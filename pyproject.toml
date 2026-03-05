@@ -18,6 +18,8 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     # Gateway
     "python-telegram-bot[job-queue]>=21.0",
+    # OS toolkit
+    "psutil>=5.9.0",
     # Clipboard
     "pyperclip>=1.9.0",
     # Media

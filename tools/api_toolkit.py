@@ -132,14 +132,14 @@ class ApiDatetime(BaseTool):
         import zoneinfo
 
         default_tz = "Europe/Istanbul"
-        tz_name = tool_input.parameters.get("timezone", default_tz)
+        tz_name = tool_input.parameters.get("timezone") or default_tz
         try:
             tz = zoneinfo.ZoneInfo(tz_name)
-        except (KeyError, Exception):
+        except Exception:
             try:
                 tz_name = default_tz
                 tz = zoneinfo.ZoneInfo(tz_name)
-            except (KeyError, Exception):
+            except Exception:
                 tz = timezone.utc
                 tz_name = "UTC"
 

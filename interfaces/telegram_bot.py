@@ -121,7 +121,7 @@ class TelegramGateway:
         assert update.effective_user and update.message
         if not self._is_allowed(update.effective_user.id):
             return
-        provider = self._settings.llm_provider.strip().lower() or "gemini"
+        provider = (self._settings.llm_provider or "gemini").strip().lower()
         if provider == "groq":
             model = self._settings.groq_llm_model
         else:

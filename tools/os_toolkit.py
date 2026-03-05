@@ -12,6 +12,7 @@ from pathlib import Path
 
 from config.logging import get_logger
 from config.settings import get_settings
+from tools.base import resolve_user_path
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
 
@@ -19,13 +20,19 @@ logger = get_logger(__name__)
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
-    """Resolve *path_str* within the sandbox root.  Raises on escape."""
+    """Resolve *path_str* within the sandbox root. Raises on escape."""
     sandbox = get_settings().sandbox_root.resolve()
     sandbox.mkdir(parents=True, exist_ok=True)
-    target = (sandbox / path_str).resolve()
-    if not str(target).startswith(str(sandbox)):
+    target, is_cross = resolve_user_path(path_str, sandbox)
+    if is_cross:
         raise PermissionError(f"Path '{target}' escapes sandbox root '{sandbox}'")
     return target
+
+
+def _resolve_with_alias(path_str: str) -> tuple[Path, bool]:
+    sandbox = get_settings().sandbox_root.resolve()
+    sandbox.mkdir(parents=True, exist_ok=True)
+    return resolve_user_path(path_str, sandbox)
 
 
 # ---------------------------------------------------------------------------
@@ -34,6 +41,11 @@ def _resolve_sandboxed(path_str: str) -> Path:
 class OsReadFile(BaseTool):
     name = "os_read_file"
     description = "Read the contents of a file within the sandbox directory."
+
+    def requires_approval(self, tool_input: ToolInput) -> bool:
+        path = str(tool_input.parameters.get("path", ""))
+        _, is_cross = _resolve_with_alias(path)
+        return self.is_destructive or is_cross
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
@@ -58,6 +70,11 @@ class OsWriteFile(BaseTool):
     description = "Write content to a file within the sandbox directory."
     is_destructive = True  # can overwrite
 
+    def requires_approval(self, tool_input: ToolInput) -> bool:
+        path = str(tool_input.parameters.get("path", ""))
+        _, is_cross = _resolve_with_alias(path)
+        return self.is_destructive or is_cross
+
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
             path = _resolve_sandboxed(tool_input.parameters["path"])
@@ -76,6 +93,11 @@ class OsWriteFile(BaseTool):
 class OsListDir(BaseTool):
     name = "os_list_dir"
     description = "List files and directories within a sandbox path."
+
+    def requires_approval(self, tool_input: ToolInput) -> bool:
+        path = str(tool_input.parameters.get("path", "."))
+        _, is_cross = _resolve_with_alias(path)
+        return self.is_destructive or is_cross
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
@@ -107,6 +129,13 @@ class OsMoveFile(BaseTool):
     description = "Move or rename a file/directory within the sandbox."
     is_destructive = True
 
+    def requires_approval(self, tool_input: ToolInput) -> bool:
+        src = str(tool_input.parameters.get("source", ""))
+        dst = str(tool_input.parameters.get("destination", ""))
+        _, cross_src = _resolve_with_alias(src)
+        _, cross_dst = _resolve_with_alias(dst)
+        return self.is_destructive or cross_src or cross_dst
+
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
             src = _resolve_sandboxed(tool_input.parameters["source"])
@@ -128,6 +157,11 @@ class OsDeleteFile(BaseTool):
     name = "os_delete_file"
     description = "Delete a file or directory within the sandbox."
     is_destructive = True
+
+    def requires_approval(self, tool_input: ToolInput) -> bool:
+        path = str(tool_input.parameters.get("path", ""))
+        _, is_cross = _resolve_with_alias(path)
+        return self.is_destructive or is_cross
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:

@@ -229,14 +229,15 @@ class CognitiveRouter:
                 results_summary.append(f"[FAIL] {step.description}: {step.error}")
                 continue
 
+            temp_input = ToolInput(tool_name=step.tool_name, parameters=step.parameters)
             tool_input = ToolInput(
                 tool_name=step.tool_name,
                 parameters=step.parameters,
-                requires_approval=tool.is_destructive,
+                requires_approval=tool.requires_approval(temp_input),
             )
 
             # Guardian check for destructive actions.
-            if tool.is_destructive:
+            if tool.requires_approval(tool_input):
                 step.status = StepStatus.AWAITING_APPROVAL
                 approval = await self._guardian.request_approval(
                     action_description=f"{step.tool_name}: {step.description}",
