@@ -94,3 +94,16 @@ class TestApiDatetime:
         assert result.status == ToolStatus.SUCCESS
         assert "iso" in result.data
         assert "UTC" in result.data["timezone"]
+
+    @pytest.mark.asyncio
+    async def test_default_timezone_is_istanbul(self):
+        tool = ApiDatetime()
+        result = await tool.execute(
+            ToolInput(
+                tool_name="api_datetime",
+                parameters={},
+            )
+        )
+        assert result.status == ToolStatus.SUCCESS
+        assert "timezone" in result.data
+        assert result.data["timezone"] == "Europe/Istanbul"

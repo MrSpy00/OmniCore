@@ -34,7 +34,16 @@ from tools.os_toolkit import (
 )
 from tools.terminal_toolkit import TerminalExecute
 from tools.web_toolkit import WebNavigate, WebSearch, WebScreenshot, shutdown_browser
+from tools.advanced_web_toolkit import WebExtractLinks, WebReadArticle
 from tools.api_toolkit import ApiHttpRequest, ApiWeather, ApiDatetime
+from tools.advanced_os_toolkit import (
+    OsListRunningProcesses,
+    OsKillProcess,
+    OsLaunchApplication,
+    OsClipboardRead,
+    OsClipboardWrite,
+)
+from tools.media_toolkit import MediaDownloadYoutubeAudio, MediaGetYoutubeTranscript
 from core.router import CognitiveRouter
 from scheduler.pulse import AutonomousPulse
 
@@ -59,10 +68,21 @@ def _build_tool_registry() -> ToolRegistry:
         WebNavigate,
         WebSearch,
         WebScreenshot,
+        WebExtractLinks,
+        WebReadArticle,
         # API
         ApiHttpRequest,
         ApiWeather,
         ApiDatetime,
+        # Advanced OS
+        OsListRunningProcesses,
+        OsKillProcess,
+        OsLaunchApplication,
+        OsClipboardRead,
+        OsClipboardWrite,
+        # Media
+        MediaDownloadYoutubeAudio,
+        MediaGetYoutubeTranscript,
     ]:
         registry.register(tool_cls())
     return registry

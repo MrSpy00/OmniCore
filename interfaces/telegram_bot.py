@@ -121,9 +121,16 @@ class TelegramGateway:
         assert update.effective_user and update.message
         if not self._is_allowed(update.effective_user.id):
             return
+        provider = self._settings.llm_provider.strip().lower() or "gemini"
+        if provider == "groq":
+            model = self._settings.groq_llm_model
+        else:
+            provider = "gemini"
+            model = self._settings.omni_llm_model
         await update.message.reply_text(
             "OmniCore Status: Running\n"
-            f"Model: {self._settings.omni_llm_model}\n"
+            f"Provider: {provider}\n"
+            f"Model: {model}\n"
             f"HITL Timeout: {self._settings.hitl_timeout_minutes}m"
         )
 

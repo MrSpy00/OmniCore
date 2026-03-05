@@ -15,8 +15,14 @@ dependencies = [
     "aiosqlite>=0.20.0",
     # Web Automation
     "playwright>=1.48.0",
+    "beautifulsoup4>=4.12.0",
     # Gateway
     "python-telegram-bot[job-queue]>=21.0",
+    # Clipboard
+    "pyperclip>=1.9.0",
+    # Media
+    "yt-dlp>=2024.7.0",
+    "youtube-transcript-api>=0.6.2",
     # Scheduler
     "apscheduler>=3.10.0",
     # Config & Utilities
