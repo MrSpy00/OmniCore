@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -22,7 +23,8 @@ class AdminExportRegistryKey(BaseTool):
             return self._failure("key_path is required")
 
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["reg", "export", key_path, output_path, "/y"],
                 capture_output=True,
                 text=True,
@@ -43,7 +45,8 @@ class AdminListStartupPrograms(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["reg", "query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"],
                 capture_output=True,
                 text=True,
@@ -67,17 +70,7 @@ class AdminGenerateDiskReport(BaseTool):
         path = Path(root).expanduser().resolve()
         sizes = []
         try:
-            for child in path.iterdir():
-                if child.is_dir():
-                    total = sum(p.stat().st_size for p in child.rglob("*") if p.is_file())
-                    sizes.append({"path": str(child), "size_mb": round(total / (1024 * 1024), 2)})
-                elif child.is_file():
-                    sizes.append(
-                        {
-                            "path": str(child),
-                            "size_mb": round(child.stat().st_size / (1024 * 1024), 2),
-                        }
-                    )
+            sizes = await asyncio.to_thread(_disk_report, path)
 
             sizes.sort(key=lambda x: x["size_mb"], reverse=True)
             return self._success("Disk report generated", data={"entries": sizes})
@@ -92,7 +85,8 @@ class AdminNetworkSnapshot(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["netstat", "-ano"],
                 capture_output=True,
                 text=True,
@@ -113,7 +107,8 @@ class AdminSummarizeEventLogs(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 [
                     "wevtutil",
                     "qe",
@@ -131,3 +126,20 @@ class AdminSummarizeEventLogs(BaseTool):
             )
         except Exception as exc:
             return self._failure(str(exc))
+
+
+def _disk_report(path: Path) -> list[dict[str, float | str]]:
+    sizes: list[dict[str, float | str]] = []
+    for child in path.iterdir():
+        if child.is_dir():
+            total = sum(p.stat().st_size for p in child.rglob("*") if p.is_file())
+            sizes.append({"path": str(child), "size_mb": round(total / (1024 * 1024), 2)})
+        elif child.is_file():
+            sizes.append(
+                {
+                    "path": str(child),
+                    "size_mb": round(child.stat().st_size / (1024 * 1024), 2),
+                }
+            )
+    sizes.sort(key=lambda x: float(x["size_mb"]), reverse=True)
+    return sizes

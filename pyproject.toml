@@ -38,6 +38,11 @@ dependencies = [
     "edge-tts>=6.1.0",
     # Security
     "cryptography>=42.0.0",
+    # OCR
+    "pytesseract>=0.3.10",
+    # Audio Recording
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12.1",
     # Config & Utilities
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",

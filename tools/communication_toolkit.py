@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import smtplib
 from email.message import EmailMessage
 
@@ -33,11 +34,21 @@ class CommSendEmail(BaseTool):
             msg["Subject"] = subject
             msg.set_content(body)
 
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-                server.starttls()
-                server.login(username, password)
-                server.send_message(msg)
+            await asyncio.to_thread(_send_email, smtp_host, smtp_port, username, password, msg)
 
             return self._success("Email sent", data={"to": to_addr})
         except Exception as exc:
             return self._failure(str(exc))
+
+
+def _send_email(
+    smtp_host: str,
+    smtp_port: int,
+    username: str,
+    password: str,
+    msg: EmailMessage,
+) -> None:
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+        server.starttls()
+        server.login(username, password)
+        server.send_message(msg)

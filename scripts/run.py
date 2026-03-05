@@ -70,6 +70,11 @@ from tools.admin_toolkit import (
     AdminNetworkSnapshot,
     AdminSummarizeEventLogs,
 )
+from tools.ocr_toolkit import OcrReadImage
+from tools.audio_record_toolkit import AudioRecordMicrophone
+from tools.web_research_toolkit import WebDeepCrawl
+from tools.steganography_toolkit import StegHideMessage, StegRevealMessage
+from tools.browser_cache_toolkit import SysClearBrowserCaches
 from core.router import CognitiveRouter
 from scheduler.pulse import AutonomousPulse
 
@@ -142,6 +147,17 @@ def _build_tool_registry() -> ToolRegistry:
         AdminGenerateDiskReport,
         AdminNetworkSnapshot,
         AdminSummarizeEventLogs,
+        # OCR
+        OcrReadImage,
+        # Audio Recording
+        AudioRecordMicrophone,
+        # Web Research
+        WebDeepCrawl,
+        # Steganography
+        StegHideMessage,
+        StegRevealMessage,
+        # Browser Cache
+        SysClearBrowserCaches,
     ]:
         registry.register(tool_cls())
     return registry

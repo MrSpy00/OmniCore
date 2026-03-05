@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
 import subprocess
 
@@ -22,7 +23,8 @@ class NetPing(BaseTool):
 
         try:
             count = int(tool_input.parameters.get("count", 1))
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["ping", "-n", str(count), host],
                 capture_output=True,
                 text=True,

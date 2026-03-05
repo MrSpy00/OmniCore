@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from config.settings import get_settings
@@ -32,13 +33,11 @@ class DocReadPdf(BaseTool):
             if target.suffix.lower() == ".pdf":
                 from PyPDF2 import PdfReader
 
-                reader = PdfReader(str(target))
-                text = "\n".join(page.extract_text() or "" for page in reader.pages)
+                text = await asyncio.to_thread(_read_pdf, target)
             elif target.suffix.lower() == ".docx":
                 from docx import Document
 
-                doc = Document(str(target))
-                text = "\n".join(p.text for p in doc.paragraphs)
+                text = await asyncio.to_thread(_read_docx, target)
             else:
                 return self._failure("Unsupported file type. Use PDF or DOCX.")
 
@@ -49,3 +48,17 @@ class DocReadPdf(BaseTool):
             return self._success("Document read", data={"text": text})
         except Exception as exc:
             return self._failure(str(exc))
+
+
+def _read_pdf(path: Path) -> str:
+    from PyPDF2 import PdfReader
+
+    reader = PdfReader(str(path))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def _read_docx(path: Path) -> str:
+    from docx import Document
+
+    doc = Document(str(path))
+    return "\n".join(p.text for p in doc.paragraphs)

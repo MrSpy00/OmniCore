@@ -7,6 +7,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+import asyncio
 
 from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
@@ -41,15 +42,15 @@ class SecEncryptFile(BaseTool):
 
         try:
             src = _resolve_sandboxed(path)
-            data = src.read_bytes()
+            data = await asyncio.to_thread(src.read_bytes)
             fernet = Fernet(_derive_key(password))
-            encrypted = fernet.encrypt(data)
+            encrypted = await asyncio.to_thread(fernet.encrypt, data)
 
             if output_path:
                 dest = _resolve_sandboxed(output_path)
             else:
                 dest = src.with_suffix(src.suffix + ".enc")
-            dest.write_bytes(encrypted)
+            await asyncio.to_thread(dest.write_bytes, encrypted)
             return self._success("File encrypted", data={"path": str(dest)})
         except Exception as exc:
             return self._failure(str(exc))
@@ -69,15 +70,15 @@ class SecDecryptFile(BaseTool):
 
         try:
             src = _resolve_sandboxed(path)
-            data = src.read_bytes()
+            data = await asyncio.to_thread(src.read_bytes)
             fernet = Fernet(_derive_key(password))
-            decrypted = fernet.decrypt(data)
+            decrypted = await asyncio.to_thread(fernet.decrypt, data)
 
             if output_path:
                 dest = _resolve_sandboxed(output_path)
             else:
                 dest = src.with_suffix("")
-            dest.write_bytes(decrypted)
+            await asyncio.to_thread(dest.write_bytes, decrypted)
             return self._success("File decrypted", data={"path": str(dest)})
         except Exception as exc:
             return self._failure(str(exc))
