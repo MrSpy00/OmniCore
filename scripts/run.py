@@ -75,10 +75,16 @@ async def _run(mode: str) -> None:
     logger.info("omnicore.starting", mode=mode, model=settings.omni_llm_model)
 
     # Validate required secrets.
-    if not settings.google_api_key:
-        logger.error("omnicore.missing_google_api_key")
-        print("ERROR: GOOGLE_API_KEY is not set. Copy .env.example to .env and fill it in.")
-        sys.exit(1)
+    if settings.llm_provider.strip().lower() == "groq":
+        if not settings.groq_api_key:
+            logger.error("omnicore.missing_groq_api_key")
+            print("ERROR: GROQ_API_KEY is not set. Copy .env.example to .env and fill it in.")
+            sys.exit(1)
+    else:
+        if not settings.google_api_key:
+            logger.error("omnicore.missing_google_api_key")
+            print("ERROR: GOOGLE_API_KEY is not set. Copy .env.example to .env and fill it in.")
+            sys.exit(1)
 
     # Boot subsystems.
     short_term = ShortTermMemory()

@@ -23,8 +23,11 @@ class Settings(BaseSettings):
     )
 
     # --- LLM -----------------------------------------------------------------
+    llm_provider: str = "gemini"
     google_api_key: str = ""
     omni_llm_model: str = "gemini-1.5-pro"
+    groq_api_key: str = ""
+    groq_llm_model: str = "llama-3.3-70b-versatile"
     llm_temperature: float = 0.2
     llm_max_output_tokens: int = 4096
 

@@ -33,6 +33,8 @@ def tmp_workspace(tmp_path: Path) -> Path:
 def settings(tmp_path: Path, tmp_workspace: Path, monkeypatch) -> Settings:
     """Create a Settings instance pointing at temporary directories."""
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key-not-real")
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
     monkeypatch.setenv("SANDBOX_ROOT", str(tmp_workspace))
     monkeypatch.setenv("CHROMA_PERSIST_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("SQLITE_DB_PATH", str(tmp_path / "test.db"))
@@ -62,7 +64,7 @@ def short_term() -> ShortTermMemory:
 
 
 @pytest.fixture()
-async def state_tracker(tmp_path: Path) -> StateTracker:
+async def state_tracker(tmp_path: Path):
     db_path = tmp_path / "state.db"
     tracker = StateTracker(db_path)
     await tracker.initialize()

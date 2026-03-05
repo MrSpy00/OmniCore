@@ -18,11 +18,11 @@ logger = get_logger(__name__)
 
 _PROMPT = "\n[You] > "
 _BANNER = """
-╔═══════════════════════════════════════╗
-║         OmniCore — CLI Mode           ║
-║  Type a message or 'quit' to exit.    ║
-║  Destructive actions auto-approve.    ║
-╚═══════════════════════════════════════╝
++-------------------------------------+
+|         OmniCore - CLI Mode         |
+|  Type a message or 'quit' to exit.  |
+|  Destructive actions auto-approve.  |
++-------------------------------------+
 """
 
 

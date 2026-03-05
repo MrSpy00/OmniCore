@@ -2,7 +2,7 @@
 
 Autonomous OS-level AI assistant with modular architecture. Executes complex multi-step workflows, browses the web, manages files (sandboxed), and interacts via Telegram, CLI, or REST API.
 
-Powered by Google Gemini (`gemini-1.5-pro`) via LangChain.
+Provider-agnostic LLM support (Gemini or Groq) via LangChain.
 
 ## Architecture
 
@@ -55,7 +55,7 @@ Response summarized by LLM --> Gateway --> User
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (package manager)
-- A Google Gemini API key
+- A Google Gemini API key or Groq API key
 - A Telegram Bot Token (for Telegram gateway)
 
 ### Install
@@ -80,7 +80,10 @@ cp .env.example .env
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `GOOGLE_API_KEY` | Yes | -- | Google Gemini API key |
+| `LLM_PROVIDER` | No | `gemini` | LLM provider (`gemini` or `groq`) |
+| `GOOGLE_API_KEY` | When provider=gemini | -- | Google Gemini API key |
+| `GROQ_API_KEY` | When provider=groq | -- | Groq API key |
+| `GROQ_LLM_MODEL` | No | `llama-3.3-70b-versatile` | Groq model name |
 | `TELEGRAM_BOT_TOKEN` | Telegram mode | -- | Telegram Bot API token |
 | `TELEGRAM_ALLOWED_USERS` | No | (all) | Comma-separated Telegram user IDs |
 | `OMNI_LLM_MODEL` | No | `gemini-1.5-pro` | Gemini model name |

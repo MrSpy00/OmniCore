@@ -15,6 +15,7 @@ import json
 from typing import Any, Callable, Awaitable
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from config.logging import get_logger
@@ -65,18 +66,31 @@ class CognitiveRouter:
         self._state = state_tracker
 
         settings = get_settings()
-        self._llm = ChatGoogleGenerativeAI(
-            model=settings.omni_llm_model,
-            google_api_key=settings.google_api_key,
-            temperature=settings.llm_temperature,
-            max_output_tokens=settings.llm_max_output_tokens,
-        )
+        self._llm = self._build_llm(settings)
         self._planner = Planner(self._llm)
         self._guardian = Guardian(
             timeout_minutes=settings.hitl_timeout_minutes,
             approval_callback=approval_callback,
         )
         self._recovery = RecoveryEngine()
+
+    def _build_llm(self, settings) -> Any:
+        provider = settings.llm_provider.strip().lower()
+        if provider == "groq":
+            return ChatGroq(
+                model=settings.groq_llm_model,
+                api_key=settings.groq_api_key,
+                temperature=settings.llm_temperature,
+            )
+        if provider in ("", "gemini"):
+            return ChatGoogleGenerativeAI(
+                model=settings.omni_llm_model,
+                google_api_key=settings.google_api_key,
+                temperature=settings.llm_temperature,
+                max_output_tokens=settings.llm_max_output_tokens,
+            )
+
+        raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
     # -- public API -----------------------------------------------------------
 
