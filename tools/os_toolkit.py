@@ -6,6 +6,7 @@ path is explicitly within that directory tree.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 from pathlib import Path
@@ -35,6 +36,14 @@ def _resolve_with_alias(path_str: str) -> tuple[Path, bool]:
     return resolve_user_path(path_str, sandbox)
 
 
+def _resolve_readonly(path_str: str) -> Path:
+    """Resolve a user path for read-only access (sandbox or alias)."""
+    sandbox = get_settings().sandbox_root.resolve()
+    sandbox.mkdir(parents=True, exist_ok=True)
+    target, _ = resolve_user_path(path_str, sandbox)
+    return target
+
+
 # ---------------------------------------------------------------------------
 # Read File
 # ---------------------------------------------------------------------------
@@ -43,17 +52,16 @@ class OsReadFile(BaseTool):
     description = "Read the contents of a file within the sandbox directory."
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
-        path = str(tool_input.parameters.get("path", ""))
-        _, is_cross = _resolve_with_alias(path)
-        return self.is_destructive or is_cross
+        return self.is_destructive
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            path = _resolve_sandboxed(tool_input.parameters["path"])
+            path = _resolve_readonly(tool_input.parameters["path"])
             if not path.is_file():
                 return self._failure(f"File not found: {path}")
             max_bytes = tool_input.parameters.get("max_bytes", 1_000_000)
-            content = path.read_text(encoding="utf-8")[:max_bytes]
+            content = await asyncio.to_thread(path.read_text, encoding="utf-8")
+            content = content[:max_bytes]
             return self._success(
                 f"Read {len(content)} chars from {path.name}",
                 data={"content": content, "path": str(path)},
@@ -80,7 +88,7 @@ class OsWriteFile(BaseTool):
             path = _resolve_sandboxed(tool_input.parameters["path"])
             content = tool_input.parameters["content"]
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+            await asyncio.to_thread(path.write_text, content, encoding="utf-8")
             logger.info("os_toolkit.write_file", path=str(path), size=len(content))
             return self._success(f"Wrote {len(content)} chars to {path.name}")
         except Exception as exc:
@@ -95,24 +103,14 @@ class OsListDir(BaseTool):
     description = "List files and directories within a sandbox path."
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
-        path = str(tool_input.parameters.get("path", "."))
-        _, is_cross = _resolve_with_alias(path)
-        return self.is_destructive or is_cross
+        return self.is_destructive
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            path = _resolve_sandboxed(tool_input.parameters.get("path", "."))
+            path = _resolve_readonly(tool_input.parameters.get("path", "."))
             if not path.is_dir():
                 return self._failure(f"Not a directory: {path}")
-            entries = []
-            for entry in sorted(path.iterdir()):
-                entries.append(
-                    {
-                        "name": entry.name,
-                        "type": "dir" if entry.is_dir() else "file",
-                        "size": entry.stat().st_size if entry.is_file() else 0,
-                    }
-                )
+            entries = await asyncio.to_thread(_list_dir_entries, path)
             return self._success(
                 f"Listed {len(entries)} entries in {path.name}",
                 data={"entries": entries, "path": str(path)},
@@ -143,7 +141,7 @@ class OsMoveFile(BaseTool):
             if not src.exists():
                 return self._failure(f"Source not found: {src}")
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dst))
+            await asyncio.to_thread(shutil.move, str(src), str(dst))
             logger.info("os_toolkit.move", src=str(src), dst=str(dst))
             return self._success(f"Moved {src.name} -> {dst.name}")
         except Exception as exc:
@@ -169,9 +167,9 @@ class OsDeleteFile(BaseTool):
             if not path.exists():
                 return self._failure(f"Path not found: {path}")
             if path.is_dir():
-                shutil.rmtree(path)
+                await asyncio.to_thread(shutil.rmtree, path)
             else:
-                path.unlink()
+                await asyncio.to_thread(path.unlink)
             logger.info("os_toolkit.delete", path=str(path))
             return self._success(f"Deleted {path.name}")
         except Exception as exc:
@@ -206,3 +204,16 @@ class OsSystemInfo(BaseTool):
             return self._success("Basic system info (psutil not installed)", data=info)
         except Exception as exc:
             return self._failure(str(exc))
+
+
+def _list_dir_entries(path: Path) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for entry in sorted(path.iterdir()):
+        entries.append(
+            {
+                "name": entry.name,
+                "type": "dir" if entry.is_dir() else "file",
+                "size": entry.stat().st_size if entry.is_file() else 0,
+            }
+        )
+    return entries

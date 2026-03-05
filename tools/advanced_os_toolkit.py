@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import psutil
 import pyperclip
+import asyncio
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
@@ -14,11 +15,7 @@ class OsResourceMonitor(BaseTool):
     description = "Return current CPU, RAM, and Disk usage."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        info = {
-            "cpu_percent": psutil.cpu_percent(interval=0.2),
-            "memory_used_percent": psutil.virtual_memory().percent,
-            "disk_used_percent": psutil.disk_usage("/").percent,
-        }
+        info = await asyncio.to_thread(_collect_resource_info)
         return self._success("Resource usage collected", data=info)
 
 
@@ -27,15 +24,7 @@ class OsListRunningProcesses(BaseTool):
     description = "List top 15 memory-consuming processes."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        processes = []
-        for proc in psutil.process_iter(attrs=["pid", "name", "memory_info"]):
-            info = proc.info
-            mem = info.get("memory_info")
-            rss = mem.rss if mem else 0
-            processes.append({"pid": info.get("pid"), "name": info.get("name"), "rss": rss})
-
-        processes.sort(key=lambda p: p["rss"], reverse=True)
-        top = processes[:15]
+        top = await asyncio.to_thread(_top_memory_processes)
         return self._success("Top processes collected", data={"processes": top})
 
 
@@ -76,7 +65,27 @@ class OsClipboardWrite(BaseTool):
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         text = tool_input.parameters.get("text", "")
         try:
-            pyperclip.copy(text)
+            await asyncio.to_thread(pyperclip.copy, text)
             return self._success("Clipboard updated", data={"length": len(text)})
         except Exception as exc:
             return self._failure(str(exc))
+
+
+def _collect_resource_info() -> dict[str, float]:
+    return {
+        "cpu_percent": psutil.cpu_percent(interval=0.2),
+        "memory_used_percent": psutil.virtual_memory().percent,
+        "disk_used_percent": psutil.disk_usage("/").percent,
+    }
+
+
+def _top_memory_processes() -> list[dict[str, int | str]]:
+    processes: list[dict[str, int | str]] = []
+    for proc in psutil.process_iter(attrs=["pid", "name", "memory_info"]):
+        info = proc.info
+        mem = info.get("memory_info")
+        rss = mem.rss if mem else 0
+        processes.append({"pid": info.get("pid"), "name": info.get("name"), "rss": rss})
+
+    processes.sort(key=lambda p: int(p["rss"]), reverse=True)
+    return processes[:15]
