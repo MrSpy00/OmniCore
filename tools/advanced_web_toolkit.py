@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from urllib.parse import urljoin
+from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
@@ -35,7 +36,7 @@ class WebExtractAllLinks(BaseTool):
                 links.append(
                     {
                         "text": (a.get_text() or "").strip(),
-                        "url": urljoin(url, str(href)),
+                        "url": urljoin(url, str(href)),  # type: ignore[arg-type]
                     }
                 )
             return self._success(

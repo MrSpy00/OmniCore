@@ -64,14 +64,15 @@ class WebNavigate(BaseTool):
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
                 title = await page.title()
-                # Extract main text content, stripping scripts/styles
-                content = await page.evaluate("""
+                content = await page.evaluate(
+                    """
                     () => {
                         const scripts = document.querySelectorAll('script, style, noscript');
                         scripts.forEach(s => s.remove());
                         return document.body ? document.body.innerText : '';
                     }
-                """)
+                    """
+                )
                 max_chars = tool_input.parameters.get("max_chars", 15_000)
                 if len(content) > max_chars:
                     content = content[:max_chars] + "\n... (truncated)"
@@ -99,8 +100,6 @@ class WebSearch(BaseTool):
         if not query:
             return self._failure("No search query provided")
 
-        num_results = tool_input.parameters.get("num_results", 5)
-
         try:
             context = await _get_browser()
             page = await context.new_page()
@@ -108,30 +107,23 @@ class WebSearch(BaseTool):
                 search_url = f"https://duckduckgo.com/?q={query}&ia=web"
                 await page.goto(search_url, wait_until="domcontentloaded", timeout=30_000)
 
-                # Wait for results to load
-                await page.wait_for_selector("[data-testid='result']", timeout=10_000)
+                content = await page.evaluate(
+                    """
+                    () => {
+                        const scripts = document.querySelectorAll('script, style, noscript');
+                        scripts.forEach(s => s.remove());
+                        return document.body ? document.body.innerText : '';
+                    }
+                    """
+                )
+                max_chars = tool_input.parameters.get("max_chars", 12_000)
+                if len(content) > max_chars:
+                    content = content[:max_chars] + "\n... (truncated)"
 
-                results = await page.evaluate(f"""
-                    () => {{
-                        const items = document.querySelectorAll('[data-testid="result"]');
-                        const results = [];
-                        for (let i = 0; i < Math.min(items.length, {num_results}); i++) {{
-                            const a = items[i].querySelector('a[data-testid="result-title-a"]');
-                            const snippet = items[i].querySelector('[data-result="snippet"]');
-                            results.push({{
-                                title: a ? a.innerText : '',
-                                url: a ? a.href : '',
-                                snippet: snippet ? snippet.innerText : '',
-                            }});
-                        }}
-                        return results;
-                    }}
-                """)
-
-                logger.info("web.search", query=query, results=len(results))
+                logger.info("web.search", query=query)
                 return self._success(
-                    f"Found {len(results)} results for '{query}'",
-                    data={"query": query, "results": results},
+                    f"Search page loaded for '{query}'",
+                    data={"query": query, "content": content},
                 )
             finally:
                 await page.close()

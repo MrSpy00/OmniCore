@@ -39,7 +39,7 @@ class OsKillProcess(BaseTool):
             return self._failure("pid is required")
         try:
             proc = psutil.Process(int(pid))
-            proc.terminate()
+            await asyncio.to_thread(proc.terminate)
             return self._success(f"Terminated PID {pid}")
         except Exception as exc:
             return self._failure(str(exc))
@@ -51,7 +51,7 @@ class OsClipboardRead(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            text = pyperclip.paste() or ""
+            text = await asyncio.to_thread(pyperclip.paste) or ""
             return self._success("Clipboard read", data={"text": text})
         except Exception as exc:
             return self._failure(str(exc))
@@ -79,13 +79,15 @@ def _collect_resource_info() -> dict[str, float]:
     }
 
 
-def _top_memory_processes() -> list[dict[str, int | str]]:
-    processes: list[dict[str, int | str]] = []
+def _top_memory_processes() -> list[dict[str, object]]:
+    processes: list[dict[str, object]] = []
     for proc in psutil.process_iter(attrs=["pid", "name", "memory_info"]):
         info = proc.info
         mem = info.get("memory_info")
         rss = mem.rss if mem else 0
-        processes.append({"pid": info.get("pid"), "name": info.get("name"), "rss": rss})
+        pid = int(info.get("pid") or 0)
+        name = str(info.get("name") or "")
+        processes.append({"pid": pid, "name": name, "rss": rss})
 
     processes.sort(key=lambda p: int(p["rss"]), reverse=True)
     return processes[:15]

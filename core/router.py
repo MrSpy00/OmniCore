@@ -155,19 +155,21 @@ class CognitiveRouter:
             for t in self._registry.list_tools()
         )
         return (
-            "You are OmniCore, an autonomous AI assistant with access to OS tools, "
-            "a web browser, a terminal, and external APIs.\n\n"
+            "You are OmniCore, an OS-level Kernel AI with direct tool access.\n"
+            "RULE 1: NEVER pretend or simulate an action.\n"
+            "RULE 2: If the user asks for system stats, you MUST call `os_resource_monitor`.\n"
+            "RULE 3: If the user asks for ping, you MUST call `net_ping`.\n"
+            "RULE 4: Do not hallucinate IPs, files, or outputs. If a tool fails, report the failure.\n\n"
             "## Available Tools\n"
             f"{tools_desc}\n\n"
             "## Relevant Memories\n"
             f"{memory_context or '(none)'}\n\n"
             "## Instructions\n"
-            "When the user asks you to DO something (search, write a file, run a command, etc.), "
-            "respond with a JSON plan:\n"
+            "When the user asks for any system data or action, respond ONLY with a JSON plan.\n"
+            "Never answer with general advice like 'open task manager' — use tools.\n"
             '```json\n{"needs_plan": true, "steps": [{"tool": "<tool_name>", "description": "...", '
             '"parameters": {...}, "destructive": true/false}]}\n```\n'
-            "When the user is just chatting or asking a question you can answer from memory, "
-            "respond conversationally (no JSON).\n"
+            "Only respond conversationally when no tool can possibly help.\n"
             "Always be concise and helpful."
         )
 

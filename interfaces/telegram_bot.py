@@ -9,6 +9,7 @@ Uses ``python-telegram-bot`` v21+ with native asyncio support.  Handles:
 from __future__ import annotations
 
 import asyncio
+import html
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -24,6 +25,7 @@ from telegram.ext import (
 from config.logging import get_logger
 from config.settings import get_settings
 from core.guardian import ApprovalResult
+from telegram.constants import ParseMode
 from core.router import CognitiveRouter
 from models.messages import Message, MessageRole
 
@@ -103,18 +105,19 @@ class TelegramGateway:
     async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         assert update.effective_user and update.message
         if not self._is_allowed(update.effective_user.id):
-            await update.message.reply_text("Unauthorized.")
+            await update.message.reply_text("Unauthorized.", parse_mode="HTML")
             return
         await update.message.reply_text(
-            "OmniCore is online.\n\n"
+            "<b>OmniCore is online.</b>\n\n"
             "Send me a message and I'll help you with:\n"
             "- File management\n"
             "- Web searches and scraping\n"
             "- Shell commands (with approval)\n"
             "- External API calls\n\n"
             "Commands:\n"
-            "/status — Show system status\n"
-            "/clear — Clear conversation history"
+            "<code>/status</code> — Show system status\n"
+            "<code>/clear</code> — Clear conversation history",
+            parse_mode=ParseMode.HTML,
         )
 
     async def _handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -127,11 +130,14 @@ class TelegramGateway:
         else:
             provider = "gemini"
             model = self._settings.omni_llm_model
+        provider = html.escape(provider)
+        model = html.escape(model)
         await update.message.reply_text(
-            "OmniCore Status: Running\n"
-            f"Provider: {provider}\n"
-            f"Model: {model}\n"
-            f"HITL Timeout: {self._settings.hitl_timeout_minutes}m"
+            "<b>OmniCore Status</b>\n"
+            f"Provider: <code>{provider}</code>\n"
+            f"Model: <code>{model}</code>\n"
+            f"HITL Timeout: <code>{self._settings.hitl_timeout_minutes}m</code>",
+            parse_mode=ParseMode.HTML,
         )
 
     async def _handle_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -140,7 +146,10 @@ class TelegramGateway:
         if not self._is_allowed(update.effective_user.id):
             return
         self._router._short_term.clear(user_id)
-        await update.message.reply_text("Conversation history cleared.")
+        await update.message.reply_text(
+            "Conversation history cleared.",
+            parse_mode="HTML",
+        )
 
     # -- message handler -------------------------------------------------------
 
@@ -148,7 +157,7 @@ class TelegramGateway:
         assert update.effective_user and update.message and update.message.text
         user_id = update.effective_user.id
         if not self._is_allowed(user_id):
-            await update.message.reply_text("Unauthorized.")
+            await update.message.reply_text("Unauthorized.", parse_mode="HTML")
             return
 
         user_text = update.message.text
@@ -168,11 +177,12 @@ class TelegramGateway:
             reply = await self._router.handle_message(msg, conversation_id=str(user_id))
             # Telegram has a 4096-char limit per message.
             for chunk in _chunk_text(reply, 4096):
-                await update.message.reply_text(chunk)
+                await update.message.reply_text(_escape_html(chunk), parse_mode=ParseMode.HTML)
         except Exception as exc:
             logger.error("telegram.handler_error", error=str(exc))
             await update.message.reply_text(
-                f"An error occurred while processing your request:\n{exc}"
+                f"<b>Error:</b> {_escape_html(str(exc))}",
+                parse_mode=ParseMode.HTML,
             )
 
     # -- HITL approval via inline keyboard ------------------------------------
@@ -199,12 +209,12 @@ class TelegramGateway:
         await self._app.bot.send_message(
             chat_id=int(user_id),
             text=(
-                "**APPROVAL REQUIRED**\n\n"
-                f"Action: {action_description}\n\n"
-                f"This will time out in {self._settings.hitl_timeout_minutes} minutes."
+                "<b>APPROVAL REQUIRED</b>\n\n"
+                f"Action: <code>{_escape_html(action_description)}</code>\n\n"
+                f"This will time out in <code>{self._settings.hitl_timeout_minutes}</code> minutes."
             ),
             reply_markup=keyboard,
-            parse_mode="Markdown",
+            parse_mode=ParseMode.HTML,
         )
 
         try:
@@ -230,15 +240,18 @@ class TelegramGateway:
         action, callback_id = parts
         future = _pending_approvals.get(callback_id)
         if future is None or future.done():
-            await query.edit_message_text("This approval request has expired.")
+            await query.edit_message_text(
+                "This approval request has expired.",
+                parse_mode=ParseMode.HTML,
+            )
             return
 
         if action == "approve":
             future.set_result(ApprovalResult.APPROVED)
-            await query.edit_message_text("Action APPROVED.")
+            await query.edit_message_text("Action APPROVED.", parse_mode=ParseMode.HTML)
         else:
             future.set_result(ApprovalResult.DENIED)
-            await query.edit_message_text("Action DENIED.")
+            await query.edit_message_text("Action DENIED.", parse_mode=ParseMode.HTML)
 
 
 def _chunk_text(text: str, max_len: int) -> list[str]:
@@ -250,3 +263,7 @@ def _chunk_text(text: str, max_len: int) -> list[str]:
         chunks.append(text[:max_len])
         text = text[max_len:]
     return chunks
+
+
+def _escape_html(text: str) -> str:
+    return html.escape(text, quote=False)
