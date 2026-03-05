@@ -1,0 +1,174 @@
+"""OS Toolkit — file CRUD and system resource monitoring.
+
+All file operations are sandboxed to ``settings.sandbox_root`` unless the
+path is explicitly within that directory tree.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+from pathlib import Path
+
+from config.logging import get_logger
+from config.settings import get_settings
+from models.tools import ToolInput, ToolOutput
+from tools.base import BaseTool
+
+logger = get_logger(__name__)
+
+
+def _resolve_sandboxed(path_str: str) -> Path:
+    """Resolve *path_str* within the sandbox root.  Raises on escape."""
+    sandbox = get_settings().sandbox_root.resolve()
+    sandbox.mkdir(parents=True, exist_ok=True)
+    target = (sandbox / path_str).resolve()
+    if not str(target).startswith(str(sandbox)):
+        raise PermissionError(f"Path '{target}' escapes sandbox root '{sandbox}'")
+    return target
+
+
+# ---------------------------------------------------------------------------
+# Read File
+# ---------------------------------------------------------------------------
+class OsReadFile(BaseTool):
+    name = "os_read_file"
+    description = "Read the contents of a file within the sandbox directory."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            path = _resolve_sandboxed(tool_input.parameters["path"])
+            if not path.is_file():
+                return self._failure(f"File not found: {path}")
+            max_bytes = tool_input.parameters.get("max_bytes", 1_000_000)
+            content = path.read_text(encoding="utf-8")[:max_bytes]
+            return self._success(
+                f"Read {len(content)} chars from {path.name}",
+                data={"content": content, "path": str(path)},
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Write File
+# ---------------------------------------------------------------------------
+class OsWriteFile(BaseTool):
+    name = "os_write_file"
+    description = "Write content to a file within the sandbox directory."
+    is_destructive = True  # can overwrite
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            path = _resolve_sandboxed(tool_input.parameters["path"])
+            content = tool_input.parameters["content"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            logger.info("os_toolkit.write_file", path=str(path), size=len(content))
+            return self._success(f"Wrote {len(content)} chars to {path.name}")
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# List Directory
+# ---------------------------------------------------------------------------
+class OsListDir(BaseTool):
+    name = "os_list_dir"
+    description = "List files and directories within a sandbox path."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            path = _resolve_sandboxed(tool_input.parameters.get("path", "."))
+            if not path.is_dir():
+                return self._failure(f"Not a directory: {path}")
+            entries = []
+            for entry in sorted(path.iterdir()):
+                entries.append(
+                    {
+                        "name": entry.name,
+                        "type": "dir" if entry.is_dir() else "file",
+                        "size": entry.stat().st_size if entry.is_file() else 0,
+                    }
+                )
+            return self._success(
+                f"Listed {len(entries)} entries in {path.name}",
+                data={"entries": entries, "path": str(path)},
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Move / Rename
+# ---------------------------------------------------------------------------
+class OsMoveFile(BaseTool):
+    name = "os_move_file"
+    description = "Move or rename a file/directory within the sandbox."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            src = _resolve_sandboxed(tool_input.parameters["source"])
+            dst = _resolve_sandboxed(tool_input.parameters["destination"])
+            if not src.exists():
+                return self._failure(f"Source not found: {src}")
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+            logger.info("os_toolkit.move", src=str(src), dst=str(dst))
+            return self._success(f"Moved {src.name} -> {dst.name}")
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Delete
+# ---------------------------------------------------------------------------
+class OsDeleteFile(BaseTool):
+    name = "os_delete_file"
+    description = "Delete a file or directory within the sandbox."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            path = _resolve_sandboxed(tool_input.parameters["path"])
+            if not path.exists():
+                return self._failure(f"Path not found: {path}")
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            logger.info("os_toolkit.delete", path=str(path))
+            return self._success(f"Deleted {path.name}")
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# System Info
+# ---------------------------------------------------------------------------
+class OsSystemInfo(BaseTool):
+    name = "os_system_info"
+    description = "Report current CPU and memory usage of the host system."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            import psutil  # optional dependency
+
+            info = {
+                "cpu_percent": psutil.cpu_percent(interval=0.5),
+                "memory_total_gb": round(psutil.virtual_memory().total / (1024**3), 2),
+                "memory_used_percent": psutil.virtual_memory().percent,
+                "disk_usage_percent": psutil.disk_usage("/").percent,
+            }
+            return self._success("System info collected", data=info)
+        except ImportError:
+            # Fallback without psutil
+            info = {
+                "platform": os.name,
+                "cpu_count": os.cpu_count(),
+                "note": "Install psutil for detailed metrics",
+            }
+            return self._success("Basic system info (psutil not installed)", data=info)
+        except Exception as exc:
+            return self._failure(str(exc))
