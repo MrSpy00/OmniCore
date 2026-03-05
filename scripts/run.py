@@ -52,6 +52,12 @@ from tools.gui_automation_toolkit import (
     GuiTakeScreenshot,
     GuiGetMousePosition,
 )
+from tools.developer_toolkit import DevExecutePythonCode, DevRunSqliteQuery
+from tools.system_optimizer_toolkit import (
+    SysCleanTempFiles,
+    SysFindLargeFiles,
+    SysFlushDnsCache,
+)
 from core.router import CognitiveRouter
 from scheduler.pulse import AutonomousPulse
 
@@ -100,6 +106,13 @@ def _build_tool_registry() -> ToolRegistry:
         GuiPressHotkey,
         GuiTakeScreenshot,
         GuiGetMousePosition,
+        # Developer Tools
+        DevExecutePythonCode,
+        DevRunSqliteQuery,
+        # System Optimizer
+        SysCleanTempFiles,
+        SysFindLargeFiles,
+        SysFlushDnsCache,
     ]:
         registry.register(tool_cls())
     return registry
