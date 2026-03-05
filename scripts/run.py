@@ -34,7 +34,7 @@ from tools.os_toolkit import (
 )
 from tools.terminal_toolkit import TerminalExecute
 from tools.web_toolkit import WebNavigate, WebSearch, WebScreenshot, shutdown_browser
-from tools.advanced_web_toolkit import WebExtractLinks, WebReadArticle
+from tools.advanced_web_toolkit import WebExtractAllLinks, WebReadMainArticle
 from tools.api_toolkit import ApiHttpRequest, ApiWeather, ApiDatetime
 from tools.advanced_os_toolkit import (
     OsResourceMonitor,
@@ -45,6 +45,13 @@ from tools.advanced_os_toolkit import (
 )
 from tools.media_toolkit import MediaDownloadYoutubeAudio, MediaGetYoutubeTranscript
 from tools.network_toolkit import NetPing, NetGetIP
+from tools.gui_automation_toolkit import (
+    GuiMouseMoveClick,
+    GuiTypeText,
+    GuiPressHotkey,
+    GuiTakeScreenshot,
+    GuiGetMousePosition,
+)
 from core.router import CognitiveRouter
 from scheduler.pulse import AutonomousPulse
 
@@ -69,8 +76,8 @@ def _build_tool_registry() -> ToolRegistry:
         WebNavigate,
         WebSearch,
         WebScreenshot,
-        WebExtractLinks,
-        WebReadArticle,
+        WebExtractAllLinks,
+        WebReadMainArticle,
         # API
         ApiHttpRequest,
         ApiWeather,
@@ -87,6 +94,12 @@ def _build_tool_registry() -> ToolRegistry:
         # Network
         NetPing,
         NetGetIP,
+        # GUI Automation
+        GuiMouseMoveClick,
+        GuiTypeText,
+        GuiPressHotkey,
+        GuiTakeScreenshot,
+        GuiGetMousePosition,
     ]:
         registry.register(tool_cls())
     return registry

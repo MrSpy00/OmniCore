@@ -1,36 +1,30 @@
-"""Advanced Web Toolkit — link extraction and article scraping."""
+"""Advanced Web Toolkit — link extraction and article parsing."""
 
 from __future__ import annotations
 
 from urllib.parse import urljoin
 
+import httpx
 from bs4 import BeautifulSoup
 
-from config.logging import get_logger
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
-from tools.web_toolkit import _get_browser
-
-logger = get_logger(__name__)
 
 
-class WebExtractLinks(BaseTool):
-    name = "web_extract_links"
-    description = "Extract all hyperlinks from a web page."
+class WebExtractAllLinks(BaseTool):
+    name = "web_extract_all_links"
+    description = "Extract all hyperlinks from a URL."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         url = tool_input.parameters.get("url", "")
         if not url:
-            return self._failure("No URL provided")
+            return self._failure("url is required")
 
         try:
-            context = await _get_browser()
-            page = await context.new_page()
-            try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-                html = await page.content()
-            finally:
-                await page.close()
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                html = response.text
 
             soup = BeautifulSoup(html, "html.parser")
             links = []
@@ -41,38 +35,31 @@ class WebExtractLinks(BaseTool):
                 links.append(
                     {
                         "text": (a.get_text() or "").strip(),
-                        "url": urljoin(url, href),
+                        "url": urljoin(url, str(href)),
                     }
                 )
-
-            max_links = int(tool_input.parameters.get("max_links", 200))
-            links = links[:max_links]
-            logger.info("web.extract_links", url=url, count=len(links))
             return self._success(
                 f"Extracted {len(links)} links",
                 data={"url": url, "links": links},
             )
         except Exception as exc:
-            return self._failure(f"Link extraction failed: {exc}")
+            return self._failure(str(exc))
 
 
-class WebReadArticle(BaseTool):
-    name = "web_read_article"
-    description = "Extract the main article text from a web page."
+class WebReadMainArticle(BaseTool):
+    name = "web_read_main_article"
+    description = "Extract the main article text from a URL."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         url = tool_input.parameters.get("url", "")
         if not url:
-            return self._failure("No URL provided")
+            return self._failure("url is required")
 
         try:
-            context = await _get_browser()
-            page = await context.new_page()
-            try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-                html = await page.content()
-            finally:
-                await page.close()
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                html = response.text
 
             soup = BeautifulSoup(html, "html.parser")
             for tag in soup(["script", "style", "noscript", "nav", "header", "footer", "aside"]):
@@ -88,10 +75,9 @@ class WebReadArticle(BaseTool):
             if len(text) > max_chars:
                 text = text[:max_chars] + "\n... (truncated)"
 
-            logger.info("web.read_article", url=url)
             return self._success(
                 "Article extracted",
                 data={"url": url, "content": text},
             )
         except Exception as exc:
-            return self._failure(f"Article extraction failed: {exc}")
+            return self._failure(str(exc))
