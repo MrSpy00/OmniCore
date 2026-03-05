@@ -31,6 +31,13 @@ dependencies = [
     "youtube-transcript-api>=0.6.2",
     # Scheduler
     "apscheduler>=3.10.0",
+    # Documents
+    "PyPDF2>=3.0.0",
+    "python-docx>=1.1.0",
+    # Audio
+    "edge-tts>=6.1.0",
+    # Security
+    "cryptography>=42.0.0",
     # Config & Utilities
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",

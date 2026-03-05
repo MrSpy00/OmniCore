@@ -58,6 +58,18 @@ from tools.system_optimizer_toolkit import (
     SysFindLargeFiles,
     SysFlushDnsCache,
 )
+from tools.document_toolkit import DocReadPdf
+from tools.audio_toolkit import AudioTextToSpeech
+from tools.security_toolkit import SecEncryptFile, SecDecryptFile
+from tools.communication_toolkit import CommSendEmail
+from tools.scheduler_toolkit import SchedAddDynamicReminder
+from tools.admin_toolkit import (
+    AdminExportRegistryKey,
+    AdminListStartupPrograms,
+    AdminGenerateDiskReport,
+    AdminNetworkSnapshot,
+    AdminSummarizeEventLogs,
+)
 from core.router import CognitiveRouter
 from scheduler.pulse import AutonomousPulse
 
@@ -113,6 +125,23 @@ def _build_tool_registry() -> ToolRegistry:
         SysCleanTempFiles,
         SysFindLargeFiles,
         SysFlushDnsCache,
+        # Documents
+        DocReadPdf,
+        # Audio
+        AudioTextToSpeech,
+        # Security
+        SecEncryptFile,
+        SecDecryptFile,
+        # Communication
+        CommSendEmail,
+        # Scheduler
+        SchedAddDynamicReminder,
+        # Admin
+        AdminExportRegistryKey,
+        AdminListStartupPrograms,
+        AdminGenerateDiskReport,
+        AdminNetworkSnapshot,
+        AdminSummarizeEventLogs,
     ]:
         registry.register(tool_cls())
     return registry

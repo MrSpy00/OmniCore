@@ -53,6 +53,7 @@ class DevExecutePythonCode(BaseTool):
 class DevRunSqliteQuery(BaseTool):
     name = "dev_run_sqlite_query"
     description = "Run a read-only SQL query against the OmniCore database."
+    is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         query = tool_input.parameters.get("query", "")
