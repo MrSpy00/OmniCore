@@ -5,23 +5,19 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.base import resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
-    sandbox = get_settings().sandbox_root.resolve()
-    sandbox.mkdir(parents=True, exist_ok=True)
-    target = (sandbox / path_str).resolve()
-    if not str(target).startswith(str(sandbox)):
-        raise PermissionError(f"Path '{target}' escapes sandbox root '{sandbox}'")
+    target, _ = resolve_user_path(path_str)
     return target
 
 
 class DocReadPdf(BaseTool):
     name = "doc_read_pdf"
-    description = "Extract text from a PDF or DOCX file in the sandbox."
+    description = "Extract text from a PDF or DOCX file on the host OS."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         path = tool_input.parameters.get("path", "")

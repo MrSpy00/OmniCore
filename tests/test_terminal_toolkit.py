@@ -9,7 +9,7 @@ from tools.terminal_toolkit import TerminalExecute
 
 
 @pytest.mark.asyncio
-async def test_terminal_execute_sets_utf8_env(monkeypatch):
+async def test_terminal_execute_sets_utf8_env(monkeypatch, tmp_path):
     recorded = {}
 
     class DummyProcess:
@@ -25,12 +25,15 @@ async def test_terminal_execute_sets_utf8_env(monkeypatch):
 
     monkeypatch.setattr(asyncio, "create_subprocess_shell", fake_create_subprocess_shell)
 
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+
     tool = TerminalExecute()
     result = await tool.execute(
-        ToolInput(tool_name="terminal_execute", parameters={"command": "dir"})
+        ToolInput(tool_name="terminal_execute", parameters={"command": "dir", "cwd": "."})
     )
 
     assert result.status == ToolStatus.SUCCESS
     assert recorded["env"]["PYTHONIOENCODING"] == "utf-8"
     assert recorded["env"]["PYTHONUTF8"] == "1"
     assert recorded["args"][0] == "chcp 65001 >NUL && dir"
+    assert recorded["cwd"] == str(tmp_path)

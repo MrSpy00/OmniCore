@@ -41,6 +41,7 @@ class TestOsToolkit:
     @pytest.mark.asyncio
     async def test_write_and_read_file(self, tmp_workspace, settings, monkeypatch):
         monkeypatch.setenv("SANDBOX_ROOT", str(tmp_workspace))
+        monkeypatch.setenv("USERPROFILE", str(tmp_workspace))
         from config.settings import get_settings
 
         get_settings.cache_clear()
@@ -67,6 +68,7 @@ class TestOsToolkit:
     @pytest.mark.asyncio
     async def test_read_nonexistent_file(self, tmp_workspace, settings, monkeypatch):
         monkeypatch.setenv("SANDBOX_ROOT", str(tmp_workspace))
+        monkeypatch.setenv("USERPROFILE", str(tmp_workspace))
         from config.settings import get_settings
 
         get_settings.cache_clear()

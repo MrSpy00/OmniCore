@@ -9,23 +9,19 @@ from pathlib import Path
 
 from PIL import Image  # type: ignore[import-not-found]
 
-from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.base import resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
-    sandbox = get_settings().sandbox_root.resolve()
-    sandbox.mkdir(parents=True, exist_ok=True)
-    target = (sandbox / path_str).resolve()
-    if not str(target).startswith(str(sandbox)):
-        raise PermissionError(f"Path '{target}' escapes sandbox root '{sandbox}'")
+    target, _ = resolve_user_path(path_str)
     return target
 
 
 class ArchiveCreateZip(BaseTool):
     name = "archive_create_zip"
-    description = "Create a ZIP archive from a file or directory in the sandbox."
+    description = "Create a ZIP archive from a file or directory on the host OS."
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -45,7 +41,7 @@ class ArchiveCreateZip(BaseTool):
 
 class ArchiveExtractZip(BaseTool):
     name = "archive_extract_zip"
-    description = "Extract a ZIP archive into the sandbox."
+    description = "Extract a ZIP archive to the host OS."
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -65,7 +61,7 @@ class ArchiveExtractZip(BaseTool):
 
 class ImageReadExif(BaseTool):
     name = "image_read_exif"
-    description = "Read EXIF metadata from an image in the sandbox."
+    description = "Read EXIF metadata from an image on the host OS."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
@@ -92,6 +88,8 @@ def _make_zip(src: Path, dest: Path) -> None:
 
 
 def _extract_zip(src: Path, dest: Path) -> None:
+    if src == dest:
+        dest = dest.with_name(dest.name + "_extracted")
     dest.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(src, "r") as archive:
         archive.extractall(dest)

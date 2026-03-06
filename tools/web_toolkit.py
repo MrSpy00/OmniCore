@@ -9,6 +9,7 @@ from __future__ import annotations
 from config.logging import get_logger
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.base import resolve_user_path
 
 logger = get_logger(__name__)
 
@@ -141,7 +142,7 @@ class WebSearch(BaseTool):
 # ---------------------------------------------------------------------------
 class WebScreenshot(BaseTool):
     name = "web_screenshot"
-    description = "Take a screenshot of a web page and save it to the sandbox."
+    description = "Take a screenshot of a web page and save it to the host OS."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
@@ -155,10 +156,7 @@ class WebScreenshot(BaseTool):
             url = "https://" + url
 
         try:
-            from config.settings import get_settings
-
-            settings = get_settings()
-            save_path = (settings.sandbox_root / output_path).resolve()
+            save_path, _ = resolve_user_path(output_path)
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
             context = await _get_browser()

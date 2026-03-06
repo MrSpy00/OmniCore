@@ -4,20 +4,17 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any, cast
 
 from PIL import Image
 
-from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.base import resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
-    sandbox = get_settings().sandbox_root.resolve()
-    sandbox.mkdir(parents=True, exist_ok=True)
-    target = (sandbox / path_str).resolve()
-    if not str(target).startswith(str(sandbox)):
-        raise PermissionError(f"Path '{target}' escapes sandbox root '{sandbox}'")
+    target, _ = resolve_user_path(path_str)
     return target
 
 
@@ -62,6 +59,9 @@ class StegRevealMessage(BaseTool):
 def _encode_message(src: Path, dest: Path, message: str) -> None:
     img = Image.open(src).convert("RGB")
     pixels = img.load()
+    if pixels is None:
+        raise ValueError("Unable to access image pixels")
+    pixel_access = cast(Any, pixels)
     message_bytes = message.encode("utf-8") + b"\x00"
     bits = "".join(f"{b:08b}" for b in message_bytes)
     width, height = img.size
@@ -71,21 +71,24 @@ def _encode_message(src: Path, dest: Path, message: str) -> None:
             if idx >= len(bits):
                 img.save(dest)
                 return
-            r, g, b = pixels[x, y]
+            r, g, b = cast(tuple[int, int, int], pixel_access[x, y])
             r = (r & ~1) | int(bits[idx])
             idx += 1
-            pixels[x, y] = (r, g, b)
+            pixel_access[x, y] = (r, g, b)
     img.save(dest)
 
 
 def _decode_message(src: Path) -> str:
     img = Image.open(src).convert("RGB")
     pixels = img.load()
+    if pixels is None:
+        raise ValueError("Unable to access image pixels")
+    pixel_access = cast(Any, pixels)
     width, height = img.size
     bits = []
     for y in range(height):
         for x in range(width):
-            r, g, b = pixels[x, y]
+            r, g, b = cast(tuple[int, int, int], pixel_access[x, y])
             bits.append(str(r & 1))
     bytes_out = []
     for i in range(0, len(bits), 8):

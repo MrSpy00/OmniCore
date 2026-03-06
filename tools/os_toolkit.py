@@ -1,8 +1,4 @@
-"""OS Toolkit — file CRUD and system resource monitoring.
-
-All file operations are sandboxed to ``settings.sandbox_root`` unless the
-path is explicitly within that directory tree.
-"""
+"""OS Toolkit — file CRUD and system resource monitoring."""
 
 from __future__ import annotations
 
@@ -12,7 +8,6 @@ import shutil
 from pathlib import Path
 
 from config.logging import get_logger
-from config.settings import get_settings
 from tools.base import resolve_user_path
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
@@ -21,57 +16,29 @@ logger = get_logger(__name__)
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
-    """Resolve *path_str* within the sandbox root. Raises on escape."""
-    sandbox = get_settings().sandbox_root.resolve()
-    sandbox.mkdir(parents=True, exist_ok=True)
-    target, is_cross = resolve_user_path(path_str, sandbox)
-    if is_cross:
-        raise PermissionError(f"Path '{target}' escapes sandbox root '{sandbox}'")
+    """Resolve a path directly on the host OS."""
+    target, _ = resolve_user_path(path_str)
     return target
 
 
 def _resolve_write_target(path_str: str) -> Path:
-    """Resolve write target allowing absolute paths after HITL approval."""
-    sandbox = get_settings().sandbox_root.resolve()
-    sandbox.mkdir(parents=True, exist_ok=True)
     raw = (path_str or "").strip()
-    if Path(raw).expanduser().is_absolute():
-        target = Path(raw).expanduser().resolve()
-        if target.exists() and target.is_dir():
-            return target / "output_file.txt"
-        if target.suffix == "":
-            # If no filename extension is present and it points to an existing dir-like path,
-            # make it an output file target.
-            if target.exists() and target.is_dir():
-                return target / "output_file.txt"
-        return target
-    target, is_cross = resolve_user_path(raw, sandbox)
-    if is_cross:
-        # Alias paths (Desktop/Documents/Downloads) are intentionally allowed
-        # once execution reaches here (Guardian approval already happened).
-        if target.exists() and target.is_dir():
-            return target / "output_file.txt"
-        if str(raw).lower() in {"desktop", "downloads", "documents"}:
-            return target / "output_file.txt"
-        return target
+    target, _ = resolve_user_path(raw)
+    if target.exists() and target.is_dir():
+        return target / "output_file.txt"
+    if str(raw).strip().lower() in {"desktop", "downloads", "documents"}:
+        return target / "output_file.txt"
     return target
 
 
 def _resolve_with_alias(path_str: str) -> tuple[Path, bool]:
-    sandbox = get_settings().sandbox_root.resolve()
-    sandbox.mkdir(parents=True, exist_ok=True)
-    return resolve_user_path(path_str, sandbox)
+    return resolve_user_path(path_str)
 
 
 def _resolve_readonly(path_str: str) -> Path:
-    """Resolve a user path for read-only access (sandbox or alias)."""
-    sandbox = get_settings().sandbox_root.resolve()
-    sandbox.mkdir(parents=True, exist_ok=True)
+    """Resolve a user path for host OS read access."""
     raw = (path_str or "").strip()
-    if raw in {"", "."}:
-        user_root = os.environ.get("USERPROFILE", r"C:\Users\mrSpy")
-        return Path(user_root).resolve()
-    target, _ = resolve_user_path(raw, sandbox)
+    target, _ = resolve_user_path(raw)
     return target
 
 
@@ -80,7 +47,7 @@ def _resolve_readonly(path_str: str) -> Path:
 # ---------------------------------------------------------------------------
 class OsReadFile(BaseTool):
     name = "os_read_file"
-    description = "Read the contents of a file within the sandbox directory."
+    description = "Read the contents of a file on the host OS."
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
         return self.is_destructive
@@ -110,14 +77,13 @@ class OsReadFile(BaseTool):
 # ---------------------------------------------------------------------------
 class OsWriteFile(BaseTool):
     name = "os_write_file"
-    description = "Write content to a file within the sandbox directory."
+    description = "Write content to a file on the host OS."
     is_destructive = True  # can overwrite
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
         params = self._params(tool_input)
         path = str(self._first_param(params, "file_path", "path", "value", default=""))
-        _, is_cross = _resolve_with_alias(path)
-        return self.is_destructive or is_cross
+        return self.is_destructive
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
@@ -140,7 +106,7 @@ class OsWriteFile(BaseTool):
 # ---------------------------------------------------------------------------
 class OsListDir(BaseTool):
     name = "os_list_dir"
-    description = "List files and directories within a sandbox path."
+    description = "List files and directories on the host OS."
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
         return self.is_destructive
@@ -166,16 +132,14 @@ class OsListDir(BaseTool):
 # ---------------------------------------------------------------------------
 class OsMoveFile(BaseTool):
     name = "os_move_file"
-    description = "Move or rename a file/directory within the sandbox."
+    description = "Move or rename a file or directory on the host OS."
     is_destructive = True
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
         params = self._params(tool_input)
         src = str(self._first_param(params, "source", "src", default=""))
         dst = str(self._first_param(params, "destination", "dest", default=""))
-        _, cross_src = _resolve_with_alias(src)
-        _, cross_dst = _resolve_with_alias(dst)
-        return self.is_destructive or cross_src or cross_dst
+        return self.is_destructive
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
@@ -201,14 +165,13 @@ class OsMoveFile(BaseTool):
 # ---------------------------------------------------------------------------
 class OsDeleteFile(BaseTool):
     name = "os_delete_file"
-    description = "Delete a file or directory within the sandbox."
+    description = "Delete a file or directory on the host OS."
     is_destructive = True
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
         params = self._params(tool_input)
         path = str(self._first_param(params, "file_path", "path", "value", default=""))
-        _, is_cross = _resolve_with_alias(path)
-        return self.is_destructive or is_cross
+        return self.is_destructive
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:

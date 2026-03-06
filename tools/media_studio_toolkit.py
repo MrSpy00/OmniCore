@@ -8,17 +8,13 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont  # type: ignore[import-not-found]
 
-from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.base import resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
-    sandbox = get_settings().sandbox_root.resolve()
-    sandbox.mkdir(parents=True, exist_ok=True)
-    target = (sandbox / path_str).resolve()
-    if not str(target).startswith(str(sandbox)):
-        raise PermissionError(f"Path '{target}' escapes sandbox root '{sandbox}'")
+    target, _ = resolve_user_path(path_str)
     return target
 
 

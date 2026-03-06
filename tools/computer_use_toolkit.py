@@ -3,29 +3,32 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 import time
 from pathlib import Path
 from typing import Any, cast
 
-import imageio.v2 as imageio
+import imageio.v2 as imageio  # type: ignore[import-not-found]
 import mss  # type: ignore[import-not-found]
 import pyautogui
 from PIL import Image  # type: ignore[import-not-found]
 
-from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
 from tools.vision_toolkit import REGION_TEXT_PROMPT, analyze_image_with_gemini
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
-    sandbox = get_settings().sandbox_root.resolve()
-    sandbox.mkdir(parents=True, exist_ok=True)
-    target = (sandbox / path_str).resolve()
-    if not str(target).startswith(str(sandbox)):
-        raise PermissionError(f"Path '{target}' escapes sandbox root '{sandbox}'")
-    return target
+    home = Path(os.environ.get("USERPROFILE") or str(Path.home())).expanduser().resolve()
+    raw = (path_str or "").strip()
+    if not raw:
+        return home
+    raw = os.path.expandvars(raw).replace("<Username>", home.name).replace("<username>", home.name)
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (home / raw).resolve()
 
 
 class GuiClickImageOnScreen(BaseTool):
@@ -155,7 +158,7 @@ def _record_screen(path: Path, seconds: float, fps: int) -> None:
             shot = sct.grab(monitor)
             frames.append(Image.frombytes("RGB", shot.size, shot.rgb))
             time.sleep(1 / max(1, fps))
-    with imageio.get_writer(path, fps=fps) as writer:
+    with imageio.get_writer(path, format=cast(Any, "FFMPEG"), fps=fps) as writer:
         append_data = cast(Any, writer).append_data
         for frame in frames:
             append_data(frame)

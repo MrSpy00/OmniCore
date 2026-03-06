@@ -8,32 +8,23 @@ import pyautogui
 import mss  # type: ignore[import-not-found]
 from PIL import Image  # type: ignore[import-not-found]
 
-from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
 from tools.base import resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
-    sandbox = get_settings().sandbox_root.resolve()
-    sandbox.mkdir(parents=True, exist_ok=True)
-    target = (sandbox / path_str).resolve()
-    if not str(target).startswith(str(sandbox)):
-        raise PermissionError(f"Path '{target}' escapes sandbox root '{sandbox}'")
+    target, _ = resolve_user_path(path_str)
     return target
 
 
 def _resolve_output_target(path_str: str) -> Path:
-    sandbox = get_settings().sandbox_root.resolve()
-    sandbox.mkdir(parents=True, exist_ok=True)
     raw = (path_str or "").strip()
     candidate = Path(raw).expanduser()
     if candidate.is_absolute():
         return candidate.resolve()
 
-    target, is_cross = resolve_user_path(raw, sandbox)
-    if is_cross:
-        return target
+    target, _ = resolve_user_path(raw)
     return target
 
 

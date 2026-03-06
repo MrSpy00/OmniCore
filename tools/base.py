@@ -105,39 +105,47 @@ def fuzzy_get(params: dict[str, Any], possible_keys: Iterable[str], default: Any
     return default
 
 
-def resolve_user_path(path_str: str, sandbox_root: Path) -> tuple[Path, bool]:
-    """Resolve a user path to a concrete path and flag cross-boundary access.
+def resolve_user_path(path_str: str, sandbox_root: Path | None = None) -> tuple[Path, bool]:
+    """Resolve a user path directly on the host OS.
 
-    Returns (path, is_cross_boundary). Cross-boundary means the resolved path
-    is outside the sandbox root (including smart paths like Desktop).
+    Absolute paths are allowed as-is. Relative paths resolve against the real
+    Windows user profile directory. The second tuple item is retained for
+    backwards compatibility and is always ``False``.
     """
-    sandbox = sandbox_root.resolve()
+    del sandbox_root
+
+    home = Path(os.environ.get("USERPROFILE") or str(Path.home())).expanduser().resolve()
     raw = (path_str or "").strip()
+    if raw in {"", "."}:
+        return home, False
+
+    raw = os.path.expandvars(raw)
+    normalized_original = raw.replace("\\", "/")
+    placeholder_match = re.match(
+        r"^[a-z]:/users/<username>(?:/(.*))?$", normalized_original.lower()
+    )
+    if placeholder_match:
+        remainder = placeholder_match.group(1) or ""
+        return (home / remainder).resolve(), False
+
+    raw = raw.replace("<Username>", home.name).replace("<username>", home.name)
     normalized = raw.replace("\\", "/")
 
-    home = os.environ.get("USERPROFILE", r"C:\Users\mrSpy")
     alias_map = {
-        "desktop": os.path.join(home, "Desktop"),
-        "downloads": os.path.join(home, "Downloads"),
-        "documents": os.path.join(home, "Documents"),
+        "desktop": home / "Desktop",
+        "downloads": home / "Downloads",
+        "documents": home / "Documents",
     }
     for alias, base_path in alias_map.items():
-        if normalized.lower() == alias or normalized.lower().startswith(f"{alias}/"):
-            remainder = normalized[len(alias) :].lstrip("/")
-            target = Path(os.path.join(base_path, remainder)).resolve()
-            return target, True
-
-        # Catch common bad absolute patterns like X:\desktop from LLM output.
-        pattern = rf"^[a-z]:/{alias}(?:/.*)?$"
-        if re.match(pattern, normalized.lower()):
-            suffix = normalized.split(f"/{alias}", 1)[1].lstrip("/")
-            target = Path(os.path.join(base_path, suffix)).resolve()
-            return target, True
+        alias_prefix = f"{alias}/"
+        if normalized.lower() == alias:
+            return base_path.resolve(), False
+        if normalized.lower().startswith(alias_prefix):
+            remainder = normalized[len(alias_prefix) :]
+            return (base_path / remainder).resolve(), False
 
     candidate = Path(raw).expanduser()
     if candidate.is_absolute():
-        target = candidate.resolve()
-        return target, not str(target).startswith(str(sandbox))
+        return candidate.resolve(), False
 
-    target = (sandbox / raw).resolve()
-    return target, not str(target).startswith(str(sandbox))
+    return (home / raw).resolve(), False

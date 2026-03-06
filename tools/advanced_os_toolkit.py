@@ -86,19 +86,18 @@ class OsLaunchApplication(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        app = str(
-            self._first_param(
-                params,
-                "app",
-                "application",
-                "name",
-                "program",
-                "query",
-                "target",
-                "value",
-                default="",
-            )
+        app_value = (
+            params.get("app")
+            or params.get("query")
+            or params.get("application")
+            or params.get("name")
+            or params.get("program")
+            or params.get("target")
+            or params.get("value")
         )
+        if app_value in (None, "") and params:
+            app_value = next((value for value in params.values() if value not in (None, "")), "")
+        app = str(app_value or "").strip()
         if not app:
             return self._failure("app is required")
 

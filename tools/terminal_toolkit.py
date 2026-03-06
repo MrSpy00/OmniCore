@@ -1,4 +1,4 @@
-"""Terminal Toolkit — sandboxed shell command execution.
+"""Terminal Toolkit — host shell command execution.
 
 Every command goes through the HITL Guardian (``is_destructive = True``)
 because arbitrary shell execution is inherently dangerous.
@@ -12,6 +12,7 @@ import os
 from config.logging import get_logger
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.base import resolve_user_path
 
 logger = get_logger(__name__)
 
@@ -20,11 +21,11 @@ _DEFAULT_TIMEOUT_SECONDS = 60
 
 
 class TerminalExecute(BaseTool):
-    """Execute a shell command inside the sandbox directory."""
+    """Execute a shell command on the host OS."""
 
     name = "terminal_execute"
     description = (
-        "Execute a shell command in a sandboxed working directory. "
+        "Execute a shell command in a host working directory. "
         "Requires explicit user approval before running."
     )
     is_destructive = True  # always requires HITL approval
@@ -38,11 +39,11 @@ class TerminalExecute(BaseTool):
         timeout = params.get("timeout", _DEFAULT_TIMEOUT_SECONDS)
         cwd_param = self._first_param(params, "cwd", "working_dir", default="")
         if cwd_param:
-            cwd = str(cwd_param)
+            cwd = str(resolve_user_path(str(cwd_param))[0])
         else:
             cwd = os.environ.get("USERPROFILE", "C:\\")
 
-        # Ensure sandbox directory exists.
+        # Ensure working directory exists.
         os.makedirs(cwd, exist_ok=True)
 
         logger.info("terminal.execute", command=command, cwd=cwd, timeout=timeout)
