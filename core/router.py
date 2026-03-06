@@ -12,6 +12,7 @@ Responsibilities:
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Callable, Awaitable
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -155,11 +156,12 @@ class CognitiveRouter:
             for t in self._registry.list_tools()
         )
         return (
-            "You are OmniCore, an OS-level Kernel AI with direct tool access.\n"
-            "RULE 1: NEVER pretend or simulate an action.\n"
-            "RULE 2: If the user asks for system stats, you MUST call `os_resource_monitor`.\n"
-            "RULE 3: If the user asks for ping, you MUST call `net_ping`.\n"
-            "RULE 4: Do not hallucinate IPs, files, or outputs. If a tool fails, report the failure.\n\n"
+            "You are OmniCore, an autonomous OS Kernel. YOU ARE FORBIDDEN FROM PRETENDING TO DO ACTIONS. "
+            "If the user asks for IP, Ping, PC Stats, or any system info, YOU MUST RETURN A JSON PLAN "
+            "CALLING THE EXACT TOOL. NEVER simulate a response. NEVER tell the user to check it themselves. "
+            "EXECUTE THE TOOL AND WAIT FOR THE RESULT.\n"
+            "CRITICAL RULE: DO NOT generate placeholders like [insert date here]. If you do not have data, "
+            "you MUST call a tool to get it. DO NOT output raw JSON plans directly to the user.\n\n"
             "## Available Tools\n"
             f"{tools_desc}\n\n"
             "## Relevant Memories\n"
@@ -295,4 +297,33 @@ class CognitiveRouter:
             + "\n\nPlease write a concise summary for the user."
         )
         summary_response = await self._llm.ainvoke([HumanMessage(content=summary_prompt)])
-        return summary_response.content
+        summary_text = str(summary_response.content)
+
+        if _looks_like_json_plan(summary_text):
+            fallback = [line for line in results_summary if line]
+            if not fallback:
+                return "I could not complete the request due to tool failures."
+            return "\n".join(fallback)
+
+        if _contains_placeholder(summary_text):
+            fallback = [line for line in results_summary if line]
+            if fallback:
+                return "\n".join(fallback)
+        return summary_text
+
+
+def _looks_like_json_plan(text: str) -> bool:
+    stripped = text.strip()
+    if stripped.startswith("{") and '"needs_plan"' in stripped:
+        return True
+    return stripped.startswith("```") and '"needs_plan"' in stripped
+
+
+def _contains_placeholder(text: str) -> bool:
+    patterns = [
+        r"\[.*burada.*\]",
+        r"\[.*insert.*\]",
+        r"placeholder",
+    ]
+    lowered = text.lower()
+    return any(re.search(p, lowered) for p in patterns)

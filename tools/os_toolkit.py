@@ -30,6 +30,21 @@ def _resolve_sandboxed(path_str: str) -> Path:
     return target
 
 
+def _resolve_write_target(path_str: str) -> Path:
+    """Resolve write target allowing absolute paths after HITL approval."""
+    sandbox = get_settings().sandbox_root.resolve()
+    sandbox.mkdir(parents=True, exist_ok=True)
+    raw = (path_str or "").strip()
+    if Path(raw).expanduser().is_absolute():
+        return Path(raw).expanduser().resolve()
+    target, is_cross = resolve_user_path(raw, sandbox)
+    if is_cross:
+        # Alias paths (Desktop/Documents/Downloads) are intentionally allowed
+        # once execution reaches here (Guardian approval already happened).
+        return target
+    return target
+
+
 def _resolve_with_alias(path_str: str) -> tuple[Path, bool]:
     sandbox = get_settings().sandbox_root.resolve()
     sandbox.mkdir(parents=True, exist_ok=True)
@@ -95,7 +110,7 @@ class OsWriteFile(BaseTool):
             if not path_value:
                 return self._failure("path is required")
             content = self._first_param(params, "content", "text", default="")
-            path = _resolve_sandboxed(str(path_value))
+            path = _resolve_write_target(str(path_value))
             path.parent.mkdir(parents=True, exist_ok=True)
             await asyncio.to_thread(path.write_text, str(content), encoding="utf-8")
             logger.info("os_toolkit.write_file", path=str(path), size=len(content))

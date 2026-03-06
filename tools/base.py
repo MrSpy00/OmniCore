@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import os
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from models.tools import ToolInput, ToolOutput, ToolStatus
 
@@ -61,11 +62,33 @@ class BaseTool(ABC):
         return {}
 
     def _first_param(self, params: dict[str, Any], *names: str, default: Any = None) -> Any:
-        for name in names:
-            value = params.get(name)
-            if value not in (None, ""):
-                return value
+        return fuzzy_get(params, names, default=default)
+
+
+def fuzzy_get(params: dict[str, Any], possible_keys: Iterable[str], default: Any = None) -> Any:
+    """Return the first non-empty value from possible key variations."""
+    if not isinstance(params, dict):
         return default
+
+    # Exact lookup first.
+    for key in possible_keys:
+        value = params.get(key)
+        if value not in (None, ""):
+            return value
+
+    # Case-insensitive and normalized lookup.
+    normalized_map: dict[str, Any] = {}
+    for key, value in params.items():
+        if isinstance(key, str):
+            normalized_map[key.lower().replace("-", "_")] = value
+
+    for key in possible_keys:
+        lookup = key.lower().replace("-", "_")
+        value = normalized_map.get(lookup)
+        if value not in (None, ""):
+            return value
+
+    return default
 
 
 def resolve_user_path(path_str: str, sandbox_root: Path) -> tuple[Path, bool]:
@@ -88,6 +111,13 @@ def resolve_user_path(path_str: str, sandbox_root: Path) -> tuple[Path, bool]:
         if normalized.lower() == alias or normalized.lower().startswith(f"{alias}/"):
             remainder = normalized[len(alias) :].lstrip("/")
             target = Path(os.path.join(base_path, remainder)).resolve()
+            return target, True
+
+        # Catch common bad absolute patterns like X:\desktop from LLM output.
+        pattern = rf"^[a-z]:/{alias}(?:/.*)?$"
+        if re.match(pattern, normalized.lower()):
+            suffix = normalized.split(f"/{alias}", 1)[1].lstrip("/")
+            target = Path(os.path.join(base_path, suffix)).resolve()
             return target, True
 
     candidate = Path(raw).expanduser()
