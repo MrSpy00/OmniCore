@@ -26,6 +26,7 @@ dependencies = [
     "psutil>=5.9.0",
     # Clipboard
     "pyperclip>=1.9.0",
+    "pycaw>=20240210",
     # Media
     "yt-dlp>=2024.7.0",
     "youtube-transcript-api>=0.6.2",

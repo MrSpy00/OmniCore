@@ -80,7 +80,7 @@ class TelegramGateway:
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            pass
+            logger.info("telegram.cancelled")
         finally:
             await self.shutdown()
 
@@ -318,7 +318,7 @@ class TelegramGateway:
             try:
                 await query.answer("Error processing")
             except Exception:
-                pass
+                logger.error("telegram.callback_answer_failed")
 
 
 def _chunk_text(text: str, max_len: int) -> list[str]:

@@ -64,7 +64,7 @@ class BaseTool(ABC):
                 if isinstance(parsed, dict):
                     return parsed
             except Exception:
-                pass
+                parsed = None
             return {
                 "value": value,
                 "query": value,

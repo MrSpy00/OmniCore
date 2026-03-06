@@ -5,6 +5,7 @@ from __future__ import annotations
 import psutil
 import pyperclip
 import asyncio
+import os
 import subprocess
 import shutil
 import webbrowser
@@ -171,17 +172,36 @@ def _launch_windows_app(app: str) -> None:
         "spotify": "spotify:",
         "teams": "msteams:",
         "steam": "steam://open/main",
+        "calculator": "calculator:",
     }
-    if app_lower in uri_map:
-        subprocess.Popen(
-            ["powershell", "-NoProfile", "-Command", f"Start-Process '{uri_map[app_lower]}'"],
-            shell=False,
-        )
-        return
 
-    if shutil.which(app):
-        subprocess.Popen([app], shell=False)
-        return
+    # 1. Standard executable launch.
+    try:
+        if shutil.which(app):
+            subprocess.Popen([app], shell=False)
+            return
+    except Exception as exc:
+        _ = exc
+
+    # 2. URI scheme launch via Windows shell.
+    try:
+        uri = uri_map.get(app_lower, f"{app_lower}:")
+        exit_code = os.system(f'start "" "{uri}"')
+        if exit_code == 0:
+            return
+    except Exception as exc:
+        _ = exc
+
+    # 3. PowerShell URI fallback.
+    if app_lower in uri_map:
+        try:
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-Command", f"Start-Process '{uri_map[app_lower]}'"],
+                shell=False,
+            )
+            return
+        except Exception as exc:
+            _ = exc
 
     # Shell apps folder fallback (UWP).
     command = (

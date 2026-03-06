@@ -84,6 +84,10 @@ from tools.workflow_toolkit import (
     WorkflowSystemCalculator,
     WebDeepScraper,
 )
+from tools.windows_power_toolkit import OsControlAudio, OsManageWindows
+from tools.monitoring_toolkit import WebMonitorChanges, SysNetworkScanner
+from tools.archive_image_toolkit import ArchiveCreateZip, ArchiveExtractZip, ImageReadExif
+from tools.developer_extra_toolkit import DevDecodeBase64, DevFormatJson
 from core.router import CognitiveRouter
 from scheduler.pulse import AutonomousPulse
 
@@ -176,6 +180,19 @@ def _build_tool_registry() -> ToolRegistry:
         WorkflowSetAlarm,
         WorkflowSystemCalculator,
         WebDeepScraper,
+        # Windows Power
+        OsControlAudio,
+        OsManageWindows,
+        # Monitoring
+        WebMonitorChanges,
+        SysNetworkScanner,
+        # Archive and Image
+        ArchiveCreateZip,
+        ArchiveExtractZip,
+        ImageReadExif,
+        # Developer Extra
+        DevDecodeBase64,
+        DevFormatJson,
     ]:
         registry.register(tool_cls())
     return registry

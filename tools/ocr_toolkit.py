@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from functools import lru_cache
 from pathlib import Path
 
-import pytesseract
-from PIL import Image
+import easyocr
 
 from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
@@ -27,7 +27,10 @@ class OcrReadImage(BaseTool):
     description = "Extract text from an image file in the sandbox."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        path = tool_input.parameters.get("path", "")
+        params = self._params(tool_input)
+        path = str(
+            self._first_param(params, "path", "file_path", "image_path", "value", default="")
+        )
         if not path:
             return self._failure("path is required")
 
@@ -40,5 +43,11 @@ class OcrReadImage(BaseTool):
 
 
 def _run_ocr(path: Path) -> str:
-    image = Image.open(path)
-    return pytesseract.image_to_string(image)
+    reader = _get_reader()
+    result = reader.readtext(str(path), detail=0, paragraph=True)
+    return "\n".join(str(line) for line in result)
+
+
+@lru_cache(maxsize=1)
+def _get_reader() -> easyocr.Reader:
+    return easyocr.Reader(["en", "tr"], gpu=False)

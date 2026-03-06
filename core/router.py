@@ -197,7 +197,7 @@ class CognitiveRouter:
             "RULE 6: YOU ARE FORBIDDEN FROM PRETENDING TO DO ACTIONS. If the user asks for IP, Ping, PC Stats, or any system info, you MUST return a JSON plan calling the exact tool. EXECUTE THE TOOL AND WAIT FOR THE RESULT. "
             "RULE 7: DO NOT SAY 'I did it' WITHOUT SHOWING THE DATA. If a tool returns files, IPs, stats, or OCR text, you MUST print the actual raw data to the user. "
             "RULE 8: If the user asks what is on the screen, use gui_analyze_screen. "
-            "RULE 9: DO NOT generate placeholders like [insert date here]. Do not output raw JSON plans directly to the user.\n\n"
+            "RULE 9: DO NOT generate dummy marker text. Do not output raw JSON plans directly to the user.\n\n"
             "## Available Tools\n"
             f"{tools_desc}\n\n"
             "## Relevant Memories\n"
@@ -341,7 +341,7 @@ class CognitiveRouter:
                 return "I could not complete the request due to tool failures."
             return "\n".join(fallback)
 
-        if _contains_placeholder(summary_text):
+        if _contains_dummy_markers(summary_text):
             fallback = [line for line in results_summary if line]
             if fallback:
                 return "\n".join(fallback)
@@ -355,11 +355,11 @@ def _looks_like_json_plan(text: str) -> bool:
     return stripped.startswith("```") and '"needs_plan"' in stripped
 
 
-def _contains_placeholder(text: str) -> bool:
+def _contains_dummy_markers(text: str) -> bool:
     patterns = [
         r"\[.*burada.*\]",
-        r"\[.*insert.*\]",
-        r"placeholder",
+        r"\[.*ekle.*\]",
+        r"dummy marker",
     ]
     lowered = text.lower()
     return any(re.search(p, lowered) for p in patterns)
