@@ -54,9 +54,12 @@ class WebNavigate(BaseTool):
     description = "Navigate to a URL and return the page text content."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        url = tool_input.parameters.get("url", "")
+        params = self._params(tool_input)
+        url = str(self._first_param(params, "url", "target", "query", default=""))
         if not url:
             return self._failure("No URL provided")
+        if not url.startswith("http"):
+            url = "https://" + url
 
         try:
             context = await _get_browser()
@@ -73,7 +76,7 @@ class WebNavigate(BaseTool):
                     }
                     """
                 )
-                max_chars = tool_input.parameters.get("max_chars", 15_000)
+                max_chars = params.get("max_chars", 15_000)
                 if len(content) > max_chars:
                     content = content[:max_chars] + "\n... (truncated)"
 
@@ -96,7 +99,8 @@ class WebSearch(BaseTool):
     description = "Search the web using DuckDuckGo and return top results."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        query = tool_input.parameters.get("query", "")
+        params = self._params(tool_input)
+        query = str(self._first_param(params, "query", "q", "value", default=""))
         if not query:
             return self._failure("No search query provided")
 
@@ -116,7 +120,7 @@ class WebSearch(BaseTool):
                     }
                     """
                 )
-                max_chars = tool_input.parameters.get("max_chars", 12_000)
+                max_chars = params.get("max_chars", 12_000)
                 if len(content) > max_chars:
                     content = content[:max_chars] + "\n... (truncated)"
 
@@ -139,10 +143,15 @@ class WebScreenshot(BaseTool):
     description = "Take a screenshot of a web page and save it to the sandbox."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        url = tool_input.parameters.get("url", "")
-        output_path = tool_input.parameters.get("output_path", "screenshot.png")
+        params = self._params(tool_input)
+        url = str(self._first_param(params, "url", "target", default=""))
+        output_path = str(
+            self._first_param(params, "output_path", "path", "file_path", default="screenshot.png")
+        )
         if not url:
             return self._failure("No URL provided")
+        if not url.startswith("http"):
+            url = "https://" + url
 
         try:
             from config.settings import get_settings

@@ -38,7 +38,8 @@ class OsKillProcess(BaseTool):
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        pid = tool_input.parameters.get("pid")
+        params = self._params(tool_input)
+        pid = self._first_param(params, "pid", "process_id", "id")
         if pid is None:
             return self._failure("pid is required")
         try:
@@ -84,7 +85,17 @@ class OsLaunchApplication(BaseTool):
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
         app = str(
-            self._first_param(params, "app", "application", "name", "target", "value", default="")
+            self._first_param(
+                params,
+                "app",
+                "application",
+                "name",
+                "program",
+                "query",
+                "target",
+                "value",
+                default="",
+            )
         )
         if not app:
             return self._failure("app is required")
@@ -92,6 +103,20 @@ class OsLaunchApplication(BaseTool):
         try:
             await asyncio.to_thread(_launch_windows_app, app)
             return self._success(f"Launch request sent for {app}")
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class OsGetNowPlaying(BaseTool):
+    name = "os_get_now_playing"
+    description = "Get currently playing media title/artist from Windows session."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            result = await asyncio.to_thread(_get_now_playing_powershell)
+            if not result:
+                return self._failure("No active media session found")
+            return self._success("Now playing detected", data=result)
         except Exception as exc:
             return self._failure(str(exc))
 
@@ -146,3 +171,37 @@ def _launch_windows_app(app: str) -> None:
         "else { throw 'App not found' }"
     )
     subprocess.Popen(["powershell", "-NoProfile", "-Command", command], shell=False)
+
+
+def _get_now_playing_powershell() -> dict[str, str]:
+    script = (
+        "Add-Type -AssemblyName System.Runtime.WindowsRuntime; "
+        "$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime]; "
+        "$mgr = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync().GetAwaiter().GetResult(); "
+        "$session = $mgr.GetCurrentSession(); "
+        "if (-not $session) { exit 1 }; "
+        "$props = $session.TryGetMediaPropertiesAsync().GetAwaiter().GetResult(); "
+        "$out = @{title=$props.Title; artist=$props.Artist; album=$props.AlbumTitle}; "
+        "$out | ConvertTo-Json -Compress"
+    )
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=8,
+    )
+    if completed.returncode != 0:
+        return {}
+    raw = completed.stdout.strip()
+    if not raw:
+        return {}
+    import json
+
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        return {}
+    return {
+        "title": str(parsed.get("title", "")),
+        "artist": str(parsed.get("artist", "")),
+        "album": str(parsed.get("album", "")),
+    }

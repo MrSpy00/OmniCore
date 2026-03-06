@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import partial
 from typing import Any, Callable, Awaitable
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -78,11 +79,29 @@ class CognitiveRouter:
     def _build_llm(self, settings) -> Any:
         provider = settings.llm_provider.strip().lower()
         if provider == "groq":
-            return ChatGroq(
+            primary = ChatGroq(
                 model=settings.groq_llm_model,
                 api_key=settings.groq_api_key,
                 temperature=settings.llm_temperature,
             )
+            raw_models = [m.strip() for m in settings.groq_fallback_models.split(",") if m.strip()]
+            fallback_models = [m for m in raw_models if m != settings.groq_llm_model]
+            fallbacks = [
+                ChatGroq(
+                    model=model_name,
+                    api_key=settings.groq_api_key,
+                    temperature=settings.llm_temperature,
+                )
+                for model_name in fallback_models
+            ]
+            if fallbacks:
+                logger.info(
+                    "router.groq_fallbacks_enabled",
+                    primary=settings.groq_llm_model,
+                    fallbacks=fallback_models,
+                )
+                return primary.with_fallbacks(fallbacks)
+            return primary
         if provider in ("", "gemini"):
             return ChatGoogleGenerativeAI(
                 model=settings.omni_llm_model,
@@ -165,6 +184,7 @@ class CognitiveRouter:
             "CRITICAL: You are running on WINDOWS 11. When using terminal_execute, you MUST use Windows CMD "
             "or PowerShell commands. DO NOT use Linux commands like whois, ls, or ~ for paths. Use C:\\ paths. "
             "To open an app like Steam, use start steam or PowerShell. Never assume Linux.\n"
+            "If user asks for what's on screen, use gui_analyze_screen.\n"
             "CRITICAL RULE: DO NOT generate placeholders like [insert date here]. If you do not have data, "
             "you MUST call a tool to get it. DO NOT output raw JSON plans directly to the user.\n\n"
             "## Available Tools\n"

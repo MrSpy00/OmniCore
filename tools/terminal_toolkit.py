@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 
 from config.logging import get_logger
-from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
 
@@ -38,8 +36,11 @@ class TerminalExecute(BaseTool):
             return self._failure("No command provided")
 
         timeout = params.get("timeout", _DEFAULT_TIMEOUT_SECONDS)
-        settings = get_settings()
-        cwd = _choose_cwd(command, settings.sandbox_root.resolve())
+        cwd_param = self._first_param(params, "cwd", "working_dir", default="")
+        if cwd_param:
+            cwd = str(cwd_param)
+        else:
+            cwd = os.environ.get("USERPROFILE", "C:\\")
 
         # Ensure sandbox directory exists.
         os.makedirs(cwd, exist_ok=True)
@@ -86,23 +87,3 @@ class TerminalExecute(BaseTool):
             return self._failure(f"Command timed out after {timeout}s")
         except Exception as exc:
             return self._failure(str(exc))
-
-
-def _choose_cwd(command: str, sandbox_root: Path) -> str:
-    trimmed = command.strip().lower()
-    if _looks_global_command(trimmed):
-        return os.environ.get("USERPROFILE", "C:\\")
-    return str(sandbox_root.resolve())
-
-
-def _looks_global_command(command: str) -> bool:
-    global_prefixes = (
-        "start ",
-        "powershell",
-        "pwsh",
-        "cmd",
-        "cd ",
-        "dir",
-        "explorer",
-    )
-    return command.startswith(global_prefixes)
