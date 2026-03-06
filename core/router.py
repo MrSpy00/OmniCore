@@ -11,8 +11,10 @@ Responsibilities:
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
+import threading
 from typing import Any, Callable, Awaitable
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -34,6 +36,37 @@ from models.tools import ToolInput
 from tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Round-robin API key rotator for Groq multi-key support
+# ---------------------------------------------------------------------------
+class _GroqKeyRotator:
+    """Thread-safe round-robin Groq API key selector.
+
+    Cycles through ``GROQ_API_KEY_1``, ``_2``, ``_3`` (or the single
+    ``GROQ_API_KEY``) on each call to ``next_key()``.
+    """
+
+    def __init__(self, keys: list[str]) -> None:
+        self._keys = keys or [""]
+        self._cycle = itertools.cycle(self._keys)
+        self._lock = threading.Lock()
+        self._current: str = ""
+        # Advance to the first key.
+        self.next_key()
+
+    @property
+    def current(self) -> str:
+        return self._current
+
+    def next_key(self) -> str:
+        with self._lock:
+            self._current = next(self._cycle)
+        return self._current
+
+    def __len__(self) -> int:
+        return len(self._keys)
 
 
 def _is_retryable_llm_error(exc: BaseException) -> bool:
@@ -73,6 +106,8 @@ class CognitiveRouter:
         self._state = state_tracker
 
         settings = get_settings()
+        self._key_rotator: _GroqKeyRotator | None = None
+        self._settings = settings
         self._llm = self._build_llm(settings)
         self._planner = Planner(self._llm)
         self._guardian = Guardian(
@@ -84,17 +119,22 @@ class CognitiveRouter:
     def _build_llm(self, settings) -> Any:
         provider = settings.llm_provider.strip().lower()
         if provider == "groq":
+            api_keys = settings.groq_api_keys
+            if not api_keys:
+                api_keys = [settings.groq_api_key or ""]
+            self._key_rotator = _GroqKeyRotator(api_keys)
+
             primary_model = "llama-3.1-8b-instant"
             fallback_models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"]
             primary = ChatGroq(
                 model=primary_model,
-                api_key=settings.groq_api_key,
+                api_key=self._key_rotator.current,
                 temperature=settings.llm_temperature,
             )
             fallbacks = [
                 ChatGroq(
                     model=model_name,
-                    api_key=settings.groq_api_key,
+                    api_key=self._key_rotator.current,
                     temperature=settings.llm_temperature,
                 )
                 for model_name in fallback_models
@@ -104,6 +144,7 @@ class CognitiveRouter:
                     "router.groq_fallbacks_enabled",
                     primary=primary_model,
                     fallbacks=fallback_models,
+                    num_api_keys=len(api_keys),
                 )
                 return primary.with_fallbacks(fallbacks)
             return primary
@@ -117,6 +158,18 @@ class CognitiveRouter:
 
         raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
+    def _rotate_groq_key_and_rebuild(self) -> None:
+        """Rotate to the next Groq API key and rebuild the LLM chain."""
+        if self._key_rotator and len(self._key_rotator) > 1:
+            old_key = self._key_rotator.current[-6:]
+            new_key_full = self._key_rotator.next_key()
+            logger.warning(
+                "router.groq_key_rotated",
+                old_suffix=f"...{old_key}",
+                new_suffix=f"...{new_key_full[-6:]}",
+            )
+            self._llm = self._build_llm(self._settings)
+
     @retry(
         reraise=True,
         stop=stop_after_attempt(2),
@@ -124,7 +177,12 @@ class CognitiveRouter:
         retry=retry_if_exception(_is_retryable_llm_error),
     )
     async def _ainvoke_with_retry(self, messages: list) -> Any:
-        return await self._llm.ainvoke(messages)
+        try:
+            return await self._llm.ainvoke(messages)
+        except Exception as exc:
+            if _is_retryable_llm_error(exc):
+                self._rotate_groq_key_and_rebuild()
+            raise
 
     # -- public API -----------------------------------------------------------
 
@@ -185,38 +243,39 @@ class CognitiveRouter:
 
     def _build_system_prompt(self, memory_context: str) -> str:
         tools_desc = "\n".join(
-            f"- {t['name']}: {t['description']} (destructive={t['destructive']})"
+            f"- {t['name']}: {t['description']} (yikici={t['destructive']})"
             for t in self._registry.list_tools()
         )
         return (
-            "CRITICAL MANDATE: YOU ARE A SYSTEM KERNEL. YOU MUST NEVER HALLUCINATE OR SIMULATE DATA. "
-            "If the user asks what is on the desktop, YOU MUST EXECUTE os_list_dir. NEVER invent file names. "
-            "If the user asks you to write code, YOU MUST EXECUTE os_write_file or dev_execute_python_code. "
-            "NEVER write the code block in the chat response. IF YOU DO NOT USE A TOOL, YOU FAIL. "
-            "YOU ARE OMNICORE. YOU HAVE ZERO TOLERANCE FOR HALLUCINATIONS. "
-            "RULE 1: If a tool returns an error, YOU MUST TELL THE USER IT FAILED. DO NOT pretend it succeeded. "
-            "RULE 2: If you use a tool to find data (IP, WHOIS, files, song names, OCR text), YOU MUST PRINT THE EXACT RAW DATA returned by the tool. "
-            "RULE 3: You are operating on Windows. Never assume Linux pathways. "
-            "RULE 4: If the user asks to open or view a site, use os_open_browser_visible. "
-            "RULE 5: If the user asks to PLAY A VIDEO or OPEN A SONG on YouTube, you MUST use os_open_browser_visible with the exact YouTube URL. DO NOT use api_http_request. Physical opening is mandatory. "
-            "RULE 6: If you need to search the web for info to read yourself, use web_search. "
-            "RULE 7: If the user asks what song is playing, DO NOT HALLUCINATE. Use os_get_now_playing. "
-            "RULE 8: Relative paths resolve from the real Windows user profile unless the user says otherwise. NEVER use placeholder usernames. "
-            "RULE 9: If the user asks for IP, Ping, PC Stats, or any system info, you MUST return a JSON plan calling the exact tool and wait for the result. "
-            "RULE 10: If the user asks what is on the screen, use gui_analyze_screen. "
-            "RULE 11: IF YOU FAIL A TOOL 2 TIMES, DO NOT RETRY. Tell the user exactly what failed. "
-            "RULE 12: DO NOT generate dummy marker text. Do not output raw JSON plans directly to the user.\n\n"
-            "## Available Tools\n"
+            "KRİTİK ZORUNLULUK: SEN BİR SİSTEM ÇEKİRDEĞİSİN. ASLA HALÜSİNASYON YAPMA VEYA VERİ UYDURMA. "
+            "HER ZAMAN TÜRKÇE YANIT VER. İNGİLİZCE KONUŞMA YASAKTIR. "
+            "Kullanıcı masaüstünde ne var diye sorarsa, os_list_dir ÇALIŞTIRMALISIN. Asla dosya adı uydurma. "
+            "Kullanıcı kod yazmanı isterse, os_write_file veya dev_execute_python_code ÇALIŞTIRMALISIN. "
+            "Asla kod bloğunu sohbet yanıtında yazma. ARAÇ KULLANMAZSAN BAŞARISIZ OLURSUN. "
+            "SEN OMNICORE'SUN. HALÜSİNASYONLARA SIFIR TOLERANSIN VAR. "
+            "KURAL 1: Bir araç hata döndürürse, kullanıcıya BAŞARISIZ OLDUĞUNU SÖYLEMELİSİN. Başarılıymış gibi davranma. "
+            "KURAL 2: Veri bulmak için araç kullandıysan (IP, WHOIS, dosyalar, şarkı adları, OCR metni), aracın döndürdüğü HAM VERİYİ AYNEN YAZDIRMALISIN. "
+            "KURAL 3: Windows üzerinde çalışıyorsun. Asla Linux yolları varsayma. "
+            "KURAL 4: Kullanıcı bir siteyi açmak veya görüntülemek isterse, os_open_browser_visible kullan. "
+            "KURAL 5: Kullanıcı YouTube'da VİDEO OYNATMAK veya ŞARKI AÇMAK isterse, os_open_browser_visible veya web_play_youtube_video_visible KULLANMALISIN. api_http_request KULLANMA. Fiziksel açma zorunludur. "
+            "KURAL 6: Kendin bilgi aramak istersen, web_search kullan. "
+            "KURAL 7: Kullanıcı hangi şarkı çalıyor diye sorarsa, HALÜSİNASYON YAPMA. os_get_now_playing kullan. "
+            "KURAL 8: Göreli yollar gerçek Windows kullanıcı profil dizininden çözümlenir. Asla yer tutucu kullanıcı adı kullanma. "
+            "KURAL 9: Kullanıcı IP, Ping, PC Bilgisi veya herhangi bir sistem bilgisi isterse, ilgili aracı çağıran bir JSON planı döndürmelisin. "
+            "KURAL 10: Kullanıcı ekranda ne var diye sorarsa, gui_analyze_screen kullan. "
+            "KURAL 11: BİR ARACI 2 KEZ BAŞARISIZ OLURSA, TEKRAR DENEME. Kullanıcıya tam olarak neyin başarısız olduğunu söyle. "
+            "KURAL 12: Sahte işaretçi metin üretme. Ham JSON planlarını doğrudan kullanıcıya gösterme.\n\n"
+            "## Kullanılabilir Araçlar\n"
             f"{tools_desc}\n\n"
-            "## Relevant Memories\n"
-            f"{memory_context or '(none)'}\n\n"
-            "## Instructions\n"
-            "When the user asks for any system data or action, respond ONLY with a JSON plan.\n"
-            "Never answer with general advice like 'open task manager' — use tools.\n"
-            '```json\n{"needs_plan": true, "steps": [{"tool": "<tool_name>", "description": "...", '
+            "## İlgili Hatıralar\n"
+            f"{memory_context or '(yok)'}\n\n"
+            "## Talimatlar\n"
+            "Kullanıcı herhangi bir sistem verisi veya eylem istediğinde, YALNIZCA bir JSON planıyla yanıt ver.\n"
+            "Asla 'görev yöneticisini aç' gibi genel tavsiyeler verme — araçları kullan.\n"
+            '```json\n{"needs_plan": true, "steps": [{"tool": "<arac_adi>", "description": "...", '
             '"parameters": {...}, "destructive": true/false}]}\n```\n'
-            "Only respond conversationally when no tool can possibly help.\n"
-            "Always be concise and helpful."
+            "Yalnızca hiçbir araç yardımcı olamayacağı zaman konuşma tarzında yanıt ver.\n"
+            "Her zaman kısa, öz ve yardımcı ol. HER ZAMAN TÜRKÇE YANIT VER."
         )
 
     async def _classify_intent(self, user_text: str, lc_messages: list) -> dict[str, Any]:
@@ -335,10 +394,10 @@ class CognitiveRouter:
 
         # Ask the LLM to summarise the results into a user-friendly reply.
         summary_prompt = (
-            f"The user asked: {user_message.content}\n\n"
-            f"I executed the following steps:\n"
+            f"Kullanıcı şunu sordu: {user_message.content}\n\n"
+            f"Aşağıdaki adımları yürüttüm:\n"
             + "\n".join(results_summary)
-            + "\n\nPlease write a concise summary for the user and include concrete raw values from the tool outputs. If any tool failed, state the exact error."
+            + "\n\nLütfen kullanıcı için kısa bir TÜRKÇE özet yaz ve araç çıktılarından somut ham değerleri dahil et. Herhangi bir araç başarısız olduysa, tam hatayı belirt."
         )
         summary_response = await self._ainvoke_with_retry([HumanMessage(content=summary_prompt)])
         summary_text = str(summary_response.content)
@@ -346,7 +405,7 @@ class CognitiveRouter:
         if _looks_like_json_plan(summary_text):
             fallback = [line for line in results_summary if line]
             if not fallback:
-                return "I could not complete the request due to tool failures."
+                return "Araç hataları nedeniyle isteği tamamlayamadım."
             return "\n".join(fallback)
 
         if _contains_dummy_markers(summary_text):

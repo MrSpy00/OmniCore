@@ -142,6 +142,115 @@ class OsOpenBrowserVisible(BaseTool):
             return self._failure(str(exc))
 
 
+class OsClipboardHistoryManager(BaseTool):
+    name = "os_clipboard_history_manager"
+    description = (
+        "Manage clipboard history: read current, store to history, list recent entries, "
+        "or restore a previous entry."
+    )
+    is_destructive = True
+
+    # In-memory clipboard history (survives within session).
+    _history: list[str] = []
+    _MAX_HISTORY = 50
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        action = str(self._first_param(params, "action", "command", default="list")).lower()
+        index = self._first_param(params, "index", "entry", default=None)
+
+        try:
+            if action in ("read", "current"):
+                text = await asyncio.to_thread(pyperclip.paste) or ""
+                return self._success("Current clipboard", data={"text": text})
+
+            if action in ("store", "save", "push"):
+                text = await asyncio.to_thread(pyperclip.paste) or ""
+                if text and (not self._history or self._history[-1] != text):
+                    self._history.append(text)
+                    if len(self._history) > self._MAX_HISTORY:
+                        self._history = self._history[-self._MAX_HISTORY :]
+                return self._success(
+                    "Clipboard stored to history",
+                    data={"entries": len(self._history), "latest": text[:200]},
+                )
+
+            if action in ("list", "history"):
+                recent = self._history[-10:] if self._history else []
+                entries = [
+                    {"index": len(self._history) - len(recent) + i, "preview": e[:100]}
+                    for i, e in enumerate(recent)
+                ]
+                return self._success(
+                    f"Clipboard history ({len(self._history)} total)",
+                    data={"entries": entries},
+                )
+
+            if action in ("restore", "get", "recall"):
+                if index is None:
+                    return self._failure("index is required for restore action")
+                idx = int(index)
+                if idx < 0 or idx >= len(self._history):
+                    return self._failure(f"Index {idx} out of range (0-{len(self._history) - 1})")
+                text = self._history[idx]
+                await asyncio.to_thread(pyperclip.copy, text)
+                return self._success(
+                    f"Restored entry {idx} to clipboard",
+                    data={"text": text[:200]},
+                )
+
+            if action == "clear":
+                self._history.clear()
+                return self._success("Clipboard history cleared")
+
+            return self._failure(f"Unknown action: {action}")
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class WebPlayYoutubeVideoVisible(BaseTool):
+    name = "web_play_youtube_video_visible"
+    description = (
+        "Search YouTube for a video query and open the top result in the user's "
+        "real default browser. Physical browser opening is mandatory."
+    )
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        query = str(
+            self._first_param(
+                params, "query", "search", "video", "song", "url", "value", default=""
+            )
+        )
+        if not query:
+            return self._failure("query is required")
+
+        # If it's already a YouTube URL, open directly.
+        if "youtube.com/" in query or "youtu.be/" in query:
+            url = query if query.startswith("http") else f"https://{query}"
+            try:
+                await asyncio.to_thread(webbrowser.open_new_tab, url)
+                return self._success("Opened YouTube video", data={"url": url})
+            except Exception as exc:
+                return self._failure(str(exc))
+
+        # Otherwise construct a YouTube search URL and open it.
+        import urllib.parse
+
+        search_url = (
+            f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}"
+        )
+        try:
+            await asyncio.to_thread(webbrowser.open_new_tab, search_url)
+            return self._success(
+                f"Opened YouTube search for '{query}'",
+                data={"url": search_url, "query": query},
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
 def _collect_resource_info() -> dict[str, float]:
     return {
         "cpu_percent": psutil.cpu_percent(interval=0.2),
@@ -165,6 +274,11 @@ def _top_memory_processes() -> list[dict[str, int | str]]:
 
 
 def _launch_windows_app(app: str) -> None:
+    """Launch a Windows application using os.system('start ...') as primary strategy.
+
+    This approach is more reliable for UWP/Store apps than subprocess.Popen.
+    Falls back to PowerShell Get-StartApps search if simple start fails.
+    """
     app_lower = app.strip().lower()
 
     uri_map = {
@@ -172,48 +286,56 @@ def _launch_windows_app(app: str) -> None:
         "teams": "msteams:",
         "steam": "steam://open/main",
         "calculator": "calculator:",
+        "mail": "outlookmail:",
+        "calendar": "outlookcal:",
+        "photos": "ms-photos:",
+        "settings": "ms-settings:",
+        "store": "ms-windows-store:",
+        "xbox": "xbox:",
+        "maps": "bingmaps:",
+        "camera": "microsoft.windows.camera:",
+        "clock": "ms-clock:",
+        "weather": "bingweather:",
     }
 
-    # 1. Standard executable launch.
-    try:
-        if shutil.which(app):
-            subprocess.Popen([app], shell=False)
-            return
-    except Exception as exc:
-        _ = exc
-
-    # 2. URI scheme launch via Windows shell.
-    try:
-        uri = uri_map.get(app_lower, f"{app_lower}:")
+    # 1. Try URI scheme via os.system('start ...') — most reliable for UWP.
+    uri = uri_map.get(app_lower)
+    if uri:
         exit_code = os.system(f'start "" "{uri}"')
         if exit_code == 0:
             return
-    except Exception as exc:
-        _ = exc
 
-    # 3. PowerShell URI fallback.
-    if app_lower in uri_map:
-        try:
-            subprocess.Popen(
-                ["powershell", "-NoProfile", "-Command", f"Start-Process '{uri_map[app_lower]}'"],
-                shell=False,
-            )
+    # 2. Try direct start command (works for exe-based apps).
+    exit_code = os.system(f'start "" "{app}"')
+    if exit_code == 0:
+        return
+
+    # 3. Try shutil.which for PATH-accessible executables.
+    try:
+        if shutil.which(app):
+            os.system(f'start "" "{app}"')
             return
-        except Exception as exc:
-            _ = exc
+    except Exception:
+        pass
 
-    # Shell apps folder fallback (UWP).
+    # 4. PowerShell Get-StartApps fallback for UWP apps not in uri_map.
     command = (
         "$pkg = Get-StartApps | Where-Object { $_.Name -like '*"
         + app
         + "*' } | Select-Object -First 1; "
         'if ($pkg) { Start-Process "shell:AppsFolder\\$($pkg.AppID)" } '
-        "else { throw 'App not found' }"
+        "else { throw 'Uygulama bulunamadi: " + app + "' }"
     )
     subprocess.Popen(["powershell", "-NoProfile", "-Command", command], shell=False)
 
 
 def _get_now_playing_powershell() -> dict[str, str]:
+    """Get currently playing media info.
+
+    Strategy 1: Windows Media Transport Controls (SMTC) API via PowerShell.
+    Strategy 2: Fallback to scanning window titles of known media players.
+    """
+    # --- Strategy 1: SMTC API ---
     script = (
         "Add-Type -AssemblyName System.Runtime.WindowsRuntime; "
         "$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime]; "
@@ -224,24 +346,83 @@ def _get_now_playing_powershell() -> dict[str, str]:
         "$out = @{title=$props.Title; artist=$props.Artist; album=$props.AlbumTitle}; "
         "$out | ConvertTo-Json -Compress"
     )
-    completed = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", script],
-        capture_output=True,
-        text=True,
-        timeout=8,
-    )
-    if completed.returncode != 0:
-        return {}
-    raw = completed.stdout.strip()
-    if not raw:
-        return {}
-    import json
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        if completed.returncode == 0:
+            raw = completed.stdout.strip()
+            if raw:
+                import json
 
-    parsed = json.loads(raw)
-    if not isinstance(parsed, dict):
-        return {}
-    return {
-        "title": str(parsed.get("title", "")),
-        "artist": str(parsed.get("artist", "")),
-        "album": str(parsed.get("album", "")),
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict) and parsed.get("title"):
+                    return {
+                        "title": str(parsed.get("title", "")),
+                        "artist": str(parsed.get("artist", "")),
+                        "album": str(parsed.get("album", "")),
+                        "source": "smtc",
+                    }
+    except Exception:
+        pass
+
+    # --- Strategy 2: Window title scanning fallback ---
+    media_apps = {
+        "spotify": "Spotify",
+        "vlc": "VLC media player",
+        "musicbee": "MusicBee",
+        "foobar2000": "foobar2000",
+        "chrome": "YouTube",
+        "firefox": "YouTube",
+        "msedge": "YouTube",
+        "wmplayer": "Windows Media Player",
+        "groove": "Groove Music",
     }
+    title_script = (
+        "Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | "
+        "Select-Object ProcessName, MainWindowTitle | ConvertTo-Json -Compress"
+    )
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", title_script],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        if completed.returncode == 0:
+            raw = completed.stdout.strip()
+            if raw:
+                import json
+
+                windows = json.loads(raw)
+                if isinstance(windows, dict):
+                    windows = [windows]
+                for win in windows:
+                    proc_name = str(win.get("ProcessName", "")).lower()
+                    title = str(win.get("MainWindowTitle", ""))
+                    if not title:
+                        continue
+                    for app_key in media_apps:
+                        if app_key in proc_name:
+                            # Extract artist - title pattern common in media players
+                            if " - " in title:
+                                parts = title.split(" - ", 1)
+                                return {
+                                    "title": parts[-1].strip(),
+                                    "artist": parts[0].strip(),
+                                    "album": "",
+                                    "source": f"window_title:{proc_name}",
+                                }
+                            return {
+                                "title": title,
+                                "artist": "",
+                                "album": "",
+                                "source": f"window_title:{proc_name}",
+                            }
+    except Exception:
+        pass
+
+    return {}

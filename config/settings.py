@@ -27,10 +27,27 @@ class Settings(BaseSettings):
     google_api_key: str = ""
     omni_llm_model: str = "gemini-1.5-pro"
     groq_api_key: str = ""
+    groq_api_key_1: str = ""
+    groq_api_key_2: str = ""
+    groq_api_key_3: str = ""
     groq_llm_model: str = "llama-3.1-8b-instant"
     groq_fallback_models: str = "llama-3.3-70b-versatile,mixtral-8x7b-32768"
     llm_temperature: float = 0.2
     llm_max_output_tokens: int = 4096
+
+    @property
+    def groq_api_keys(self) -> list[str]:
+        """Return all configured Groq API keys in round-robin order.
+
+        Collects GROQ_API_KEY_1, _2, _3 first, then falls back to the
+        original GROQ_API_KEY if no numbered keys are set.
+        """
+        keys = [
+            k for k in (self.groq_api_key_1, self.groq_api_key_2, self.groq_api_key_3) if k.strip()
+        ]
+        if not keys and self.groq_api_key.strip():
+            keys = [self.groq_api_key.strip()]
+        return keys
 
     # --- Telegram Gateway ----------------------------------------------------
     telegram_bot_token: str = ""

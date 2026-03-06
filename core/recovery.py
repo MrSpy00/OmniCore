@@ -2,9 +2,9 @@
 
 When a tool execution fails, the RecoveryEngine:
   1. Logs the error with full context.
-  2. Checks whether retries remain.
-  3. Re-attempts the tool call (up to ``step.max_retries``).
-  4. If all retries are exhausted, returns the failure output.
+  2. Checks whether retries remain (hard cap: 2 attempts max).
+  3. Re-attempts the tool call (up to ``step.max_retries``, capped at 2).
+  4. If all retries are exhausted, returns a Turkish failure message.
 """
 
 from __future__ import annotations
@@ -22,6 +22,9 @@ logger = get_logger(__name__)
 # Backoff base delay between retries (seconds).
 _RETRY_BASE_DELAY = 2.0
 
+# Hard cap: never retry more than 2 times regardless of step.max_retries.
+_MAX_RETRY_CAP = 2
+
 
 class RecoveryEngine:
     """Execute tools with automatic retry and error analysis."""
@@ -32,14 +35,16 @@ class RecoveryEngine:
         tool_input: ToolInput,
         step: TaskStep,
     ) -> ToolOutput:
-        """Attempt to execute *tool* up to ``step.max_retries + 1`` times.
+        """Attempt to execute *tool* up to 2 times (hard cap).
 
         On each failure the engine waits with exponential backoff before
         retrying.  The ``step.retry_count`` is updated in-place.
+        After 2 consecutive failures, returns a Turkish error message.
         """
         last_output: ToolOutput | None = None
+        effective_max = min(step.max_retries, _MAX_RETRY_CAP)
 
-        for attempt in range(step.max_retries + 1):
+        for attempt in range(effective_max + 1):
             try:
                 output = await tool.execute(tool_input)
                 if output.status == ToolStatus.SUCCESS:
@@ -66,7 +71,11 @@ class RecoveryEngine:
                     logger.warning(
                         "recovery.loop_breaker_triggered",
                         tool=tool.name,
-                        reason="2_consecutive_failures",
+                        reason="2_ardisik_basarisizlik",
+                    )
+                    last_output.error = (
+                        f"[DÖNGÜ KORUMASI] {tool.name} araci 2 kez basarisiz oldu. "
+                        f"Son hata: {last_output.error}"
                     )
                     return last_output
 
@@ -90,12 +99,16 @@ class RecoveryEngine:
                     logger.warning(
                         "recovery.loop_breaker_triggered",
                         tool=tool.name,
-                        reason="2_consecutive_exceptions",
+                        reason="2_ardisik_istisna",
+                    )
+                    last_output.error = (
+                        f"[DÖNGÜ KORUMASI] {tool.name} araci 2 kez istisna firlatarak basarisiz oldu. "
+                        f"Son hata: {type(exc).__name__}: {exc}"
                     )
                     return last_output
 
             # Exponential backoff before next attempt.
-            if attempt < step.max_retries:
+            if attempt < effective_max:
                 delay = _RETRY_BASE_DELAY * (2**attempt)
                 logger.debug("recovery.backoff", delay=delay)
                 await asyncio.sleep(delay)
@@ -103,10 +116,10 @@ class RecoveryEngine:
         logger.error(
             "recovery.all_retries_exhausted",
             tool=tool.name,
-            retries=step.max_retries,
+            retries=effective_max,
         )
         return last_output or ToolOutput(
             tool_name=tool.name,
             status=ToolStatus.FAILURE,
-            error="All retries exhausted with no output",
+            error=f"[DÖNGÜ KORUMASI] {tool.name}: Tum denemeler tukendi, sonuc alinamadi.",
         )

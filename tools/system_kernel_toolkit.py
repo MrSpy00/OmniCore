@@ -87,6 +87,28 @@ class SysControlHardware(BaseTool):
             return self._failure(str(exc))
 
 
+class SysKillTaskForcefully(BaseTool):
+    name = "sys_kill_task_forcefully"
+    description = "Force-kill a process by name or PID using taskkill /F on Windows."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        target = str(
+            self._first_param(params, "name", "process", "pid", "target", "app", default="")
+        )
+        if not target:
+            return self._failure("process name or PID is required")
+        try:
+            result = await asyncio.to_thread(_force_kill, target)
+            return self._success(
+                f"Forcefully killed: {target}",
+                data={"target": target, "output": result},
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
 def _service_command(service: str, action: str) -> str:
     if action == "restart":
         subprocess.run(["sc", "stop", service], capture_output=True, text=True, timeout=15)
@@ -173,3 +195,29 @@ def _control_hardware(target: str, value: int) -> str:
         )
         return completed.stdout + completed.stderr
     raise ValueError("Unsupported hardware target")
+
+
+def _force_kill(target: str) -> str:
+    """Force-kill a process by name or PID using taskkill /F."""
+    target = target.strip()
+    # If target is numeric, treat as PID.
+    if target.isdigit():
+        completed = subprocess.run(
+            ["taskkill", "/F", "/PID", target],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    else:
+        # Ensure .exe suffix for taskkill /IM.
+        name = target if target.lower().endswith(".exe") else f"{target}.exe"
+        completed = subprocess.run(
+            ["taskkill", "/F", "/IM", name],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    output = (completed.stdout + completed.stderr).strip()
+    if completed.returncode != 0 and "not found" in output.lower():
+        raise RuntimeError(f"Process not found: {target}")
+    return output

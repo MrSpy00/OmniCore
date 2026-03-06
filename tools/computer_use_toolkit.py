@@ -143,6 +143,33 @@ class GuiExtractTextFromRegion(BaseTool):
             return self._failure(str(exc))
 
 
+class GuiLocateAndClick(BaseTool):
+    name = "gui_locate_and_click"
+    description = (
+        "Take a screenshot, use Gemini vision to locate a described UI element, "
+        "and click its center coordinates."
+    )
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        element_desc = str(
+            self._first_param(
+                params, "element", "description", "target", "text", "label", default=""
+            )
+        )
+        if not element_desc:
+            return self._failure("element description is required")
+        try:
+            result = await asyncio.to_thread(_locate_and_click_via_vision, element_desc)
+            return self._success(
+                f"Clicked element: {element_desc}",
+                data=result,
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
 def _human_type(text: str) -> None:
     for char in text:
         pyautogui.write(char)
@@ -171,3 +198,46 @@ def _capture_region(path: Path, region: dict[str, int]) -> None:
         shot = sct.grab(region)
         image = Image.frombytes("RGB", shot.size, shot.rgb)
         image.save(path)
+
+
+def _locate_and_click_via_vision(element_desc: str) -> dict[str, Any]:
+    """Screenshot the screen, ask Gemini to find the element, click its center.
+
+    Gemini is prompted to return the bounding box as JSON
+    ``{"x": <center_x>, "y": <center_y>}`` for the described element.
+    """
+    import json as _json
+    import tempfile
+
+    # Capture full screen.
+    with mss.mss() as sct:
+        monitor = sct.monitors[0]
+        shot = sct.grab(monitor)
+        img = Image.frombytes("RGB", shot.size, shot.rgb)
+
+    tmp_path = Path(tempfile.gettempdir()) / "omnicore_locate_click.png"
+    img.save(tmp_path)
+
+    prompt = (
+        f"Ekran görüntüsünde şu UI öğesini bul: '{element_desc}'. "
+        "Öğenin merkez koordinatlarını piksel cinsinden döndür. "
+        'Yanıtı YALNIZCA şu JSON formatında ver: {"x": <int>, "y": <int>}. '
+        "Başka hiçbir şey yazma."
+    )
+    raw = analyze_image_with_gemini(tmp_path, prompt)
+
+    # Parse coordinates from Gemini response.
+    # Strip markdown fences if present.
+    text = raw.strip()
+    if "```" in text:
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+
+    coords = _json.loads(text)
+    x = int(coords["x"])
+    y = int(coords["y"])
+
+    pyautogui.click(x, y)
+    return {"x": x, "y": y, "element": element_desc}

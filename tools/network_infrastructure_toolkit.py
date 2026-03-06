@@ -127,6 +127,27 @@ class NetSshExecute(BaseTool):
             return self._failure(str(exc))
 
 
+class NetWifiConnect(BaseTool):
+    name = "net_wifi_connect"
+    description = "Connect to a Wi-Fi network by SSID using netsh on Windows."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        ssid = str(self._first_param(params, "ssid", "name", "network", default=""))
+        password = str(self._first_param(params, "password", "key", "pass", default=""))
+        if not ssid:
+            return self._failure("ssid is required")
+        try:
+            result = await asyncio.to_thread(_wifi_connect, ssid, password)
+            return self._success(
+                f"Wi-Fi connection attempt for '{ssid}'",
+                data={"ssid": ssid, "output": result},
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
 def _scan_ports(host: str, ports: list[int]) -> list[int]:
     open_ports: list[int] = []
     for port in ports:
@@ -163,3 +184,68 @@ def _ssh_execute(
         }
     finally:
         client.close()
+
+
+def _wifi_connect(ssid: str, password: str) -> str:
+    """Connect to a Wi-Fi network using netsh.
+
+    If a profile for the SSID already exists, connects directly.
+    Otherwise, creates a temporary XML profile, adds it, then connects.
+    """
+    import os
+    import tempfile
+
+    # First try direct connect (profile may already exist).
+    completed = subprocess.run(
+        ["netsh", "wlan", "connect", f"name={ssid}"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if completed.returncode == 0 and "successfully" in completed.stdout.lower():
+        return completed.stdout.strip()
+
+    # Create a temporary profile XML and add it.
+    if not password:
+        raise RuntimeError(f"No existing profile for '{ssid}' and no password provided.")
+
+    auth = "WPA2PSK"
+    encryption = "AES"
+    profile_xml = f"""<?xml version="1.0"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+    <name>{ssid}</name>
+    <SSIDConfig><SSID><name>{ssid}</name></SSID></SSIDConfig>
+    <connectionType>ESS</connectionType>
+    <connectionMode>auto</connectionMode>
+    <MSM><security>
+        <authEncryption><authentication>{auth}</authentication>
+        <encryption>{encryption}</encryption><useOneX>false</useOneX></authEncryption>
+        <sharedKey><keyType>passPhrase</keyType><protected>false</protected>
+        <keyMaterial>{password}</keyMaterial></sharedKey>
+    </security></MSM>
+</WLANProfile>"""
+
+    tmp_path = os.path.join(tempfile.gettempdir(), f"omnicore_wifi_{ssid}.xml")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(profile_xml)
+
+        add_result = subprocess.run(
+            ["netsh", "wlan", "add", "profile", f"filename={tmp_path}"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if add_result.returncode != 0:
+            raise RuntimeError(f"Failed to add profile: {add_result.stderr}")
+
+        connect_result = subprocess.run(
+            ["netsh", "wlan", "connect", f"name={ssid}"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return (connect_result.stdout + connect_result.stderr).strip()
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)

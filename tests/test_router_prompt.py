@@ -17,16 +17,10 @@ def test_system_prompt_includes_hallucination_lockdown():
 
     prompt = router._build_system_prompt("memory")
 
-    assert (
-        "CRITICAL MANDATE: YOU ARE A SYSTEM KERNEL. YOU MUST NEVER HALLUCINATE OR SIMULATE DATA."
-        in prompt
-    )
-    assert "If the user asks what is on the desktop, YOU MUST EXECUTE os_list_dir." in prompt
-    assert (
-        "If the user asks you to write code, YOU MUST EXECUTE os_write_file or dev_execute_python_code."
-        in prompt
-    )
-    assert (
-        "NEVER write the code block in the chat response. IF YOU DO NOT USE A TOOL, YOU FAIL."
-        in prompt
-    )
+    # V18: System prompt is now fully in Turkish.
+    assert "SEN BİR SİSTEM ÇEKİRDEĞİSİN" in prompt
+    assert "ASLA HALÜSİNASYON YAPMA" in prompt
+    assert "os_list_dir ÇALIŞTIRMALISIN" in prompt
+    assert "HER ZAMAN TÜRKÇE YANIT VER" in prompt
+    assert "KURAL 11:" in prompt
+    assert "ARAÇ KULLANMAZSAN BAŞARISIZ OLURSUN" in prompt
