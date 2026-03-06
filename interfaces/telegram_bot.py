@@ -131,11 +131,14 @@ class TelegramGateway:
             model = self._settings.omni_llm_model
         provider = html.escape(provider)
         model = html.escape(model)
+        approval_mode = self._router._guardian.mode.value
+        auto_approve = "ON" if approval_mode == "yes" else "OFF"
         await update.message.reply_text(
             "<b>OmniCore Status</b>\n"
             f"Provider: <code>{provider}</code>\n"
             f"Model: <code>{model}</code>\n"
-            f"HITL Timeout: <code>{self._settings.hitl_timeout_minutes}m</code>",
+            f"HITL Timeout: <code>{self._settings.hitl_timeout_minutes}m</code>\n"
+            f"Auto-Approve: <code>{auto_approve}</code>",
             parse_mode=ParseMode.HTML,
         )
 
@@ -162,6 +165,10 @@ class TelegramGateway:
         user_text = update.message.text
         logger.info("telegram.message", user_id=user_id, text=user_text[:100])
 
+        if user_text.lower().startswith(".omnicore approve"):
+            await self._handle_approval_toggle(update, user_text)
+            return
+
         # Show "typing" indicator while processing.
         await update.message.chat.send_action("typing")
 
@@ -183,6 +190,28 @@ class TelegramGateway:
                 f"<b>Error:</b> {_escape_html(str(exc))}",
                 parse_mode=ParseMode.HTML,
             )
+
+    async def _handle_approval_toggle(self, update: Update, user_text: str) -> None:
+        assert update.message
+        parts = user_text.strip().split()
+        if len(parts) < 3:
+            await update.message.reply_text(
+                "Usage: <code>.omnicore approve [yes|ask]</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        mode = parts[2].strip().lower()
+        if mode not in ("yes", "ask"):
+            await update.message.reply_text(
+                "Invalid mode. Use <code>yes</code> or <code>ask</code>.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        applied = self._router._guardian.set_mode(mode)
+        await update.message.reply_text(
+            f"Approval mode set to <code>{applied.value}</code>",
+            parse_mode=ParseMode.HTML,
+        )
 
     # -- HITL approval via inline keyboard ------------------------------------
 

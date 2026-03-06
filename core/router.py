@@ -160,6 +160,8 @@ class CognitiveRouter:
             "If the user asks for IP, Ping, PC Stats, or any system info, YOU MUST RETURN A JSON PLAN "
             "CALLING THE EXACT TOOL. NEVER simulate a response. NEVER tell the user to check it themselves. "
             "EXECUTE THE TOOL AND WAIT FOR THE RESULT.\n"
+            "CRITICAL: DO NOT SAY 'I did it' WITHOUT SHOWING THE DATA. If a tool returns files, IPs, or "
+            "stats, you MUST print the actual raw data to the user. DO NOT HIDE INFORMATION.\n"
             "CRITICAL: You are running on WINDOWS 11. When using terminal_execute, you MUST use Windows CMD "
             "or PowerShell commands. DO NOT use Linux commands like whois, ls, or ~ for paths. Use C:\\ paths. "
             "To open an app like Steam, use start steam or PowerShell. Never assume Linux.\n"
@@ -297,7 +299,7 @@ class CognitiveRouter:
             f"The user asked: {user_message.content}\n\n"
             f"I executed the following steps:\n"
             + "\n".join(results_summary)
-            + "\n\nPlease write a concise summary for the user."
+            + "\n\nPlease write a concise summary for the user and include concrete raw values from the tool outputs."
         )
         summary_response = await self._llm.ainvoke([HumanMessage(content=summary_prompt)])
         summary_text = str(summary_response.content)

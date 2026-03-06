@@ -61,6 +61,15 @@ class RecoveryEngine:
                     error=output.error[:300],
                 )
 
+                # Loop-breaker: stop early after 2 consecutive failures.
+                if attempt >= 1:
+                    logger.warning(
+                        "recovery.loop_breaker_triggered",
+                        tool=tool.name,
+                        reason="2_consecutive_failures",
+                    )
+                    return last_output
+
             except Exception as exc:
                 tb = traceback.format_exc()
                 logger.error(
@@ -76,6 +85,14 @@ class RecoveryEngine:
                     error=f"{type(exc).__name__}: {exc}",
                 )
                 step.retry_count = attempt + 1
+
+                if attempt >= 1:
+                    logger.warning(
+                        "recovery.loop_breaker_triggered",
+                        tool=tool.name,
+                        reason="2_consecutive_exceptions",
+                    )
+                    return last_output
 
             # Exponential backoff before next attempt.
             if attempt < step.max_retries:

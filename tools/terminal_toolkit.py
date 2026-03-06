@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 
 from config.logging import get_logger
 from config.settings import get_settings
@@ -31,13 +32,14 @@ class TerminalExecute(BaseTool):
     is_destructive = True  # always requires HITL approval
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        command = tool_input.parameters.get("command", "")
+        params = self._params(tool_input)
+        command = str(self._first_param(params, "command", "cmd", "text", "value", default=""))
         if not command.strip():
             return self._failure("No command provided")
 
-        timeout = tool_input.parameters.get("timeout", _DEFAULT_TIMEOUT_SECONDS)
+        timeout = params.get("timeout", _DEFAULT_TIMEOUT_SECONDS)
         settings = get_settings()
-        cwd = str(settings.sandbox_root.resolve())
+        cwd = _choose_cwd(command, settings.sandbox_root.resolve())
 
         # Ensure sandbox directory exists.
         os.makedirs(cwd, exist_ok=True)
@@ -59,7 +61,7 @@ class TerminalExecute(BaseTool):
             exit_code = process.returncode or 0
 
             # Truncate very long outputs to stay within LLM context limits.
-            max_output = tool_input.parameters.get("max_output_chars", 10_000)
+            max_output = params.get("max_output_chars", 10_000)
             if len(stdout) > max_output:
                 stdout = stdout[:max_output] + f"\n... (truncated to {max_output} chars)"
             if len(stderr) > max_output:
@@ -84,3 +86,23 @@ class TerminalExecute(BaseTool):
             return self._failure(f"Command timed out after {timeout}s")
         except Exception as exc:
             return self._failure(str(exc))
+
+
+def _choose_cwd(command: str, sandbox_root: Path) -> str:
+    trimmed = command.strip().lower()
+    if _looks_global_command(trimmed):
+        return os.environ.get("USERPROFILE", "C:\\")
+    return str(sandbox_root.resolve())
+
+
+def _looks_global_command(command: str) -> bool:
+    global_prefixes = (
+        "start ",
+        "powershell",
+        "pwsh",
+        "cmd",
+        "cd ",
+        "dir",
+        "explorer",
+    )
+    return command.startswith(global_prefixes)

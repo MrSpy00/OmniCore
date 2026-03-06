@@ -42,6 +42,7 @@ from tools.advanced_os_toolkit import (
     OsKillProcess,
     OsClipboardRead,
     OsClipboardWrite,
+    OsLaunchApplication,
 )
 from tools.media_toolkit import MediaDownloadYoutubeAudio, MediaGetYoutubeTranscript
 from tools.network_toolkit import NetPing, NetGetIP
@@ -75,6 +76,12 @@ from tools.audio_record_toolkit import AudioRecordMicrophone
 from tools.web_research_toolkit import WebDeepCrawl
 from tools.steganography_toolkit import StegHideMessage, StegRevealMessage
 from tools.browser_cache_toolkit import SysClearBrowserCaches
+from tools.vision_toolkit import GuiAnalyzeScreen
+from tools.workflow_toolkit import (
+    WorkflowSetAlarm,
+    WorkflowSystemCalculator,
+    WebDeepScraper,
+)
 from core.router import CognitiveRouter
 from scheduler.pulse import AutonomousPulse
 
@@ -111,6 +118,7 @@ def _build_tool_registry() -> ToolRegistry:
         OsKillProcess,
         OsClipboardRead,
         OsClipboardWrite,
+        OsLaunchApplication,
         # Media
         MediaDownloadYoutubeAudio,
         MediaGetYoutubeTranscript,
@@ -158,6 +166,12 @@ def _build_tool_registry() -> ToolRegistry:
         StegRevealMessage,
         # Browser Cache
         SysClearBrowserCaches,
+        # Vision
+        GuiAnalyzeScreen,
+        # Workflow
+        WorkflowSetAlarm,
+        WorkflowSystemCalculator,
+        WebDeepScraper,
     ]:
         registry.register(tool_cls())
     return registry

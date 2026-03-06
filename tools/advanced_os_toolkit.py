@@ -5,6 +5,10 @@ from __future__ import annotations
 import psutil
 import pyperclip
 import asyncio
+import subprocess
+import shutil
+
+from typing import cast
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
@@ -63,10 +67,31 @@ class OsClipboardWrite(BaseTool):
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        text = tool_input.parameters.get("text", "")
+        params = self._params(tool_input)
+        text = str(self._first_param(params, "text", "content", "value", default=""))
         try:
             await asyncio.to_thread(pyperclip.copy, text)
             return self._success("Clipboard updated", data={"length": len(text)})
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class OsLaunchApplication(BaseTool):
+    name = "os_launch_application"
+    description = "Launch desktop/UWP applications on Windows (e.g., Spotify, Steam)."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        app = str(
+            self._first_param(params, "app", "application", "name", "target", "value", default="")
+        )
+        if not app:
+            return self._failure("app is required")
+
+        try:
+            await asyncio.to_thread(_launch_windows_app, app)
+            return self._success(f"Launch request sent for {app}")
         except Exception as exc:
             return self._failure(str(exc))
 
@@ -79,8 +104,8 @@ def _collect_resource_info() -> dict[str, float]:
     }
 
 
-def _top_memory_processes() -> list[dict[str, object]]:
-    processes: list[dict[str, object]] = []
+def _top_memory_processes() -> list[dict[str, int | str]]:
+    processes: list[dict[str, int | str]] = []
     for proc in psutil.process_iter(attrs=["pid", "name", "memory_info"]):
         info = proc.info
         mem = info.get("memory_info")
@@ -89,5 +114,35 @@ def _top_memory_processes() -> list[dict[str, object]]:
         name = str(info.get("name") or "")
         processes.append({"pid": pid, "name": name, "rss": rss})
 
-    processes.sort(key=lambda p: int(p["rss"]), reverse=True)
+    processes.sort(key=lambda p: int(cast(int, p["rss"])), reverse=True)
     return processes[:15]
+
+
+def _launch_windows_app(app: str) -> None:
+    app_lower = app.strip().lower()
+
+    uri_map = {
+        "spotify": "spotify:",
+        "teams": "msteams:",
+        "steam": "steam://open/main",
+    }
+    if app_lower in uri_map:
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-Command", f"Start-Process '{uri_map[app_lower]}'"],
+            shell=False,
+        )
+        return
+
+    if shutil.which(app):
+        subprocess.Popen([app], shell=False)
+        return
+
+    # Shell apps folder fallback (UWP).
+    command = (
+        "$pkg = Get-StartApps | Where-Object { $_.Name -like '*"
+        + app
+        + "*' } | Select-Object -First 1; "
+        'if ($pkg) { Start-Process "shell:AppsFolder\\$($pkg.AppID)" } '
+        "else { throw 'App not found' }"
+    )
+    subprocess.Popen(["powershell", "-NoProfile", "-Command", command], shell=False)

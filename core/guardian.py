@@ -24,6 +24,13 @@ class ApprovalResult(StrEnum):
     TIMED_OUT = "timed_out"
 
 
+class ApprovalMode(StrEnum):
+    """How Guardian handles destructive action approvals."""
+
+    ASK = "ask"
+    YES = "yes"
+
+
 class Guardian:
     """HITL approval gate for destructive actions.
 
@@ -45,6 +52,20 @@ class Guardian:
     ) -> None:
         self._timeout = timeout_minutes * 60  # convert to seconds
         self._callback = approval_callback
+        self._mode = ApprovalMode.ASK
+
+    @property
+    def mode(self) -> ApprovalMode:
+        return self._mode
+
+    def set_mode(self, mode: str) -> ApprovalMode:
+        normalized = (mode or "").strip().lower()
+        if normalized == ApprovalMode.YES.value:
+            self._mode = ApprovalMode.YES
+        else:
+            self._mode = ApprovalMode.ASK
+        logger.info("guardian.mode_updated", mode=self._mode.value)
+        return self._mode
 
     async def request_approval(
         self,
@@ -61,6 +82,15 @@ class Guardian:
 
         Returns ``ApprovalResult.TIMED_OUT`` if the timeout expires.
         """
+        if self._mode == ApprovalMode.YES:
+            logger.info(
+                "guardian.auto_approve_mode",
+                action=action_description,
+                user_id=user_id,
+                mode=self._mode.value,
+            )
+            return ApprovalResult.APPROVED
+
         if self._callback is None:
             logger.warning(
                 "guardian.auto_approve",

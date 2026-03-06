@@ -21,7 +21,7 @@ _BANNER = """
 +-------------------------------------+
 |         OmniCore - CLI Mode         |
 |  Type a message or 'quit' to exit.  |
-|  Destructive actions auto-approve.  |
+|  Use .omnicore approve yes|ask.     |
 +-------------------------------------+
 """
 
@@ -54,6 +54,9 @@ class CLIGateway:
             if user_input.lower() in ("quit", "exit", "q"):
                 print("Goodbye.")
                 break
+            if user_input.lower().startswith(".omnicore approve"):
+                await self._handle_approval_toggle(user_input)
+                continue
             if user_input.lower() == "/clear":
                 self._router._short_term.clear(conversation_id)
                 print("[System] Conversation cleared.")
@@ -73,6 +76,18 @@ class CLIGateway:
             except Exception as exc:
                 logger.error("cli.error", error=str(exc))
                 print(f"\n[Error] {exc}")
+
+    async def _handle_approval_toggle(self, user_input: str) -> None:
+        parts = user_input.strip().split()
+        if len(parts) < 3:
+            print("[System] Usage: .omnicore approve [yes|ask]")
+            return
+        mode = parts[2].strip().lower()
+        if mode not in ("yes", "ask"):
+            print("[System] Invalid mode. Use 'yes' or 'ask'.")
+            return
+        applied = self._router._guardian.set_mode(mode)
+        print(f"[System] Approval mode set to: {applied.value}")
 
 
 async def cli_approval_callback(action_description: str, user_id: str) -> ApprovalResult:
