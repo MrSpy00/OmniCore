@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import os
+import json
 import re
 from pathlib import Path
 from typing import Any, Iterable
@@ -58,7 +59,20 @@ class BaseTool(ABC):
         if isinstance(value, dict):
             return value
         if isinstance(value, str):
-            return {"value": value, "path": value, "file_path": value, "text": value}
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+            return {
+                "value": value,
+                "query": value,
+                "path": value,
+                "file_path": value,
+                "content": value,
+                "command": value,
+            }
         return {}
 
     def _first_param(self, params: dict[str, Any], *names: str, default: Any = None) -> Any:

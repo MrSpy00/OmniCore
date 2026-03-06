@@ -36,11 +36,23 @@ def _resolve_write_target(path_str: str) -> Path:
     sandbox.mkdir(parents=True, exist_ok=True)
     raw = (path_str or "").strip()
     if Path(raw).expanduser().is_absolute():
-        return Path(raw).expanduser().resolve()
+        target = Path(raw).expanduser().resolve()
+        if target.exists() and target.is_dir():
+            return target / "output_file.txt"
+        if target.suffix == "":
+            # If no filename extension is present and it points to an existing dir-like path,
+            # make it an output file target.
+            if target.exists() and target.is_dir():
+                return target / "output_file.txt"
+        return target
     target, is_cross = resolve_user_path(raw, sandbox)
     if is_cross:
         # Alias paths (Desktop/Documents/Downloads) are intentionally allowed
         # once execution reaches here (Guardian approval already happened).
+        if target.exists() and target.is_dir():
+            return target / "output_file.txt"
+        if str(raw).lower() in {"desktop", "downloads", "documents"}:
+            return target / "output_file.txt"
         return target
     return target
 

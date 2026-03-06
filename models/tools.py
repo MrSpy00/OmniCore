@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+import json
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -38,10 +39,19 @@ class ToolInput(BaseModel):
         if isinstance(value, dict):
             return value
         if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
             return {
                 "value": value,
+                "query": value,
                 "path": value,
                 "file_path": value,
+                "content": value,
+                "command": value,
                 "text": value,
             }
         return {"value": value}

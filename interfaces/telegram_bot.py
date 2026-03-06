@@ -236,49 +236,60 @@ class TelegramGateway:
     ) -> None:
         """Handle inline keyboard button presses for HITL approvals."""
         query = update.callback_query
-        assert query and query.data
-
-        logger.info(f"Button pressed: {query.data}")
-        await query.answer()
-
-        if query.from_user and not self._is_allowed(query.from_user.id):
-            logger.warning("telegram.callback_unauthorized", user_id=query.from_user.id)
-            await query.edit_message_text("Unauthorized.", parse_mode=ParseMode.HTML)
+        if query is None:
             return
+        try:
+            logger.info(f"Button pressed: {query.data}")
+            await query.answer()
 
-        parts = query.data.split(":", 1)
-        if len(parts) != 2:
-            logger.warning("telegram.callback_malformed", data=query.data)
-            return
+            if query.from_user and not self._is_allowed(query.from_user.id):
+                logger.warning("telegram.callback_unauthorized", user_id=query.from_user.id)
+                await query.edit_message_text("Unauthorized.", parse_mode=ParseMode.HTML)
+                return
 
-        action, callback_id = parts
-        future = self._pending_approvals.get(callback_id)
-        if future is None or future.done():
-            logger.warning("telegram.callback_missing_future", callback_id=callback_id)
-            await query.edit_message_text(
-                "This approval request has expired.",
-                parse_mode=ParseMode.HTML,
-            )
-            return
+            if not query.data:
+                logger.warning("telegram.callback_empty")
+                return
 
-        if action == "approve":
-            decision = ApprovalResult.APPROVED
-            await query.edit_message_text(
-                text="Action APPROVED.",
-                parse_mode=ParseMode.HTML,
-            )
-            asyncio.get_running_loop().call_soon_threadsafe(future.set_result, decision)
-        elif action == "deny":
-            decision = ApprovalResult.DENIED
-            await query.edit_message_text(
-                text="Action DENIED.",
-                parse_mode=ParseMode.HTML,
-            )
-            asyncio.get_running_loop().call_soon_threadsafe(future.set_result, decision)
-        else:
-            logger.warning(
-                "telegram.callback_unknown_action", action=action, callback_id=callback_id
-            )
+            parts = query.data.split(":", 1)
+            if len(parts) != 2:
+                logger.warning("telegram.callback_malformed", data=query.data)
+                return
+
+            action, callback_id = parts
+            future = self._pending_approvals.get(callback_id)
+            if future is None or future.done():
+                logger.warning("telegram.callback_missing_future", callback_id=callback_id)
+                await query.edit_message_text(
+                    "This approval request has expired.",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+
+            if action == "approve":
+                decision = ApprovalResult.APPROVED
+                await query.edit_message_text(
+                    text="Action APPROVED.",
+                    parse_mode=ParseMode.HTML,
+                )
+                asyncio.get_running_loop().call_soon_threadsafe(future.set_result, decision)
+            elif action == "deny":
+                decision = ApprovalResult.DENIED
+                await query.edit_message_text(
+                    text="Action DENIED.",
+                    parse_mode=ParseMode.HTML,
+                )
+                asyncio.get_running_loop().call_soon_threadsafe(future.set_result, decision)
+            else:
+                logger.warning(
+                    "telegram.callback_unknown_action", action=action, callback_id=callback_id
+                )
+        except Exception as e:
+            logger.error(f"Callback failed: {e}")
+            try:
+                await query.answer("Error processing")
+            except Exception:
+                pass
 
 
 def _chunk_text(text: str, max_len: int) -> list[str]:

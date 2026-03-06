@@ -11,6 +11,7 @@ from PIL import Image  # type: ignore[import-not-found]
 from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.base import resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
@@ -19,6 +20,20 @@ def _resolve_sandboxed(path_str: str) -> Path:
     target = (sandbox / path_str).resolve()
     if not str(target).startswith(str(sandbox)):
         raise PermissionError(f"Path '{target}' escapes sandbox root '{sandbox}'")
+    return target
+
+
+def _resolve_output_target(path_str: str) -> Path:
+    sandbox = get_settings().sandbox_root.resolve()
+    sandbox.mkdir(parents=True, exist_ok=True)
+    raw = (path_str or "").strip()
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+
+    target, is_cross = resolve_user_path(raw, sandbox)
+    if is_cross:
+        return target
     return target
 
 
@@ -98,7 +113,11 @@ class GuiTakeScreenshot(BaseTool):
             region = None
 
         try:
-            save_path = _resolve_sandboxed(str(output_path))
+            save_path = _resolve_output_target(str(output_path))
+            if save_path.exists() and save_path.is_dir():
+                save_path = save_path / "screenshot.png"
+            elif str(output_path).strip().lower() in {"desktop", "downloads", "documents"}:
+                save_path = _resolve_output_target(str(output_path)) / "screenshot.png"
             save_path.parent.mkdir(parents=True, exist_ok=True)
             with mss.mss() as sct:
                 if region:
