@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import uuid
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -31,9 +32,6 @@ from models.messages import Message, MessageRole
 
 logger = get_logger(__name__)
 
-# Pending HITL approval futures, keyed by a unique callback ID.
-_pending_approvals: dict[str, asyncio.Future[ApprovalResult]] = {}
-
 
 class TelegramGateway:
     """Async Telegram bot that bridges users to the CognitiveRouter.
@@ -48,6 +46,7 @@ class TelegramGateway:
         self._router = router
         self._settings = get_settings()
         self._app: Application | None = None
+        self._pending_approvals: dict[str, asyncio.Future[ApprovalResult]] = {}
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -148,7 +147,7 @@ class TelegramGateway:
         self._router._short_term.clear(user_id)
         await update.message.reply_text(
             "Conversation history cleared.",
-            parse_mode="HTML",
+            parse_mode=ParseMode.HTML,
         )
 
     # -- message handler -------------------------------------------------------
@@ -157,7 +156,7 @@ class TelegramGateway:
         assert update.effective_user and update.message and update.message.text
         user_id = update.effective_user.id
         if not self._is_allowed(user_id):
-            await update.message.reply_text("Unauthorized.", parse_mode="HTML")
+            await update.message.reply_text("Unauthorized.", parse_mode=ParseMode.HTML)
             return
 
         user_text = update.message.text
@@ -192,9 +191,10 @@ class TelegramGateway:
 
         This method is injected into the Guardian as the approval callback.
         """
-        callback_id = f"hitl_{id(action_description)}_{user_id}"
-        future: asyncio.Future[ApprovalResult] = asyncio.get_event_loop().create_future()
-        _pending_approvals[callback_id] = future
+        callback_id = f"hitl_{uuid.uuid4().hex}"
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[ApprovalResult] = loop.create_future()
+        self._pending_approvals[callback_id] = future
 
         keyboard = InlineKeyboardMarkup(
             [
@@ -206,21 +206,28 @@ class TelegramGateway:
         )
 
         assert self._app
-        await self._app.bot.send_message(
-            chat_id=int(user_id),
-            text=(
-                "<b>APPROVAL REQUIRED</b>\n\n"
-                f"Action: <code>{_escape_html(action_description)}</code>\n\n"
-                f"This will time out in <code>{self._settings.hitl_timeout_minutes}</code> minutes."
-            ),
-            reply_markup=keyboard,
-            parse_mode=ParseMode.HTML,
-        )
+        try:
+            await self._app.bot.send_message(
+                chat_id=int(user_id),
+                text=(
+                    "<b>APPROVAL REQUIRED</b>\n\n"
+                    f"Action: <code>{_escape_html(action_description)}</code>\n\n"
+                    f"This will time out in <code>{self._settings.hitl_timeout_minutes}</code> minutes."
+                ),
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception as exc:
+            self._pending_approvals.pop(callback_id, None)
+            logger.error("telegram.approval_send_failed", callback_id=callback_id, error=str(exc))
+            return ApprovalResult.DENIED
+
+        logger.info("telegram.approval_requested", callback_id=callback_id, user_id=user_id)
 
         try:
             result = await future
         finally:
-            _pending_approvals.pop(callback_id, None)
+            self._pending_approvals.pop(callback_id, None)
 
         return result
 
@@ -231,15 +238,23 @@ class TelegramGateway:
         query = update.callback_query
         assert query and query.data
 
+        logger.info(f"Button pressed: {query.data}")
         await query.answer()
+
+        if query.from_user and not self._is_allowed(query.from_user.id):
+            logger.warning("telegram.callback_unauthorized", user_id=query.from_user.id)
+            await query.edit_message_text("Unauthorized.", parse_mode=ParseMode.HTML)
+            return
 
         parts = query.data.split(":", 1)
         if len(parts) != 2:
+            logger.warning("telegram.callback_malformed", data=query.data)
             return
 
         action, callback_id = parts
-        future = _pending_approvals.get(callback_id)
+        future = self._pending_approvals.get(callback_id)
         if future is None or future.done():
+            logger.warning("telegram.callback_missing_future", callback_id=callback_id)
             await query.edit_message_text(
                 "This approval request has expired.",
                 parse_mode=ParseMode.HTML,
@@ -249,9 +264,13 @@ class TelegramGateway:
         if action == "approve":
             future.set_result(ApprovalResult.APPROVED)
             await query.edit_message_text("Action APPROVED.", parse_mode=ParseMode.HTML)
-        else:
+        elif action == "deny":
             future.set_result(ApprovalResult.DENIED)
             await query.edit_message_text("Action DENIED.", parse_mode=ParseMode.HTML)
+        else:
+            logger.warning(
+                "telegram.callback_unknown_action", action=action, callback_id=callback_id
+            )
 
 
 def _chunk_text(text: str, max_len: int) -> list[str]:

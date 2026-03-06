@@ -90,3 +90,11 @@ class Guardian:
                 timeout_s=self._timeout,
             )
             return ApprovalResult.TIMED_OUT
+        except Exception as exc:
+            logger.error(
+                "guardian.callback_failed",
+                action=action_description,
+                user_id=user_id,
+                error=str(exc),
+            )
+            return ApprovalResult.DENIED
