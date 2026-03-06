@@ -161,9 +161,10 @@ def _control_hardware(target: str, value: int) -> str:
         )
         return completed.stdout + completed.stderr
     if target == "volume":
-        command = (
-            f"(New-Object -ComObject WScript.Shell).SendKeys([char]175 * {max(1, value // 2)})"
-        )
+        if value <= 0:
+            command = "(new-object -com wscript.shell).SendKeys([char]173)"
+        else:
+            command = f"1..{max(1, value // 2)} | ForEach-Object {{ (New-Object -ComObject WScript.Shell).SendKeys([char]175) }}"
         completed = subprocess.run(
             ["powershell", "-NoProfile", "-Command", command],
             capture_output=True,

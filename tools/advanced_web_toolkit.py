@@ -22,7 +22,7 @@ class WebExtractAllLinks(BaseTool):
             return self._failure("url is required")
 
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
+            async with httpx.AsyncClient(timeout=20, verify=False) as client:
                 response = await client.get(url)
                 response.raise_for_status()
                 html = response.text
@@ -57,7 +57,7 @@ class WebReadMainArticle(BaseTool):
             return self._failure("url is required")
 
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
+            async with httpx.AsyncClient(timeout=20, verify=False) as client:
                 response = await client.get(url)
                 response.raise_for_status()
                 html = response.text

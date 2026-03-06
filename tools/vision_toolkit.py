@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from pathlib import Path
 
 import mss  # type: ignore[import-not-found]
 from PIL import Image  # type: ignore[import-not-found]
-from google import generativeai as genai
+from google import genai
+from google.genai import types
 
 from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
@@ -76,14 +78,14 @@ def _analyze_image_with_gemini(path: Path) -> str:
     if not settings.google_api_key:
         raise RuntimeError("GOOGLE_API_KEY is required for vision analysis")
 
-    genai.configure(api_key=settings.google_api_key)
-    model = genai.GenerativeModel(settings.omni_llm_model)
-    data = path.read_bytes()
-    response = model.generate_content(
-        [
+    client = genai.Client(api_key=settings.google_api_key)
+    encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=[
             "Read all visible text on this screen exactly. If there is no readable text, briefly describe the visible UI.",
-            {"mime_type": "image/png", "data": data},
-        ]
+            types.Part.from_bytes(data=base64.b64decode(encoded), mime_type="image/png"),
+        ],
     )
     text = getattr(response, "text", "")
     if not text:

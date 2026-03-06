@@ -7,6 +7,7 @@ import re
 import socket
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
+from typing import cast
 
 import dns.resolver
 import httpx
@@ -46,7 +47,7 @@ class WebBypassScraper(BaseTool):
         }
         try:
             async with httpx.AsyncClient(
-                timeout=20, headers=headers, follow_redirects=True
+                timeout=20, headers=headers, follow_redirects=True, verify=False
             ) as client:
                 response = await client.get(url)
                 response.raise_for_status()
@@ -69,7 +70,7 @@ class WebExtractAllEmails(BaseTool):
             url = "https://" + url
 
         try:
-            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True, verify=False) as client:
                 response = await client.get(url)
                 response.raise_for_status()
             emails = sorted(
@@ -121,13 +122,18 @@ class OsintDnsLookup(BaseTool):
 
 async def _download_images(url: str, output_dir: Path) -> list[str]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True, verify=False) as client:
         response = await client.get(url)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
-        image_urls = [
-            urljoin(url, img.get("src", "")) for img in soup.find_all("img") if img.get("src")
-        ]
+        base_url = str(url)
+        image_urls: list[str] = []
+        for img in soup.find_all("img"):
+            src = img.get("src")
+            if not src:
+                continue
+            src_str = str(src)
+            image_urls.append(urljoin(base_url, src_str))  # type: ignore[arg-type]
         saved: list[str] = []
         for index, image_url in enumerate(image_urls, start=1):
             try:

@@ -37,23 +37,24 @@ class ApiHttpRequest(BaseTool):
     )
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        url = tool_input.parameters.get("url", "")
-        method = tool_input.parameters.get("method", "GET").upper()
-        headers = tool_input.parameters.get("headers", {})
-        body = tool_input.parameters.get("body")
+        params = self._params(tool_input)
+        url = str(self._first_param(params, "url", "target", "query", default=""))
+        method = str(self._first_param(params, "method", default="GET")).upper()
+        headers = params.get("headers", {})
+        body = self._first_param(params, "body", "data", "content", default=None)
 
         if not url:
             return self._failure("No URL provided")
 
         try:
-            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, verify=False) as client:
                 if method == "POST":
                     response = await client.post(url, json=body, headers=headers)
                 else:
                     response = await client.get(url, headers=headers)
 
                 # Truncate large response bodies.
-                max_chars = tool_input.parameters.get("max_chars", 10_000)
+                max_chars = params.get("max_chars", 10_000)
                 text = response.text[:max_chars]
 
                 logger.info(
@@ -84,8 +85,9 @@ class ApiWeather(BaseTool):
     )
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        lat = tool_input.parameters.get("latitude")
-        lon = tool_input.parameters.get("longitude")
+        params = self._params(tool_input)
+        lat = self._first_param(params, "latitude", "lat")
+        lon = self._first_param(params, "longitude", "lon")
         if lat is None or lon is None:
             return self._failure("latitude and longitude are required")
 
@@ -96,7 +98,7 @@ class ApiWeather(BaseTool):
                 f"&current=temperature_2m,wind_speed_10m,relative_humidity_2m,weather_code"
                 f"&timezone=auto"
             )
-            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, verify=False) as client:
                 response = await client.get(url)
                 response.raise_for_status()
                 data = response.json()
@@ -132,7 +134,8 @@ class ApiDatetime(BaseTool):
         import zoneinfo
 
         default_tz = "Europe/Istanbul"
-        tz_name = tool_input.parameters.get("timezone") or default_tz
+        params = self._params(tool_input)
+        tz_name = self._first_param(params, "timezone", "tz", default=default_tz) or default_tz
         try:
             tz = zoneinfo.ZoneInfo(tz_name)
         except Exception:

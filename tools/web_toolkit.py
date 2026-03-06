@@ -30,6 +30,7 @@ async def _get_browser():
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
             viewport={"width": 1280, "height": 800},
+            ignore_https_errors=True,
         )
         _browser_context["playwright"] = pw
         _browser_context["browser"] = browser

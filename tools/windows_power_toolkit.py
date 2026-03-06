@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import subprocess
 
+import pyautogui
+
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
 
@@ -66,12 +68,19 @@ def _control_audio(action: str, level: object | None) -> dict[str, object]:
 
 
 def _manage_windows(action: str) -> None:
-    cmd_map = {
-        "minimize_all": "(New-Object -ComObject Shell.Application).MinimizeAll()",
-        "restore_all": "(New-Object -ComObject Shell.Application).UndoMinimizeALL()",
-        "show_desktop": "(New-Object -ComObject Shell.Application).MinimizeAll()",
-    }
-    command = cmd_map.get(action)
-    if not command:
-        raise ValueError("Unsupported action")
-    subprocess.run(["powershell", "-NoProfile", "-Command", command], check=True, timeout=10)
+    if action in {"minimize_all", "show_desktop"}:
+        pyautogui.hotkey("win", "d")
+        return
+    if action == "restore_all":
+        subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "(New-Object -ComObject Shell.Application).UndoMinimizeALL()",
+            ],
+            check=True,
+            timeout=10,
+        )
+        return
+    raise ValueError("Unsupported action")

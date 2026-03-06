@@ -1,10 +1,10 @@
-"""Communication Toolkit — email sending via SMTP."""
+"""Communication Toolkit — email drafting via default mail client."""
 
 from __future__ import annotations
 
 import asyncio
-import smtplib
-from email.message import EmailMessage
+from urllib.parse import quote
+import webbrowser
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
@@ -12,43 +12,23 @@ from tools.base import BaseTool
 
 class CommSendEmail(BaseTool):
     name = "comm_send_email"
-    description = "Send an email via SMTP."
-    is_destructive = True
+    description = "Open the default email client with a pre-filled draft."
+    is_destructive = False
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        smtp_host = tool_input.parameters.get("smtp_host", "")
-        smtp_port = int(tool_input.parameters.get("smtp_port", 587))
-        username = tool_input.parameters.get("username", "")
-        password = tool_input.parameters.get("password", "")
-        to_addr = tool_input.parameters.get("to", "")
-        subject = tool_input.parameters.get("subject", "(no subject)")
-        body = tool_input.parameters.get("body", "")
+        params = self._params(tool_input)
+        to_addr = str(self._first_param(params, "to", "recipient", "email", default=""))
+        subject = str(self._first_param(params, "subject", default="(no subject)"))
+        body = str(self._first_param(params, "body", "text", "content", default=""))
 
-        if not smtp_host or not username or not password or not to_addr:
-            return self._failure("smtp_host, username, password, and to are required")
+        if not to_addr:
+            return self._failure("recipient email is required")
 
         try:
-            msg = EmailMessage()
-            msg["From"] = username
-            msg["To"] = to_addr
-            msg["Subject"] = subject
-            msg.set_content(body)
-
-            await asyncio.to_thread(_send_email, smtp_host, smtp_port, username, password, msg)
-
-            return self._success("Email sent", data={"to": to_addr})
+            mailto = f"mailto:{quote(to_addr)}?subject={quote(subject)}&body={quote(body)}"
+            await asyncio.to_thread(webbrowser.open, mailto)
+            return self._success(
+                "Mail draft opened", data={"to": to_addr, "subject": subject, "body": body}
+            )
         except Exception as exc:
             return self._failure(str(exc))
-
-
-def _send_email(
-    smtp_host: str,
-    smtp_port: int,
-    username: str,
-    password: str,
-    msg: EmailMessage,
-) -> None:
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-        server.starttls()
-        server.login(username, password)
-        server.send_message(msg)
