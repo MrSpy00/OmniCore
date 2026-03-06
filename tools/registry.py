@@ -7,6 +7,11 @@ registry by name when it needs to dispatch a tool call.
 
 from __future__ import annotations
 
+import importlib
+import inspect
+import pkgutil
+from pathlib import Path
+
 from config.logging import get_logger
 from tools.base import BaseTool
 
@@ -64,3 +69,34 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
+
+
+def discover_tool_classes(tools_package_path: Path) -> list[type[BaseTool]]:
+    """Discover all concrete BaseTool subclasses under the tools package."""
+    discovered: list[type[BaseTool]] = []
+    package_name = "tools"
+
+    for module_info in pkgutil.iter_modules([str(tools_package_path)]):
+        module_name = module_info.name
+        if module_name in {"__init__", "base", "registry"}:
+            continue
+
+        try:
+            module = importlib.import_module(f"{package_name}.{module_name}")
+        except Exception as exc:
+            logger.error("tool_registry.import_failed", module=module_name, error=str(exc))
+            continue
+
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if obj is BaseTool:
+                continue
+            if not issubclass(obj, BaseTool):
+                continue
+            if obj.__module__ != module.__name__:
+                continue
+            if not getattr(obj, "name", ""):
+                continue
+            discovered.append(obj)
+
+    discovered.sort(key=lambda cls: cls.name)
+    return discovered

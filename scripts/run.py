@@ -23,71 +23,8 @@ from config.settings import get_settings
 from memory.short_term import ShortTermMemory
 from memory.long_term import LongTermMemory
 from memory.state import StateTracker
-from tools.registry import ToolRegistry
-from tools.os_toolkit import (
-    OsReadFile,
-    OsWriteFile,
-    OsListDir,
-    OsMoveFile,
-    OsDeleteFile,
-    OsSystemInfo,
-)
-from tools.terminal_toolkit import TerminalExecute
-from tools.web_toolkit import WebNavigate, WebSearch, WebScreenshot, shutdown_browser
-from tools.advanced_web_toolkit import WebExtractAllLinks, WebReadMainArticle
-from tools.api_toolkit import ApiHttpRequest, ApiWeather, ApiDatetime
-from tools.advanced_os_toolkit import (
-    OsResourceMonitor,
-    OsListRunningProcesses,
-    OsKillProcess,
-    OsClipboardRead,
-    OsClipboardWrite,
-    OsLaunchApplication,
-    OsGetNowPlaying,
-    OsOpenBrowserVisible,
-)
-from tools.media_toolkit import MediaDownloadYoutubeAudio, MediaGetYoutubeTranscript
-from tools.network_toolkit import NetPing, NetGetIP
-from tools.gui_automation_toolkit import (
-    GuiMouseMoveClick,
-    GuiTypeText,
-    GuiPressHotkey,
-    GuiTakeScreenshot,
-    GuiGetMousePosition,
-)
-from tools.developer_toolkit import DevExecutePythonCode, DevRunSqliteQuery
-from tools.system_optimizer_toolkit import (
-    SysCleanTempFiles,
-    SysFindLargeFiles,
-    SysFlushDnsCache,
-)
-from tools.document_toolkit import DocReadPdf
-from tools.audio_toolkit import AudioTextToSpeech
-from tools.security_toolkit import SecEncryptFile, SecDecryptFile
-from tools.communication_toolkit import CommSendEmail
-from tools.scheduler_toolkit import SchedAddDynamicReminder
-from tools.admin_toolkit import (
-    AdminExportRegistryKey,
-    AdminListStartupPrograms,
-    AdminGenerateDiskReport,
-    AdminNetworkSnapshot,
-    AdminSummarizeEventLogs,
-)
-from tools.ocr_toolkit import OcrReadImage
-from tools.audio_record_toolkit import AudioRecordMicrophone
-from tools.web_research_toolkit import WebDeepCrawl
-from tools.steganography_toolkit import StegHideMessage, StegRevealMessage
-from tools.browser_cache_toolkit import SysClearBrowserCaches
-from tools.vision_toolkit import GuiAnalyzeScreen
-from tools.workflow_toolkit import (
-    WorkflowSetAlarm,
-    WorkflowSystemCalculator,
-    WebDeepScraper,
-)
-from tools.windows_power_toolkit import OsControlAudio, OsManageWindows
-from tools.monitoring_toolkit import WebMonitorChanges, SysNetworkScanner
-from tools.archive_image_toolkit import ArchiveCreateZip, ArchiveExtractZip, ImageReadExif
-from tools.developer_extra_toolkit import DevDecodeBase64, DevFormatJson
+from tools.registry import ToolRegistry, discover_tool_classes
+from tools.web_toolkit import shutdown_browser
 from core.router import CognitiveRouter
 from scheduler.pulse import AutonomousPulse
 
@@ -96,104 +33,9 @@ logger = get_logger(__name__)
 
 
 def _build_tool_registry() -> ToolRegistry:
-    """Register all available tools."""
+    """Discover and register all available tools dynamically."""
     registry = ToolRegistry()
-    for tool_cls in [
-        # OS toolkit
-        OsReadFile,
-        OsWriteFile,
-        OsListDir,
-        OsMoveFile,
-        OsDeleteFile,
-        OsSystemInfo,
-        # Terminal
-        TerminalExecute,
-        # Web
-        WebNavigate,
-        WebSearch,
-        WebScreenshot,
-        WebExtractAllLinks,
-        WebReadMainArticle,
-        # API
-        ApiHttpRequest,
-        ApiWeather,
-        ApiDatetime,
-        # Advanced OS
-        OsResourceMonitor,
-        OsListRunningProcesses,
-        OsKillProcess,
-        OsClipboardRead,
-        OsClipboardWrite,
-        OsLaunchApplication,
-        OsGetNowPlaying,
-        OsOpenBrowserVisible,
-        # Media
-        MediaDownloadYoutubeAudio,
-        MediaGetYoutubeTranscript,
-        # Network
-        NetPing,
-        NetGetIP,
-        # GUI Automation
-        GuiMouseMoveClick,
-        GuiTypeText,
-        GuiPressHotkey,
-        GuiTakeScreenshot,
-        GuiGetMousePosition,
-        # Developer Tools
-        DevExecutePythonCode,
-        DevRunSqliteQuery,
-        # System Optimizer
-        SysCleanTempFiles,
-        SysFindLargeFiles,
-        SysFlushDnsCache,
-        # Documents
-        DocReadPdf,
-        # Audio
-        AudioTextToSpeech,
-        # Security
-        SecEncryptFile,
-        SecDecryptFile,
-        # Communication
-        CommSendEmail,
-        # Scheduler
-        SchedAddDynamicReminder,
-        # Admin
-        AdminExportRegistryKey,
-        AdminListStartupPrograms,
-        AdminGenerateDiskReport,
-        AdminNetworkSnapshot,
-        AdminSummarizeEventLogs,
-        # OCR
-        OcrReadImage,
-        # Audio Recording
-        AudioRecordMicrophone,
-        # Web Research
-        WebDeepCrawl,
-        # Steganography
-        StegHideMessage,
-        StegRevealMessage,
-        # Browser Cache
-        SysClearBrowserCaches,
-        # Vision
-        GuiAnalyzeScreen,
-        # Workflow
-        WorkflowSetAlarm,
-        WorkflowSystemCalculator,
-        WebDeepScraper,
-        # Windows Power
-        OsControlAudio,
-        OsManageWindows,
-        # Monitoring
-        WebMonitorChanges,
-        SysNetworkScanner,
-        # Archive and Image
-        ArchiveCreateZip,
-        ArchiveExtractZip,
-        ImageReadExif,
-        # Developer Extra
-        DevDecodeBase64,
-        DevFormatJson,
-    ]:
+    for tool_cls in discover_tool_classes(_PROJECT_ROOT / "tools"):
         registry.register(tool_cls())
     return registry
 
