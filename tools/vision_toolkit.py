@@ -16,6 +16,16 @@ from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
 
 
+SCREEN_ANALYSIS_PROMPT = (
+    "Read all visible text on this screen exactly. If there is no readable text, "
+    "briefly describe the visible UI."
+)
+REGION_TEXT_PROMPT = (
+    "Read all visible text in this screenshot region exactly. If there is no readable text, "
+    "briefly describe the visible UI in the region."
+)
+
+
 def _resolve_sandboxed(path_str: str) -> Path:
     sandbox = get_settings().sandbox_root.resolve()
     sandbox.mkdir(parents=True, exist_ok=True)
@@ -44,7 +54,9 @@ class GuiAnalyzeScreen(BaseTool):
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
             await asyncio.to_thread(_capture_screen, save_path, region)
-            text = await asyncio.to_thread(_analyze_image_with_gemini, save_path)
+            text = await asyncio.to_thread(
+                analyze_image_with_gemini, save_path, SCREEN_ANALYSIS_PROMPT
+            )
             max_chars = int(params.get("max_chars", 20_000))
             if len(text) > max_chars:
                 text = text[:max_chars] + "\n... (truncated)"
@@ -73,7 +85,7 @@ def _capture_screen(path: Path, region: dict | None) -> None:
         img.save(path)
 
 
-def _analyze_image_with_gemini(path: Path) -> str:
+def analyze_image_with_gemini(path: Path, prompt: str = SCREEN_ANALYSIS_PROMPT) -> str:
     settings = get_settings()
     if not settings.google_api_key:
         raise RuntimeError("GOOGLE_API_KEY is required for vision analysis")
@@ -83,7 +95,7 @@ def _analyze_image_with_gemini(path: Path) -> str:
     response = client.models.generate_content(
         model="gemini-2.0-flash",
         contents=[
-            "Read all visible text on this screen exactly. If there is no readable text, briefly describe the visible UI.",
+            prompt,
             types.Part.from_bytes(data=base64.b64decode(encoded), mime_type="image/png"),
         ],
     )

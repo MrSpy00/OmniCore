@@ -8,14 +8,13 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any, cast
 
-import cv2
 import feedparser
 import httpx
 import pandas as pd
 import pygetwindow as gw
 from PIL import Image, ImageOps, ImageStat  # type: ignore[import-not-found]
-from win10toast import ToastNotifier
 
 from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
@@ -57,10 +56,15 @@ class WebFetchRssFeed(BaseTool):
         try:
             feed = await asyncio.to_thread(feedparser.parse, url)
             entries = [
-                {"title": e.get("title", ""), "link": e.get("link", "")} for e in feed.entries[:10]
+                {
+                    "title": str(getattr(entry, "title", "") or ""),
+                    "link": str(getattr(entry, "link", "") or ""),
+                }
+                for entry in feed.entries[:10]
             ]
             return self._success(
-                "RSS feed fetched", data={"title": feed.feed.get("title", ""), "entries": entries}
+                "RSS feed fetched",
+                data={"title": str(getattr(feed.feed, "title", "") or ""), "entries": entries},
             )
         except Exception as exc:
             return self._failure(str(exc))
@@ -159,9 +163,8 @@ class DesktopSendNotification(BaseTool):
         if not message:
             return self._failure("message is required")
         try:
-            await asyncio.to_thread(
-                ToastNotifier().show_toast, title, message, duration=5, threaded=False
-            )
+            notifier = await asyncio.to_thread(_get_toast_notifier)
+            await asyncio.to_thread(notifier.show_toast, title, message, duration=5, threaded=False)
             return self._success(
                 "Desktop notification sent", data={"title": title, "message": message}
             )
@@ -329,13 +332,34 @@ class NetHttpProbe(BaseTool):
 
 
 def _read_qr(path: Path) -> list[str]:
+    try:
+        import cv2
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("img_read_qr_code requires opencv-python") from exc
+
     image = cv2.imread(str(path))
+    if image is None:
+        raise ValueError(f"Unable to read image: {path}")
     detector = cv2.QRCodeDetector()
-    found, decoded_info, _, _ = detector.detectAndDecodeMulti(image)
+    detector_multi = cast(Any, detector.detectAndDecodeMulti)
+    found, decoded_info, _, _ = detector_multi(image)
     if found:
         return [text for text in decoded_info if text]
-    single, _, _ = detector.detectAndDecode(image)
+    detector_single = cast(Any, detector.detectAndDecode)
+    single, _, _ = detector_single(image)
     return [single] if single else []
+
+
+def _get_toast_notifier():
+    try:
+        from win10toast import ToastNotifier
+    except ModuleNotFoundError as exc:
+        if exc.name == "pkg_resources":
+            raise RuntimeError(
+                "Desktop notifications require setuptools because win10toast depends on pkg_resources"
+            ) from exc
+        raise
+    return ToastNotifier()
 
 
 def _pdf_to_text(path: Path) -> str:

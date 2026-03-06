@@ -48,11 +48,18 @@ class TerminalExecute(BaseTool):
         logger.info("terminal.execute", command=command, cwd=cwd, timeout=timeout)
 
         try:
+            env = os.environ.copy()
+            env.setdefault("PYTHONIOENCODING", "utf-8")
+            env.setdefault("PYTHONUTF8", "1")
+            shell_command = command
+            if os.name == "nt":
+                shell_command = f"chcp 65001 >NUL && {command}"
             process = await asyncio.create_subprocess_shell(
-                command,
+                shell_command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
+                env=env,
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 process.communicate(), timeout=timeout

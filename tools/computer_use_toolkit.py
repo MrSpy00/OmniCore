@@ -6,16 +6,17 @@ import asyncio
 import random
 import time
 from pathlib import Path
+from typing import Any, cast
 
 import imageio.v2 as imageio
 import mss  # type: ignore[import-not-found]
 import pyautogui
 from PIL import Image  # type: ignore[import-not-found]
-import easyocr
 
 from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.vision_toolkit import REGION_TEXT_PROMPT, analyze_image_with_gemini
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
@@ -110,7 +111,7 @@ class GuiRecordScreen(BaseTool):
 
 class GuiExtractTextFromRegion(BaseTool):
     name = "gui_extract_text_from_region"
-    description = "Capture a screen region and OCR the text."
+    description = "Capture a screen region and extract text using Gemini vision."
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -126,10 +127,14 @@ class GuiExtractTextFromRegion(BaseTool):
         )
         try:
             save_path = _resolve_sandboxed(output_path)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
             await asyncio.to_thread(_capture_region, save_path, region)
-            text = await asyncio.to_thread(_easyocr_text, save_path)
+            text = await asyncio.to_thread(analyze_image_with_gemini, save_path, REGION_TEXT_PROMPT)
+            max_chars = int(self._first_param(params, "max_chars", default=20_000) or 20_000)
+            if len(text) > max_chars:
+                text = text[:max_chars] + "\n... (truncated)"
             return self._success(
-                "Region OCR completed", data={"path": str(save_path), "text": text}
+                "Region analysis completed", data={"path": str(save_path), "text": text}
             )
         except Exception as exc:
             return self._failure(str(exc))
@@ -151,22 +156,15 @@ def _record_screen(path: Path, seconds: float, fps: int) -> None:
             frames.append(Image.frombytes("RGB", shot.size, shot.rgb))
             time.sleep(1 / max(1, fps))
     with imageio.get_writer(path, fps=fps) as writer:
+        append_data = cast(Any, writer).append_data
         for frame in frames:
-            writer.append_data(frame)
+            append_data(frame)
 
 
 def _capture_region(path: Path, region: dict[str, int]) -> None:
+    if region["width"] <= 0 or region["height"] <= 0:
+        raise ValueError("width and height must be greater than zero")
     with mss.mss() as sct:
         shot = sct.grab(region)
         image = Image.frombytes("RGB", shot.size, shot.rgb)
         image.save(path)
-
-
-def _easyocr_text(path: Path) -> str:
-    reader = _get_easy_reader()
-    result = reader.readtext(str(path), detail=0, paragraph=True)
-    return "\n".join(str(line) for line in result)
-
-
-def _get_easy_reader() -> easyocr.Reader:
-    return easyocr.Reader(["en", "tr"], gpu=False)

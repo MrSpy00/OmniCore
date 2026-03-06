@@ -19,6 +19,7 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     # GUI Automation
     "pyautogui>=0.9.54",
+    "imageio>=2.37.0",
     "mss>=9.0.1",
     "pillow>=10.0.0",
     # Gateway
@@ -60,7 +61,6 @@ dependencies = [
     "httpx>=0.27.0",
     "dnspython>=2.6.1",
     "tenacity>=9.0.0",
-    "easyocr>=1.7.1",
 ]
 
 [project.scripts]
