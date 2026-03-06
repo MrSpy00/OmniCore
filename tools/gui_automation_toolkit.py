@@ -28,15 +28,16 @@ class GuiMouseMoveClick(BaseTool):
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        x = tool_input.parameters.get("x")
-        y = tool_input.parameters.get("y")
+        params = self._params(tool_input)
+        x = self._first_param(params, "x")
+        y = self._first_param(params, "y")
         if x is None or y is None:
             return self._failure("x and y are required")
 
-        click = bool(tool_input.parameters.get("click", False))
-        button = tool_input.parameters.get("button", "left")
-        clicks = int(tool_input.parameters.get("clicks", 1))
-        duration = float(tool_input.parameters.get("duration", 0.2))
+        click = bool(params.get("click", False))
+        button = params.get("button", "left")
+        clicks = int(params.get("clicks", 1))
+        duration = float(params.get("duration", 0.2))
 
         try:
             pyautogui.moveTo(int(x), int(y), duration=duration)
@@ -53,8 +54,9 @@ class GuiTypeText(BaseTool):
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        text = tool_input.parameters.get("text", "")
-        interval = float(tool_input.parameters.get("interval", 0.0))
+        params = self._params(tool_input)
+        text = str(self._first_param(params, "text", "value", default=""))
+        interval = float(params.get("interval", 0.0))
         try:
             pyautogui.write(text, interval=interval)
             return self._success(f"Typed {len(text)} characters")
@@ -68,7 +70,10 @@ class GuiPressHotkey(BaseTool):
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        keys = tool_input.parameters.get("keys", [])
+        params = self._params(tool_input)
+        keys = params.get("keys", [])
+        if isinstance(keys, str):
+            keys = [keys]
         if not keys:
             return self._failure("keys is required")
         try:
@@ -84,11 +89,16 @@ class GuiTakeScreenshot(BaseTool):
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        output_path = tool_input.parameters.get("output_path", "screenshot.png")
-        region = tool_input.parameters.get("region")
+        params = self._params(tool_input)
+        output_path = self._first_param(
+            params, "output_path", "file_path", "path", default="screenshot.png"
+        )
+        region = params.get("region")
+        if isinstance(region, str):
+            region = None
 
         try:
-            save_path = _resolve_sandboxed(output_path)
+            save_path = _resolve_sandboxed(str(output_path))
             save_path.parent.mkdir(parents=True, exist_ok=True)
             with mss.mss() as sct:
                 if region:

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ToolStatus(StrEnum):
@@ -20,8 +21,30 @@ class ToolInput(BaseModel):
     """Standardised input envelope for any tool invocation."""
 
     tool_name: str
-    parameters: dict = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(
+        default_factory=dict,
+        examples=[
+            {"path": "Desktop", "max_bytes": 1000},
+            {"file_path": "notes/todo.txt", "content": "hello"},
+        ],
+    )
     requires_approval: bool = False  # set by the guardian before execution
+
+    @field_validator("parameters", mode="before")
+    @classmethod
+    def _coerce_parameters(cls, value: Any) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            return {
+                "value": value,
+                "path": value,
+                "file_path": value,
+                "text": value,
+            }
+        return {"value": value}
 
 
 class ToolOutput(BaseModel):

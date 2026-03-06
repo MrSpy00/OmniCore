@@ -262,11 +262,19 @@ class TelegramGateway:
             return
 
         if action == "approve":
-            future.set_result(ApprovalResult.APPROVED)
-            await query.edit_message_text("Action APPROVED.", parse_mode=ParseMode.HTML)
+            decision = ApprovalResult.APPROVED
+            await query.edit_message_text(
+                text="Action APPROVED.",
+                parse_mode=ParseMode.HTML,
+            )
+            asyncio.get_running_loop().call_soon_threadsafe(future.set_result, decision)
         elif action == "deny":
-            future.set_result(ApprovalResult.DENIED)
-            await query.edit_message_text("Action DENIED.", parse_mode=ParseMode.HTML)
+            decision = ApprovalResult.DENIED
+            await query.edit_message_text(
+                text="Action DENIED.",
+                parse_mode=ParseMode.HTML,
+            )
+            asyncio.get_running_loop().call_soon_threadsafe(future.set_result, decision)
         else:
             logger.warning(
                 "telegram.callback_unknown_action", action=action, callback_id=callback_id

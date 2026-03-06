@@ -56,10 +56,14 @@ class OsReadFile(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            path = _resolve_readonly(tool_input.parameters["path"])
+            params = self._params(tool_input)
+            path_value = self._first_param(params, "file_path", "path", "value")
+            if not path_value:
+                return self._failure("path is required")
+            path = _resolve_readonly(str(path_value))
             if not path.is_file():
                 return self._failure(f"File not found: {path}")
-            max_bytes = tool_input.parameters.get("max_bytes", 1_000_000)
+            max_bytes = params.get("max_bytes", 1_000_000)
             content = await asyncio.to_thread(path.read_text, encoding="utf-8")
             content = content[:max_bytes]
             return self._success(
@@ -79,16 +83,21 @@ class OsWriteFile(BaseTool):
     is_destructive = True  # can overwrite
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
-        path = str(tool_input.parameters.get("path", ""))
+        params = self._params(tool_input)
+        path = str(self._first_param(params, "file_path", "path", "value", default=""))
         _, is_cross = _resolve_with_alias(path)
         return self.is_destructive or is_cross
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            path = _resolve_sandboxed(tool_input.parameters["path"])
-            content = tool_input.parameters["content"]
+            params = self._params(tool_input)
+            path_value = self._first_param(params, "file_path", "path", "value")
+            if not path_value:
+                return self._failure("path is required")
+            content = self._first_param(params, "content", "text", default="")
+            path = _resolve_sandboxed(str(path_value))
             path.parent.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(path.write_text, content, encoding="utf-8")
+            await asyncio.to_thread(path.write_text, str(content), encoding="utf-8")
             logger.info("os_toolkit.write_file", path=str(path), size=len(content))
             return self._success(f"Wrote {len(content)} chars to {path.name}")
         except Exception as exc:
@@ -107,7 +116,9 @@ class OsListDir(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            path = _resolve_readonly(tool_input.parameters.get("path", "."))
+            params = self._params(tool_input)
+            path_value = self._first_param(params, "path", "file_path", "value", default=".")
+            path = _resolve_readonly(str(path_value))
             if not path.is_dir():
                 return self._failure(f"Not a directory: {path}")
             entries = await asyncio.to_thread(_list_dir_entries, path)
@@ -128,16 +139,22 @@ class OsMoveFile(BaseTool):
     is_destructive = True
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
-        src = str(tool_input.parameters.get("source", ""))
-        dst = str(tool_input.parameters.get("destination", ""))
+        params = self._params(tool_input)
+        src = str(self._first_param(params, "source", "src", default=""))
+        dst = str(self._first_param(params, "destination", "dest", default=""))
         _, cross_src = _resolve_with_alias(src)
         _, cross_dst = _resolve_with_alias(dst)
         return self.is_destructive or cross_src or cross_dst
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            src = _resolve_sandboxed(tool_input.parameters["source"])
-            dst = _resolve_sandboxed(tool_input.parameters["destination"])
+            params = self._params(tool_input)
+            src_value = self._first_param(params, "source", "src")
+            dst_value = self._first_param(params, "destination", "dest")
+            if not src_value or not dst_value:
+                return self._failure("source and destination are required")
+            src = _resolve_sandboxed(str(src_value))
+            dst = _resolve_sandboxed(str(dst_value))
             if not src.exists():
                 return self._failure(f"Source not found: {src}")
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -157,13 +174,18 @@ class OsDeleteFile(BaseTool):
     is_destructive = True
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
-        path = str(tool_input.parameters.get("path", ""))
+        params = self._params(tool_input)
+        path = str(self._first_param(params, "file_path", "path", "value", default=""))
         _, is_cross = _resolve_with_alias(path)
         return self.is_destructive or is_cross
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            path = _resolve_sandboxed(tool_input.parameters["path"])
+            params = self._params(tool_input)
+            path_value = self._first_param(params, "file_path", "path", "value")
+            if not path_value:
+                return self._failure("path is required")
+            path = _resolve_sandboxed(str(path_value))
             if not path.exists():
                 return self._failure(f"Path not found: {path}")
             if path.is_dir():

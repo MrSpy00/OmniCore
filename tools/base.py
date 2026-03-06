@@ -7,7 +7,9 @@ tool without knowing its internals.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import os
 from pathlib import Path
+from typing import Any
 
 from models.tools import ToolInput, ToolOutput, ToolStatus
 
@@ -50,6 +52,21 @@ class BaseTool(ABC):
             error=error,
         )
 
+    def _params(self, tool_input: ToolInput) -> dict[str, Any]:
+        value = tool_input.parameters
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            return {"value": value, "path": value, "file_path": value, "text": value}
+        return {}
+
+    def _first_param(self, params: dict[str, Any], *names: str, default: Any = None) -> Any:
+        for name in names:
+            value = params.get(name)
+            if value not in (None, ""):
+                return value
+        return default
+
 
 def resolve_user_path(path_str: str, sandbox_root: Path) -> tuple[Path, bool]:
     """Resolve a user path to a concrete path and flag cross-boundary access.
@@ -61,11 +78,17 @@ def resolve_user_path(path_str: str, sandbox_root: Path) -> tuple[Path, bool]:
     raw = (path_str or "").strip()
     normalized = raw.replace("\\", "/")
 
-    # Smart alias: Desktop
-    if normalized.lower() == "desktop" or normalized.lower().startswith("desktop/"):
-        remainder = normalized[7:].lstrip("/")
-        target = (Path.home() / "Desktop" / remainder).resolve()
-        return target, True
+    home = os.path.expanduser("~")
+    alias_map = {
+        "desktop": os.path.join(home, "Desktop"),
+        "downloads": os.path.join(home, "Downloads"),
+        "documents": os.path.join(home, "Documents"),
+    }
+    for alias, base_path in alias_map.items():
+        if normalized.lower() == alias or normalized.lower().startswith(f"{alias}/"):
+            remainder = normalized[len(alias) :].lstrip("/")
+            target = Path(os.path.join(base_path, remainder)).resolve()
+            return target, True
 
     candidate = Path(raw).expanduser()
     if candidate.is_absolute():
