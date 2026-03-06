@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     omni_llm_model: str = "gemini-1.5-pro"
     groq_api_key: str = ""
     groq_llm_model: str = "llama-3.3-70b-versatile"
-    groq_fallback_models: str = "qwen-2.5-32b,llama-3.1-8b-instant"
+    groq_fallback_models: str = "llama-3.1-8b-instant,gemma2-9b-it"
     llm_temperature: float = 0.2
     llm_max_output_tokens: int = 4096
 

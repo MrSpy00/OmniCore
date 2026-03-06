@@ -44,6 +44,7 @@ from tools.advanced_os_toolkit import (
     OsClipboardWrite,
     OsLaunchApplication,
     OsGetNowPlaying,
+    OsOpenBrowserVisible,
 )
 from tools.media_toolkit import MediaDownloadYoutubeAudio, MediaGetYoutubeTranscript
 from tools.network_toolkit import NetPing, NetGetIP
@@ -121,6 +122,7 @@ def _build_tool_registry() -> ToolRegistry:
         OsClipboardWrite,
         OsLaunchApplication,
         OsGetNowPlaying,
+        OsOpenBrowserVisible,
         # Media
         MediaDownloadYoutubeAudio,
         MediaGetYoutubeTranscript,

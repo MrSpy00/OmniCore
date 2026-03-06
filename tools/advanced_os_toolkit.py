@@ -7,6 +7,7 @@ import pyperclip
 import asyncio
 import subprocess
 import shutil
+import webbrowser
 
 from typing import cast
 
@@ -117,6 +118,26 @@ class OsGetNowPlaying(BaseTool):
             if not result:
                 return self._failure("No active media session found")
             return self._success("Now playing detected", data=result)
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class OsOpenBrowserVisible(BaseTool):
+    name = "os_open_browser_visible"
+    description = "Open a URL in the user's real default browser in a visible tab."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        url = str(self._first_param(params, "url", "target", "query", "value", default=""))
+        if not url:
+            return self._failure("url is required")
+        if not url.startswith("http"):
+            url = "https://" + url
+
+        try:
+            await asyncio.to_thread(webbrowser.open_new_tab, url)
+            return self._success("Opened visible browser tab", data={"url": url})
         except Exception as exc:
             return self._failure(str(exc))
 

@@ -6,8 +6,8 @@ import asyncio
 from pathlib import Path
 
 import mss  # type: ignore[import-not-found]
-import pytesseract
 from PIL import Image  # type: ignore[import-not-found]
+from google import generativeai as genai
 
 from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
@@ -25,7 +25,7 @@ def _resolve_sandboxed(path_str: str) -> Path:
 
 class GuiAnalyzeScreen(BaseTool):
     name = "gui_analyze_screen"
-    description = "Take a screenshot and extract visible text via OCR."
+    description = "Take a screenshot and extract visible text using Gemini vision."
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -42,7 +42,7 @@ class GuiAnalyzeScreen(BaseTool):
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
             await asyncio.to_thread(_capture_screen, save_path, region)
-            text = await asyncio.to_thread(_ocr_image, save_path)
+            text = await asyncio.to_thread(_analyze_image_with_gemini, save_path)
             max_chars = int(params.get("max_chars", 20_000))
             if len(text) > max_chars:
                 text = text[:max_chars] + "\n... (truncated)"
@@ -71,6 +71,21 @@ def _capture_screen(path: Path, region: dict | None) -> None:
         img.save(path)
 
 
-def _ocr_image(path: Path) -> str:
-    img = Image.open(path)
-    return pytesseract.image_to_string(img)
+def _analyze_image_with_gemini(path: Path) -> str:
+    settings = get_settings()
+    if not settings.google_api_key:
+        raise RuntimeError("GOOGLE_API_KEY is required for vision analysis")
+
+    genai.configure(api_key=settings.google_api_key)
+    model = genai.GenerativeModel(settings.omni_llm_model)
+    data = path.read_bytes()
+    response = model.generate_content(
+        [
+            "Read all visible text on this screen exactly. If there is no readable text, briefly describe the visible UI.",
+            {"mime_type": "image/png", "data": data},
+        ]
+    )
+    text = getattr(response, "text", "")
+    if not text:
+        raise RuntimeError("Vision model returned empty output")
+    return text

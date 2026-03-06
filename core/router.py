@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import json
 import re
-from functools import partial
 from typing import Any, Callable, Awaitable
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
 from config.logging import get_logger
 from config.settings import get_settings
@@ -34,6 +34,11 @@ from models.tools import ToolInput
 from tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
+
+
+def _is_retryable_llm_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "429" in text or "rate limit" in text or "timeout" in text
 
 
 class CognitiveRouter:
@@ -112,6 +117,15 @@ class CognitiveRouter:
 
         raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(2),
+        wait=wait_fixed(2),
+        retry=retry_if_exception(_is_retryable_llm_error),
+    )
+    async def _ainvoke_with_retry(self, messages: list) -> Any:
+        return await self._llm.ainvoke(messages)
+
     # -- public API -----------------------------------------------------------
 
     async def handle_message(
@@ -147,7 +161,7 @@ class CognitiveRouter:
             reply = await self._execute_plan(user_message, classification, conversation_id)
         else:
             # Simple conversational reply — no tools needed.
-            response = await self._llm.ainvoke(lc_messages)
+            response = await self._ainvoke_with_retry(lc_messages)
             reply = response.content
 
         # 5. Store assistant reply in short-term memory.
@@ -175,18 +189,15 @@ class CognitiveRouter:
             for t in self._registry.list_tools()
         )
         return (
-            "You are OmniCore, an autonomous OS Kernel. YOU ARE FORBIDDEN FROM PRETENDING TO DO ACTIONS. "
-            "If the user asks for IP, Ping, PC Stats, or any system info, YOU MUST RETURN A JSON PLAN "
-            "CALLING THE EXACT TOOL. NEVER simulate a response. NEVER tell the user to check it themselves. "
-            "EXECUTE THE TOOL AND WAIT FOR THE RESULT.\n"
-            "CRITICAL: DO NOT SAY 'I did it' WITHOUT SHOWING THE DATA. If a tool returns files, IPs, or "
-            "stats, you MUST print the actual raw data to the user. DO NOT HIDE INFORMATION.\n"
-            "CRITICAL: You are running on WINDOWS 11. When using terminal_execute, you MUST use Windows CMD "
-            "or PowerShell commands. DO NOT use Linux commands like whois, ls, or ~ for paths. Use C:\\ paths. "
-            "To open an app like Steam, use start steam or PowerShell. Never assume Linux.\n"
-            "If user asks for what's on screen, use gui_analyze_screen.\n"
-            "CRITICAL RULE: DO NOT generate placeholders like [insert date here]. If you do not have data, "
-            "you MUST call a tool to get it. DO NOT output raw JSON plans directly to the user.\n\n"
+            "YOU ARE OMNICORE, AN ABSOLUTE WINDOWS 11 KERNEL. RULE 1: NEVER LIE. If a tool fails, output the exact error. "
+            "RULE 2: If the user asks to open or view a site, use os_open_browser_visible. "
+            "RULE 3: If you need to search the web for info to read yourself, use web_search. "
+            "RULE 4: If the user asks what song is playing, DO NOT HALLUCINATE. Use os_get_now_playing. "
+            "RULE 5: Your cwd is ALWAYS C:\\Users\\<Username> unless told otherwise. "
+            "RULE 6: YOU ARE FORBIDDEN FROM PRETENDING TO DO ACTIONS. If the user asks for IP, Ping, PC Stats, or any system info, you MUST return a JSON plan calling the exact tool. EXECUTE THE TOOL AND WAIT FOR THE RESULT. "
+            "RULE 7: DO NOT SAY 'I did it' WITHOUT SHOWING THE DATA. If a tool returns files, IPs, stats, or OCR text, you MUST print the actual raw data to the user. "
+            "RULE 8: If the user asks what is on the screen, use gui_analyze_screen. "
+            "RULE 9: DO NOT generate placeholders like [insert date here]. Do not output raw JSON plans directly to the user.\n\n"
             "## Available Tools\n"
             f"{tools_desc}\n\n"
             "## Relevant Memories\n"
@@ -211,7 +222,7 @@ class CognitiveRouter:
         )
         lc_messages_copy = list(lc_messages) + [HumanMessage(content=classification_prompt)]
 
-        response = await self._llm.ainvoke(lc_messages_copy)
+        response = await self._ainvoke_with_retry(lc_messages_copy)
         text = response.content.strip()
 
         # Try to parse the JSON from the LLM response.
@@ -321,7 +332,7 @@ class CognitiveRouter:
             + "\n".join(results_summary)
             + "\n\nPlease write a concise summary for the user and include concrete raw values from the tool outputs."
         )
-        summary_response = await self._llm.ainvoke([HumanMessage(content=summary_prompt)])
+        summary_response = await self._ainvoke_with_retry([HumanMessage(content=summary_prompt)])
         summary_text = str(summary_response.content)
 
         if _looks_like_json_plan(summary_text):
