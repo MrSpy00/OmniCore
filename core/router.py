@@ -84,13 +84,13 @@ class CognitiveRouter:
     def _build_llm(self, settings) -> Any:
         provider = settings.llm_provider.strip().lower()
         if provider == "groq":
+            primary_model = "llama-3.1-8b-instant"
+            fallback_models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"]
             primary = ChatGroq(
-                model=settings.groq_llm_model,
+                model=primary_model,
                 api_key=settings.groq_api_key,
                 temperature=settings.llm_temperature,
             )
-            raw_models = [m.strip() for m in settings.groq_fallback_models.split(",") if m.strip()]
-            fallback_models = [m for m in raw_models if m != settings.groq_llm_model]
             fallbacks = [
                 ChatGroq(
                     model=model_name,
@@ -102,7 +102,7 @@ class CognitiveRouter:
             if fallbacks:
                 logger.info(
                     "router.groq_fallbacks_enabled",
-                    primary=settings.groq_llm_model,
+                    primary=primary_model,
                     fallbacks=fallback_models,
                 )
                 return primary.with_fallbacks(fallbacks)
@@ -197,7 +197,8 @@ class CognitiveRouter:
             "RULE 6: YOU ARE FORBIDDEN FROM PRETENDING TO DO ACTIONS. If the user asks for IP, Ping, PC Stats, or any system info, you MUST return a JSON plan calling the exact tool. EXECUTE THE TOOL AND WAIT FOR THE RESULT. "
             "RULE 7: DO NOT SAY 'I did it' WITHOUT SHOWING THE DATA. If a tool returns files, IPs, stats, or OCR text, you MUST print the actual raw data to the user. "
             "RULE 8: If the user asks what is on the screen, use gui_analyze_screen. "
-            "RULE 9: DO NOT generate dummy marker text. Do not output raw JSON plans directly to the user.\n\n"
+            "RULE 9: IF YOU FAIL A TOOL 2 TIMES, DO NOT RETRY. Tell the user exactly what failed. "
+            "RULE 10: DO NOT generate dummy marker text. Do not output raw JSON plans directly to the user.\n\n"
             "## Available Tools\n"
             f"{tools_desc}\n\n"
             "## Relevant Memories\n"
@@ -330,7 +331,7 @@ class CognitiveRouter:
             f"The user asked: {user_message.content}\n\n"
             f"I executed the following steps:\n"
             + "\n".join(results_summary)
-            + "\n\nPlease write a concise summary for the user and include concrete raw values from the tool outputs."
+            + "\n\nPlease write a concise summary for the user and include concrete raw values from the tool outputs. If any tool failed, state the exact error."
         )
         summary_response = await self._ainvoke_with_retry([HumanMessage(content=summary_prompt)])
         summary_text = str(summary_response.content)

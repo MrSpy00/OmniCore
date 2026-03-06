@@ -115,7 +115,7 @@ def resolve_user_path(path_str: str, sandbox_root: Path) -> tuple[Path, bool]:
     raw = (path_str or "").strip()
     normalized = raw.replace("\\", "/")
 
-    home = os.path.expanduser("~")
+    home = os.environ.get("USERPROFILE", r"C:\Users\mrSpy")
     alias_map = {
         "desktop": os.path.join(home, "Desktop"),
         "downloads": os.path.join(home, "Downloads"),

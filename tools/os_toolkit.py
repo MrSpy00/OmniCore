@@ -67,7 +67,11 @@ def _resolve_readonly(path_str: str) -> Path:
     """Resolve a user path for read-only access (sandbox or alias)."""
     sandbox = get_settings().sandbox_root.resolve()
     sandbox.mkdir(parents=True, exist_ok=True)
-    target, _ = resolve_user_path(path_str, sandbox)
+    raw = (path_str or "").strip()
+    if raw in {"", "."}:
+        user_root = os.environ.get("USERPROFILE", r"C:\Users\mrSpy")
+        return Path(user_root).resolve()
+    target, _ = resolve_user_path(raw, sandbox)
     return target
 
 
