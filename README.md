@@ -188,3 +188,4 @@ OmniCore/
 
 Python 3.12 | LangChain | Google Gemini | ChromaDB | SQLite (aiosqlite) | Playwright | APScheduler | structlog | Pydantic v2 | httpx | FastAPI | python-telegram-bot v21+
 # OmniCore
+"# OmniCore" 
