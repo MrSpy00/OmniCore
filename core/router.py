@@ -15,24 +15,25 @@ import itertools
 import json
 import re
 import threading
-from typing import Any, Callable, Awaitable
-from pydantic import SecretStr
+from collections.abc import Awaitable, Callable
+from typing import Any
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from pydantic import SecretStr
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
 from config.logging import get_logger
 from config.settings import get_settings
-from core.guardian import Guardian, ApprovalResult
+from core.guardian import ApprovalResult, Guardian
 from core.planner import Planner
 from core.recovery import RecoveryEngine
-from memory.short_term import ShortTermMemory
 from memory.long_term import LongTermMemory
+from memory.short_term import ShortTermMemory
 from memory.state import StateTracker
 from models.messages import Message, MessageRole
-from models.tasks import TaskPlan, StepStatus, TaskStatus
+from models.tasks import StepStatus, TaskStatus, TaskStep
 from models.tools import ToolInput
 from tools.registry import ToolRegistry
 
@@ -341,15 +342,20 @@ class CognitiveRouter:
             for t in self._registry.list_tools()
         )
         mandated = (
-            "KRİTİK ZORUNLULUK: SEN OMNICORE ADINDA, KULLANICININ BİLGİSAYARINA TAM (ROOT) ERİŞİMİ OLAN, "
+            "KRİTİK ZORUNLULUK: SEN OMNICORE ADINDA, "
+            "KULLANICININ BİLGİSAYARINA TAM (ROOT) ERİŞİMİ OLAN, "
             "FİZİKSEL EYLEMLER YAPAN TÜRK BİR YAPAY ZEKASIN. "
             "KURAL 1: ASLA İNGİLİZCE KONUŞMA. "
-            "KURAL 2: BİR SİTEYİ AÇ VEYA VİDEO OYNAT DENİRSE, TARAYICIYI KULLANICININ GÖZÜNÜN ÖNÜNDE "
+            "KURAL 2: BİR SİTEYİ AÇ VEYA VİDEO OYNAT DENİRSE, "
+            "TARAYICIYI KULLANICININ GÖZÜ ÖNÜNDE "
             "(FOREGROUND) AÇACAKSIN! "
-            "KURAL 3: ASLA YALAN SÖYLEME VE EKSİK BİLGİ VERME. EĞER BİR DOSYAYI OKURSAN, İÇİNDEKİ YAZIYI "
+            "KURAL 3: ASLA YALAN SÖYLEME VE EKSİK BİLGİ VERME. "
+            "EĞER BİR DOSYAYI OKURSAN, İÇİNDEKİ YAZIYI "
             "BANA KELİMESİ KELİMESİNE AKTAR. "
-            "KURAL 4: KOTA HATASI (429) ALIRSAN ASLA PES ETME, DİĞER API ANAHTARINA GEÇ VE İŞLEMİ TAMAMLA! "
-            "KURAL 5: BEN BİR ŞEYİ ONAYLADIYSAM (APPROVE YES), HİÇBİR İZİN VEYA GÜVENLİK DUVARINA TAKILMADAN "
+            "KURAL 4: KOTA HATASI (429) ALIRSAN ASLA PES ETME, "
+            "DİĞER API ANAHTARINA GEÇ VE İŞLEMİ TAMAMLA! "
+            "KURAL 5: BEN BİR ŞEYİ ONAYLADIYSAM (APPROVE YES), "
+            "HİÇBİR İZİN VEYA GÜVENLİK DUVARINA TAKILMADAN "
             "O İŞLEMİ ZORLA YAPACAKSIN!"
         )
         return (
@@ -453,6 +459,15 @@ class CognitiveRouter:
             # Execute with recovery.
             output = await self._recovery.execute_with_retry(tool, tool_input, step)
 
+            if output.status.value != "success":
+                fallback_output = await self._attempt_hybrid_gui_fallback(
+                    step=step,
+                    primary_output=output,
+                    user_message=user_message,
+                )
+                if fallback_output is not None:
+                    output = fallback_output
+
             if output.status.value == "success":
                 step.status = StepStatus.COMPLETED
                 step.result = output.result
@@ -485,7 +500,9 @@ class CognitiveRouter:
             f"Kullanıcı şunu sordu: {user_message.content}\n\n"
             f"Aşağıdaki adımları yürüttüm:\n"
             + "\n".join(results_summary)
-            + "\n\nLütfen kullanıcı için kısa bir TÜRKÇE özet yaz ve araç çıktılarından somut ham değerleri dahil et. Herhangi bir araç başarısız olduysa, tam hatayı belirt."
+            + "\n\nLutfen kullanici icin kisa bir TURKCE ozet yaz "
+            "ve arac ciktilarindan somut ham degerleri dahil et. "
+            "Herhangi bir arac basarisiz olduysa, tam hatayi belirt."
         )
         summary_response = await self._ainvoke_with_retry([HumanMessage(content=summary_prompt)])
         summary_text = str(summary_response.content)
@@ -501,6 +518,103 @@ class CognitiveRouter:
             if fallback:
                 return "\n".join(fallback)
         return summary_text
+
+    async def _attempt_hybrid_gui_fallback(
+        self,
+        step: TaskStep,
+        primary_output,
+        user_message: Message,
+    ):
+        """Try CLI->GUI fallback protocol on tool failure when applicable."""
+        fallback_tool = self._registry.get("gui_autonomous_explorer")
+        if fallback_tool is None:
+            return None
+
+        if not self._settings.hybrid_fallback_enabled:
+            return None
+
+        params = step.parameters if isinstance(step.parameters, dict) else {}
+        explicit = params.get("hybrid_fallback")
+        if explicit is False:
+            return None
+
+        likely_cli = step.tool_name.startswith(("terminal_", "dev_", "net_", "web_"))
+        if explicit is not True and not likely_cli:
+            return None
+
+        error_text = str(getattr(primary_output, "error", "") or "").lower()
+        retryable = any(
+            marker in error_text
+            for marker in (
+                "timeout",
+                "timed out",
+                "permission",
+                "not found",
+                "could not",
+                "failed",
+            )
+        )
+        if explicit is not True and not retryable:
+            return None
+
+        fallback_input = ToolInput(
+            tool_name="gui_autonomous_explorer",
+            parameters={
+                "goal": (
+                    f"Primary step failed ({step.tool_name}): {step.description}. "
+                    f"Original request: {user_message.content}"
+                ),
+                "source_tool": step.tool_name,
+                "source_error": str(getattr(primary_output, "error", "") or ""),
+                "query": str(params.get("query") or params.get("url") or ""),
+                "url": str(params.get("url") or ""),
+                "max_steps": int(params.get("fallback_steps", 4) or 4),
+            },
+            requires_approval=fallback_tool.is_destructive,
+        )
+        fallback_input.parameters["max_steps"] = int(
+            params.get("fallback_steps", self._settings.hybrid_fallback_max_steps)
+            or self._settings.hybrid_fallback_max_steps
+        )
+
+        try:
+            if fallback_tool.requires_approval(fallback_input):
+                approval = await self._guardian.request_approval(
+                    action_description=(
+                        f"gui_autonomous_explorer: Fallback for failed step '{step.tool_name}'"
+                    ),
+                    user_id=user_message.user_id,
+                )
+                if approval != ApprovalResult.APPROVED:
+                    return None
+
+            fallback_output = await self._recovery.execute_with_retry(
+                fallback_tool,
+                fallback_input,
+                step,
+            )
+
+            if fallback_output.status.value == "success":
+                logger.info(
+                    "router.hybrid_fallback_success",
+                    source_tool=step.tool_name,
+                    fallback_tool="gui_autonomous_explorer",
+                )
+                return fallback_output
+
+            logger.warning(
+                "router.hybrid_fallback_failed",
+                source_tool=step.tool_name,
+                fallback_error=fallback_output.error,
+            )
+            return None
+        except Exception as exc:
+            logger.error(
+                "router.hybrid_fallback_exception",
+                source_tool=step.tool_name,
+                error=str(exc),
+            )
+            return None
 
 
 def _looks_like_json_plan(text: str) -> bool:

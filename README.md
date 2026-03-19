@@ -2,6 +2,27 @@
 
 OmniCore is a host-level AGI-style operations agent with dynamic tool loading, multi-step planning, memory, and guarded execution. It is designed to run real actions across your machine and network with minimal abstraction between intent and execution.
 
+## V24.0 Highlights (Omega Directive)
+
+- Hybrid CLI -> GUI fallback protocol added at router execution layer.
+- New advanced toolkit: `tools/omega_directive_toolkit.py`.
+- Mandatory tools added:
+  - `sys_wmi_hardware_audit`
+  - `net_packet_sniffer`
+  - `gui_autonomous_explorer`
+  - `dev_auto_debugger`
+  - `os_registry_deep_tweak`
+- Additional advanced tools added:
+  - `sys_platform_probe`
+  - `net_connection_kill_switch`
+  - `gui_foreground_guard`
+  - `dev_dependency_audit`
+  - `os_cross_root_inventory`
+- Cross-platform hardening updates:
+  - `ping` flags now OS-aware.
+  - temp cleanup and large-file scan path handling improved.
+  - Windows-only controls in `windows_power_toolkit` now guarded explicitly.
+
 ## Omni-Core Reality
 
 - Real host execution: file, process, network, and browser operations run on the real OS.
@@ -123,6 +144,8 @@ Core fields include:
 - `GROQ_PRIMARY_MODEL`, `GROQ_FALLBACK_MODEL_1`, `GROQ_FALLBACK_MODEL_2`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`
 - `HITL_TIMEOUT_MINUTES`
+- `HYBRID_FALLBACK_ENABLED`
+- `HYBRID_FALLBACK_MAX_STEPS`
 - `CHROMA_PERSIST_DIR`, `SQLITE_DB_PATH`
 - `SCHEDULER_ENABLED`, `LOG_LEVEL`
 

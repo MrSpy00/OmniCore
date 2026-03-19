@@ -7,7 +7,6 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -40,6 +39,10 @@ class Settings(BaseSettings):
     groq_fallback_models: str = "llama-3.3-70b-versatile,mixtral-8x7b-32768"
     llm_temperature: float = 0.2
     llm_max_output_tokens: int = 4096
+
+    # --- Hybrid fallback -----------------------------------------------------
+    hybrid_fallback_enabled: bool = True
+    hybrid_fallback_max_steps: int = 4
 
     @property
     def groq_api_keys(self) -> list[str]:

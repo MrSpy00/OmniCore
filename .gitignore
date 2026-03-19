@@ -39,3 +39,6 @@ Thumbs.db
 node_modules/
 __pycache__/
 *.log
+
+# Omega toolkit generated artifacts
+omnicore_packet_capture.txt

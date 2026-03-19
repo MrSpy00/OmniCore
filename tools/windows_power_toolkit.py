@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
+from typing import Any
 
 import pyautogui
 
@@ -43,31 +45,49 @@ class OsManageWindows(BaseTool):
 
 
 def _control_audio(action: str, level: object | None) -> dict[str, object]:
-    from ctypes import POINTER, cast
+    if os.name != "nt":
+        raise RuntimeError("os_control_audio is Windows-only")
+
+    level_value: float | None = None
+    try:
+        if level is not None:
+            level_value = float(str(level))
+    except Exception:
+        level_value = None
+
+    from ctypes import POINTER
+    from ctypes import cast as c_cast
 
     from comtypes import CLSCTX_ALL
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
     devices = AudioUtilities.GetSpeakers()
-    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-    volume = cast(interface, POINTER(IAudioEndpointVolume))
+    if devices is None:
+        raise RuntimeError("No default speaker endpoint found")
+    devices_any: Any = devices
+    interface = devices_any.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+    volume = c_cast(interface, POINTER(IAudioEndpointVolume))
+    volume_any: Any = volume
 
     if action == "mute":
-        volume.SetMute(1, None)
+        volume_any.SetMute(1, None)
     elif action == "unmute":
-        volume.SetMute(0, None)
+        volume_any.SetMute(0, None)
     elif action == "set":
-        if level is None:
+        if level_value is None:
             raise ValueError("level is required for set")
-        scalar = max(0.0, min(1.0, float(level) / 100.0))
-        volume.SetMasterVolumeLevelScalar(scalar, None)
+        scalar = max(0.0, min(1.0, float(level_value) / 100.0))
+        volume_any.SetMasterVolumeLevelScalar(scalar, None)
 
-    current = int(volume.GetMasterVolumeLevelScalar() * 100)
-    muted = bool(volume.GetMute())
+    current = int(volume_any.GetMasterVolumeLevelScalar() * 100)
+    muted = bool(volume_any.GetMute())
     return {"volume_percent": current, "muted": muted}
 
 
 def _manage_windows(action: str) -> None:
+    if os.name != "nt":
+        raise RuntimeError("os_manage_windows is Windows-only")
+
     if action in {"minimize_all", "show_desktop"}:
         pyautogui.hotkey("win", "d")
         return

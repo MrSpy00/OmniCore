@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import subprocess
 from pathlib import Path
-import asyncio
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
+from tools.base import BaseTool, resolve_user_path
 
 
 class SysCleanTempFiles(BaseTool):
@@ -31,7 +31,7 @@ class SysFindLargeFiles(BaseTool):
         root = tool_input.parameters.get("root", ".")
         min_mb = float(tool_input.parameters.get("min_mb", 100))
 
-        root_path = Path(root).expanduser().resolve()
+        root_path = resolve_user_path(str(root))[0]
         top = await asyncio.to_thread(_find_large_files_sync, root_path, min_mb)
         return self._success("Large files scanned", data={"files": top})
 
@@ -59,7 +59,11 @@ class SysFlushDnsCache(BaseTool):
 
 
 def _clean_temp_files_sync() -> int:
-    temp_paths = [os.getenv("TEMP", ""), r"C:\Windows\Temp"]
+    temp_paths = [os.getenv("TEMP", "")]
+    if os.name == "nt":
+        temp_paths.append(r"C:\Windows\Temp")
+    else:
+        temp_paths.append("/tmp")
     freed = 0
     for temp in temp_paths:
         if not temp:
