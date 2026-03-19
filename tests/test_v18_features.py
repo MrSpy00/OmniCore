@@ -112,6 +112,36 @@ class TestV18ToolDiscovery:
         assert tool.name == "web_play_youtube_video_visible"
         assert tool.is_destructive is True
 
+    def test_sys_force_foreground_loadable(self):
+        from tools.advanced_os_toolkit import SysForceForeground
+
+        tool = SysForceForeground()
+        assert tool.name == "sys_force_foreground"
+
+    def test_sys_get_all_installed_apps_loadable(self):
+        from tools.advanced_os_toolkit import SysGetAllInstalledApps
+
+        tool = SysGetAllInstalledApps()
+        assert tool.name == "sys_get_all_installed_apps"
+
+    def test_net_monitor_live_traffic_loadable(self):
+        from tools.network_infrastructure_toolkit import NetMonitorLiveTraffic
+
+        tool = NetMonitorLiveTraffic()
+        assert tool.name == "net_monitor_live_traffic"
+
+    def test_media_control_spotify_native_loadable(self):
+        from tools.advanced_os_toolkit import MediaControlSpotifyNative
+
+        tool = MediaControlSpotifyNative()
+        assert tool.name == "media_control_spotify_native"
+
+    def test_web_bypass_cloudflare_loadable(self):
+        from tools.deep_web_osint_toolkit import WebBypassCloudflare
+
+        tool = WebBypassCloudflare()
+        assert tool.name == "web_bypass_cloudflare"
+
 
 # ---------------------------------------------------------------------------
 # Anti-loop hardening (Turkish error messages)
@@ -156,20 +186,24 @@ class TestRecoveryAntiLoop:
 class TestTurkishPrompt:
     def test_prompt_is_turkish(self):
         from core.router import CognitiveRouter
+        from typing import Any, cast
 
         router = CognitiveRouter.__new__(CognitiveRouter)
-        router._registry = type(
-            "Registry",
-            (),
-            {
-                "list_tools": lambda self: [
-                    {"name": "test", "description": "test", "destructive": "False"}
-                ]
-            },
-        )()
+        router._registry = cast(
+            Any,
+            type(
+                "Registry",
+                (),
+                {
+                    "list_tools": lambda self: [
+                        {"name": "test", "description": "test", "destructive": "False"}
+                    ]
+                },
+            )(),
+        )
         prompt = router._build_system_prompt("")
         # Must NOT contain English mandate
         assert "CRITICAL MANDATE" not in prompt
         # Must contain Turkish
-        assert "TÜRKÇE" in prompt
-        assert "KURAL" in prompt
+        assert "OMNICORE" in prompt
+        assert "ASLA İNGİLİZCE KONUŞMA" in prompt

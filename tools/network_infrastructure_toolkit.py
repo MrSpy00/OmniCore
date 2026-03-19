@@ -6,6 +6,7 @@ import asyncio
 import ftplib
 import socket
 import subprocess
+import re
 
 import paramiko
 
@@ -148,6 +149,33 @@ class NetWifiConnect(BaseTool):
             return self._failure(str(exc))
 
 
+class NetMonitorLiveTraffic(BaseTool):
+    name = "net_monitor_live_traffic"
+    description = "Run netstat -ano and show active remote IP communications."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            completed = await asyncio.to_thread(
+                subprocess.run,
+                ["netstat", "-ano"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            raw_output = (completed.stdout or "") + (completed.stderr or "")
+            parsed = _parse_netstat_live_connections(raw_output)
+            return self._success(
+                "Live traffic snapshot collected",
+                data={
+                    "connections": parsed,
+                    "connection_count": len(parsed),
+                    "raw_output": raw_output,
+                },
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
 def _scan_ports(host: str, ports: list[int]) -> list[int]:
     open_ports: list[int] = []
     for port in ports:
@@ -249,3 +277,48 @@ def _wifi_connect(ssid: str, password: str) -> str:
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+
+
+def _parse_netstat_live_connections(raw_output: str) -> list[dict[str, str]]:
+    connections: list[dict[str, str]] = []
+    for line in raw_output.splitlines():
+        line = line.strip()
+        if not line or line.lower().startswith("proto"):
+            continue
+
+        parts = re.split(r"\s+", line)
+        if len(parts) < 4:
+            continue
+
+        proto = parts[0]
+        if proto.upper() == "TCP" and len(parts) >= 5:
+            local = parts[1]
+            remote = parts[2]
+            state = parts[3]
+            pid = parts[4]
+        elif proto.upper() == "UDP" and len(parts) >= 4:
+            local = parts[1]
+            remote = parts[2]
+            state = ""
+            pid = parts[3]
+        else:
+            continue
+
+        remote_ip = remote
+        if ":" in remote:
+            remote_ip = remote.rsplit(":", 1)[0]
+        remote_ip = remote_ip.strip("[]")
+        if remote_ip in {"0.0.0.0", "*", "::"}:
+            continue
+
+        connections.append(
+            {
+                "protocol": proto,
+                "local": local,
+                "remote": remote,
+                "remote_ip": remote_ip,
+                "state": state,
+                "pid": pid,
+            }
+        )
+    return connections

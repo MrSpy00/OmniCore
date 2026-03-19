@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     groq_api_key_1: str = ""
     groq_api_key_2: str = ""
     groq_api_key_3: str = ""
+    groq_primary_model: str = "llama-3.1-8b-instant"
+    groq_fallback_model_1: str = "llama-3.3-70b-versatile"
+    groq_fallback_model_2: str = "mixtral-8x7b-32768"
     groq_llm_model: str = "llama-3.1-8b-instant"
     groq_fallback_models: str = "llama-3.3-70b-versatile,mixtral-8x7b-32768"
     llm_temperature: float = 0.2
@@ -48,6 +51,32 @@ class Settings(BaseSettings):
         if not keys and self.groq_api_key.strip():
             keys = [self.groq_api_key.strip()]
         return keys
+
+    @property
+    def groq_model_chain(self) -> list[str]:
+        """Return ordered Groq model fallback chain.
+
+        Uses explicit env vars first (PRIMARY/FALLBACK_1/FALLBACK_2), then
+        falls back to legacy settings for backward compatibility.
+        """
+        explicit = [
+            self.groq_primary_model.strip(),
+            self.groq_fallback_model_1.strip(),
+            self.groq_fallback_model_2.strip(),
+        ]
+        chain = [m for m in explicit if m]
+
+        if not chain and self.groq_llm_model.strip():
+            chain.append(self.groq_llm_model.strip())
+
+        legacy = [m.strip() for m in self.groq_fallback_models.split(",") if m.strip()]
+        for model_name in legacy:
+            if model_name not in chain:
+                chain.append(model_name)
+
+        if not chain:
+            chain = ["llama-3.1-8b-instant"]
+        return chain
 
     # --- Telegram Gateway ----------------------------------------------------
     telegram_bot_token: str = ""

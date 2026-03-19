@@ -23,6 +23,7 @@ dependencies = [
     "imageio-ffmpeg>=0.5.1",
     "mss>=9.0.1",
     "pillow>=10.0.0",
+    "undetected-chromedriver>=3.5.5",
     # Gateway
     "python-telegram-bot[job-queue]>=21.0",
     # OS toolkit

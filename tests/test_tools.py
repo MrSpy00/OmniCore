@@ -82,6 +82,25 @@ class TestOsToolkit:
         )
         assert result.status == ToolStatus.FAILURE
 
+    @pytest.mark.asyncio
+    async def test_write_returns_raw_path_and_size(self, tmp_workspace, settings, monkeypatch):
+        monkeypatch.setenv("SANDBOX_ROOT", str(tmp_workspace))
+        monkeypatch.setenv("USERPROFILE", str(tmp_workspace))
+        from config.settings import get_settings
+
+        get_settings.cache_clear()
+
+        writer = OsWriteFile()
+        result = await writer.execute(
+            ToolInput(
+                tool_name="os_write_file",
+                parameters={"path": "raw_payload.txt", "content": "abc"},
+            )
+        )
+        assert result.status == ToolStatus.SUCCESS
+        assert "path" in result.data
+        assert "bytes_written" in result.data
+
 
 class TestApiDatetime:
     @pytest.mark.asyncio

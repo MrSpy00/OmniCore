@@ -1,4 +1,4 @@
-"""Web Toolkit — Playwright-based headless browser automation.
+"""Web Toolkit — Playwright-based visible browser automation.
 
 Provides tools for searching the web, navigating to URLs, extracting
 page content, and taking screenshots.
@@ -6,9 +6,12 @@ page content, and taking screenshots.
 
 from __future__ import annotations
 
+import asyncio
+
 from config.logging import get_logger
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.base import force_window_foreground
 from tools.base import resolve_user_path
 
 logger = get_logger(__name__)
@@ -18,12 +21,15 @@ _browser_context: dict = {}
 
 
 async def _get_browser():
-    """Lazily launch a headless Chromium browser and return a context."""
+    """Lazily launch a visible Chromium browser and return a context."""
     from playwright.async_api import async_playwright
 
     if "playwright" not in _browser_context:
         pw = await async_playwright().start()
-        browser = await pw.chromium.launch(headless=True)
+        browser = await pw.chromium.launch(
+            headless=False,
+            args=["--start-maximized"],
+        )
         context = await browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -83,9 +89,15 @@ class WebNavigate(BaseTool):
                     content = content[:max_chars] + "\n... (truncated)"
 
                 logger.info("web.navigate", url=url, title=title)
+                foreground = await asyncio.to_thread(force_window_foreground, title or url)
                 return self._success(
                     f"Loaded: {title}",
-                    data={"title": title, "url": url, "content": content},
+                    data={
+                        "title": title,
+                        "url": url,
+                        "content": content,
+                        "foreground": foreground,
+                    },
                 )
             finally:
                 await page.close()

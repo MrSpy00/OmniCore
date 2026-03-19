@@ -10,6 +10,8 @@ from abc import ABC, abstractmethod
 import os
 import json
 import re
+import subprocess
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -52,6 +54,7 @@ class BaseTool(ABC):
             tool_name=self.name,
             status=ToolStatus.FAILURE,
             error=error,
+            data={"raw_error": error},
         )
 
     def _params(self, tool_input: ToolInput) -> dict[str, Any]:
@@ -114,7 +117,7 @@ def resolve_user_path(path_str: str, sandbox_root: Path | None = None) -> tuple[
     """
     del sandbox_root
 
-    home = Path(os.environ.get("USERPROFILE") or str(Path.home())).expanduser().resolve()
+    home = _host_user_home()
     raw = (path_str or "").strip()
     if raw in {"", "."}:
         return home, False
@@ -149,3 +152,92 @@ def resolve_user_path(path_str: str, sandbox_root: Path | None = None) -> tuple[
         return candidate.resolve(), False
 
     return (home / raw).resolve(), False
+
+
+def _host_user_home() -> Path:
+    """Resolve host home, honoring USERPROFILE first for testability."""
+    userprofile = (os.environ.get("USERPROFILE") or "").strip()
+    if userprofile:
+        return Path(userprofile).expanduser().resolve()
+
+    username = (os.environ.get("USERNAME") or "").strip()
+    if username:
+        candidate = Path(f"C:/Users/{username}")
+        if candidate.exists():
+            return candidate.resolve()
+
+    if username:
+        return Path(f"C:/Users/{username}").resolve()
+
+    return Path.home().expanduser().resolve()
+
+
+def force_window_foreground(window_title: str, timeout_seconds: float = 5.0) -> dict[str, Any]:
+    """Try to bring a window matching title to absolute foreground."""
+    title_hint = (window_title or "").strip()
+    if not title_hint:
+        return {"activated": False, "method": "none", "error": "window_title is required"}
+
+    last_error = ""
+
+    try:
+        import pygetwindow as gw  # type: ignore[import-not-found]
+
+        deadline = time.time() + max(0.1, timeout_seconds)
+        while time.time() < deadline:
+            try:
+                matches = []
+                for win in gw.getAllWindows():
+                    title = str(getattr(win, "title", "") or "")
+                    if title and title_hint.lower() in title.lower():
+                        matches.append(win)
+
+                if matches:
+                    target = matches[0]
+                    matched_title = str(getattr(target, "title", "") or "")
+                    try:
+                        if bool(getattr(target, "isMinimized", False)):
+                            target.restore()
+                    except Exception:
+                        pass
+                    target.activate()
+                    time.sleep(0.15)
+                    return {
+                        "activated": True,
+                        "method": "pygetwindow",
+                        "matched_title": matched_title,
+                    }
+            except Exception as exc:
+                last_error = str(exc)
+            time.sleep(0.2)
+    except Exception as exc:
+        last_error = str(exc)
+
+    escaped = title_hint.replace("'", "''")
+    script = (
+        "$ws = New-Object -ComObject WScript.Shell; "
+        f"if ($ws.AppActivate('{escaped}')) {{ 'true' }} else {{ 'false' }}"
+    )
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        activated = "true" in (completed.stdout or "").lower()
+        return {
+            "activated": activated,
+            "method": "powershell_appactivate",
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "returncode": completed.returncode,
+            "last_error": last_error,
+        }
+    except Exception as exc:
+        return {
+            "activated": False,
+            "method": "powershell_appactivate",
+            "error": str(exc),
+            "last_error": last_error,
+        }

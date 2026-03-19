@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import socket
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 from typing import cast
@@ -116,6 +115,28 @@ class OsintDnsLookup(BaseTool):
             return self._failure(str(exc))
 
 
+class WebBypassCloudflare(BaseTool):
+    name = "web_bypass_cloudflare"
+    description = "Use undetected_chromedriver to bypass Cloudflare and fetch rendered HTML."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        url = str(self._first_param(params, "url", "target", default=""))
+        if not url:
+            return self._failure("url is required")
+        if not url.startswith("http"):
+            url = "https://" + url
+
+        wait_seconds = float(self._first_param(params, "wait_seconds", default=8) or 8)
+        max_chars = int(self._first_param(params, "max_chars", default=50000) or 50000)
+        try:
+            result = await asyncio.to_thread(_uc_fetch_page, url, wait_seconds, max_chars)
+            return self._success("Cloudflare bypass fetch completed", data=result)
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
 async def _download_images(url: str, output_dir: Path) -> list[str]:
     output_dir.mkdir(parents=True, exist_ok=True)
     async with httpx.AsyncClient(timeout=20, follow_redirects=True, verify=False) as client:
@@ -154,3 +175,30 @@ def _dns_lookup(domain: str) -> dict[str, list[str]]:
         except Exception:
             result[record_type] = []
     return result
+
+
+def _uc_fetch_page(url: str, wait_seconds: float, max_chars: int) -> dict[str, str | int]:
+    import undetected_chromedriver as uc  # type: ignore[import-not-found]
+
+    options = uc.ChromeOptions()
+    options.add_argument("--start-maximized")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    driver = uc.Chrome(options=options, use_subprocess=True)
+    try:
+        driver.get(url)
+        import time
+
+        time.sleep(max(1.0, wait_seconds))
+        html = driver.page_source or ""
+        title = driver.title or ""
+        current_url = driver.current_url or url
+        if len(html) > max_chars:
+            html = html[:max_chars]
+        return {
+            "url": current_url,
+            "title": title,
+            "html": html,
+            "html_length": len(html),
+        }
+    finally:
+        driver.quit()

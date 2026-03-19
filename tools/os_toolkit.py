@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from config.logging import get_logger
@@ -94,9 +95,32 @@ class OsWriteFile(BaseTool):
             content = self._first_param(params, "content", "text", default="")
             path = _resolve_write_target(str(path_value))
             path.parent.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(path.write_text, str(content), encoding="utf-8")
+            try:
+                await asyncio.to_thread(path.write_text, str(content), encoding="utf-8")
+            except PermissionError as exc:
+                elevation_result = await asyncio.to_thread(
+                    _attempt_windows_elevation_write,
+                    path,
+                    str(content),
+                )
+                if not elevation_result.get("ok"):
+                    return self._failure(
+                        f"Permission denied and elevation failed: {exc}; {elevation_result.get('error') or elevation_result}"
+                    )
+            if not path.exists() or not path.is_file():
+                return self._failure(f"Write verification failed: {path}")
+
+            try:
+                stat = await asyncio.to_thread(path.stat)
+                bytes_written = int(stat.st_size)
+            except Exception:
+                bytes_written = len(str(content).encode("utf-8"))
+
             logger.info("os_toolkit.write_file", path=str(path), size=len(content))
-            return self._success(f"Wrote {len(content)} chars to {path.name}")
+            return self._success(
+                f"Wrote {len(content)} chars to {path.name}",
+                data={"path": str(path), "bytes_written": bytes_written},
+            )
         except Exception as exc:
             return self._failure(str(exc))
 
@@ -233,3 +257,30 @@ def _list_dir_entries(path: Path) -> list[dict[str, object]]:
             }
         )
     return entries
+
+
+def _attempt_windows_elevation_write(path: Path, content: str) -> dict[str, object]:
+    """Attempt elevated write by relaunching python with RunAs."""
+    escaped_path = str(path).replace("'", "''")
+    escaped_content = content.replace("'", "''")
+    py_code = f"from pathlib import Path; Path(r'''{escaped_path}''').write_text(r'''{escaped_content}''', encoding='utf-8')"
+    command = (
+        "$py = (Get-Command python).Source; "
+        f"$args = @('-c', '{py_code}'); "
+        "Start-Process -FilePath $py -ArgumentList $args -Verb RunAs"
+    )
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", command],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        return {
+            "ok": completed.returncode == 0,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "returncode": completed.returncode,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}

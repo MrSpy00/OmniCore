@@ -16,6 +16,7 @@ import json
 import re
 import threading
 from typing import Any, Callable, Awaitable
+from pydantic import SecretStr
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
@@ -60,6 +61,10 @@ class _GroqKeyRotator:
     def current(self) -> str:
         return self._current
 
+    @property
+    def first(self) -> str:
+        return self._keys[0]
+
     def next_key(self) -> str:
         with self._lock:
             self._current = next(self._cycle)
@@ -67,6 +72,29 @@ class _GroqKeyRotator:
 
     def __len__(self) -> int:
         return len(self._keys)
+
+
+class _GroqModelRotator:
+    """Thread-safe round-robin Groq model selector."""
+
+    def __init__(self, models: list[str]) -> None:
+        self._models = [m for m in models if m] or ["llama-3.1-8b-instant"]
+        self._cycle = itertools.cycle(self._models)
+        self._lock = threading.Lock()
+        self._current: str = ""
+        self.next_model()
+
+    @property
+    def current(self) -> str:
+        return self._current
+
+    def next_model(self) -> str:
+        with self._lock:
+            self._current = next(self._cycle)
+        return self._current
+
+    def __len__(self) -> int:
+        return len(self._models)
 
 
 def _is_retryable_llm_error(exc: BaseException) -> bool:
@@ -107,6 +135,7 @@ class CognitiveRouter:
 
         settings = get_settings()
         self._key_rotator: _GroqKeyRotator | None = None
+        self._model_rotator: _GroqModelRotator | None = None
         self._settings = settings
         self._llm = self._build_llm(settings)
         self._planner = Planner(self._llm)
@@ -122,32 +151,28 @@ class CognitiveRouter:
             api_keys = settings.groq_api_keys
             if not api_keys:
                 api_keys = [settings.groq_api_key or ""]
-            self._key_rotator = _GroqKeyRotator(api_keys)
+            models = settings.groq_model_chain
 
-            primary_model = "llama-3.1-8b-instant"
-            fallback_models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"]
-            primary = ChatGroq(
-                model=primary_model,
-                api_key=self._key_rotator.current,
+            if self._key_rotator is None:
+                self._key_rotator = _GroqKeyRotator(api_keys)
+            if self._model_rotator is None:
+                self._model_rotator = _GroqModelRotator(models)
+
+            active_key = self._key_rotator.current
+            active_model = self._model_rotator.current
+
+            logger.info(
+                "router.groq_active_route",
+                model=active_model,
+                key_suffix=f"...{active_key[-6:]}" if active_key else "<empty>",
+                key_pool=len(api_keys),
+                model_pool=len(models),
+            )
+            return ChatGroq(
+                model=active_model,
+                api_key=SecretStr(active_key) if active_key else None,
                 temperature=settings.llm_temperature,
             )
-            fallbacks = [
-                ChatGroq(
-                    model=model_name,
-                    api_key=self._key_rotator.current,
-                    temperature=settings.llm_temperature,
-                )
-                for model_name in fallback_models
-            ]
-            if fallbacks:
-                logger.info(
-                    "router.groq_fallbacks_enabled",
-                    primary=primary_model,
-                    fallbacks=fallback_models,
-                    num_api_keys=len(api_keys),
-                )
-                return primary.with_fallbacks(fallbacks)
-            return primary
         if provider in ("", "gemini"):
             return ChatGoogleGenerativeAI(
                 model=settings.omni_llm_model,
@@ -158,17 +183,50 @@ class CognitiveRouter:
 
         raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
-    def _rotate_groq_key_and_rebuild(self) -> None:
-        """Rotate to the next Groq API key and rebuild the LLM chain."""
-        if self._key_rotator and len(self._key_rotator) > 1:
-            old_key = self._key_rotator.current[-6:]
-            new_key_full = self._key_rotator.next_key()
-            logger.warning(
-                "router.groq_key_rotated",
-                old_suffix=f"...{old_key}",
-                new_suffix=f"...{new_key_full[-6:]}",
-            )
-            self._llm = self._build_llm(self._settings)
+    def _create_groq_client(self, api_key: str, model_name: str) -> Any:
+        """Create a fresh ChatGroq instance for the given route."""
+        return ChatGroq(
+            model=model_name,
+            api_key=SecretStr(api_key) if api_key else None,
+            temperature=self._settings.llm_temperature,
+        )
+
+    def _destroy_current_llm(self) -> None:
+        """Release current LLM client reference before hard re-instantiation."""
+        self._llm = None
+
+    def _rotate_groq_route_and_rebuild(self) -> None:
+        """Rotate to next Groq key+model route and rebuild LLM."""
+        if self._key_rotator is None or self._model_rotator is None:
+            return
+
+        old_key = self._key_rotator.current
+        old_model = self._model_rotator.current
+
+        # Step key every retry; when key wraps to first entry, step model once.
+        prev_key = self._key_rotator.current
+        new_key = self._key_rotator.next_key()
+        wrapped = (
+            len(self._key_rotator) > 1
+            and new_key == self._key_rotator.first
+            and prev_key != new_key
+        )
+        if len(self._key_rotator) == 1:
+            wrapped = True
+
+        if wrapped:
+            self._model_rotator.next_model()
+
+        logger.warning(
+            "router.groq_route_rotated",
+            old_model=old_model,
+            new_model=self._model_rotator.current,
+            old_key_suffix=f"...{old_key[-6:]}" if old_key else "<empty>",
+            new_key_suffix=f"...{self._key_rotator.current[-6:]}"
+            if self._key_rotator.current
+            else "<empty>",
+        )
+        self._llm = self._build_llm(self._settings)
 
     @retry(
         reraise=True,
@@ -178,10 +236,46 @@ class CognitiveRouter:
     )
     async def _ainvoke_with_retry(self, messages: list) -> Any:
         try:
+            if self._llm is None:
+                self._llm = self._build_llm(self._settings)
             return await self._llm.ainvoke(messages)
         except Exception as exc:
             if _is_retryable_llm_error(exc):
-                self._rotate_groq_key_and_rebuild()
+                if (
+                    self._settings.llm_provider.strip().lower() == "groq"
+                    and self._key_rotator is not None
+                    and self._model_rotator is not None
+                ):
+                    # Hard reset path: destroy client, rotate route, and instantiate fresh.
+                    old_key = self._key_rotator.current
+                    old_model = self._model_rotator.current
+
+                    self._destroy_current_llm()
+
+                    prev_key = self._key_rotator.current
+                    new_key = self._key_rotator.next_key()
+                    wrapped = (
+                        len(self._key_rotator) > 1
+                        and new_key == self._key_rotator.first
+                        and prev_key != new_key
+                    )
+                    if len(self._key_rotator) == 1:
+                        wrapped = True
+                    if wrapped:
+                        self._model_rotator.next_model()
+
+                    new_model = self._model_rotator.current
+                    self._llm = self._create_groq_client(new_key, new_model)
+
+                    logger.warning(
+                        "router.groq_hard_reinstantiated",
+                        old_model=old_model,
+                        new_model=new_model,
+                        old_key_suffix=f"...{old_key[-6:]}" if old_key else "<empty>",
+                        new_key_suffix=f"...{new_key[-6:]}" if new_key else "<empty>",
+                    )
+                else:
+                    self._rotate_groq_route_and_rebuild()
             raise
 
     # -- public API -----------------------------------------------------------
@@ -246,36 +340,30 @@ class CognitiveRouter:
             f"- {t['name']}: {t['description']} (yikici={t['destructive']})"
             for t in self._registry.list_tools()
         )
+        mandated = (
+            "KRİTİK ZORUNLULUK: SEN OMNICORE ADINDA, KULLANICININ BİLGİSAYARINA TAM (ROOT) ERİŞİMİ OLAN, "
+            "FİZİKSEL EYLEMLER YAPAN TÜRK BİR YAPAY ZEKASIN. "
+            "KURAL 1: ASLA İNGİLİZCE KONUŞMA. "
+            "KURAL 2: BİR SİTEYİ AÇ VEYA VİDEO OYNAT DENİRSE, TARAYICIYI KULLANICININ GÖZÜNÜN ÖNÜNDE "
+            "(FOREGROUND) AÇACAKSIN! "
+            "KURAL 3: ASLA YALAN SÖYLEME VE EKSİK BİLGİ VERME. EĞER BİR DOSYAYI OKURSAN, İÇİNDEKİ YAZIYI "
+            "BANA KELİMESİ KELİMESİNE AKTAR. "
+            "KURAL 4: KOTA HATASI (429) ALIRSAN ASLA PES ETME, DİĞER API ANAHTARINA GEÇ VE İŞLEMİ TAMAMLA! "
+            "KURAL 5: BEN BİR ŞEYİ ONAYLADIYSAM (APPROVE YES), HİÇBİR İZİN VEYA GÜVENLİK DUVARINA TAKILMADAN "
+            "O İŞLEMİ ZORLA YAPACAKSIN!"
+        )
         return (
-            "KRİTİK ZORUNLULUK: SEN BİR SİSTEM ÇEKİRDEĞİSİN. ASLA HALÜSİNASYON YAPMA VEYA VERİ UYDURMA. "
-            "HER ZAMAN TÜRKÇE YANIT VER. İNGİLİZCE KONUŞMA YASAKTIR. "
-            "Kullanıcı masaüstünde ne var diye sorarsa, os_list_dir ÇALIŞTIRMALISIN. Asla dosya adı uydurma. "
-            "Kullanıcı kod yazmanı isterse, os_write_file veya dev_execute_python_code ÇALIŞTIRMALISIN. "
-            "Asla kod bloğunu sohbet yanıtında yazma. ARAÇ KULLANMAZSAN BAŞARISIZ OLURSUN. "
-            "SEN OMNICORE'SUN. HALÜSİNASYONLARA SIFIR TOLERANSIN VAR. "
-            "KURAL 1: Bir araç hata döndürürse, kullanıcıya BAŞARISIZ OLDUĞUNU SÖYLEMELİSİN. Başarılıymış gibi davranma. "
-            "KURAL 2: Veri bulmak için araç kullandıysan (IP, WHOIS, dosyalar, şarkı adları, OCR metni), aracın döndürdüğü HAM VERİYİ AYNEN YAZDIRMALISIN. "
-            "KURAL 3: Windows üzerinde çalışıyorsun. Asla Linux yolları varsayma. "
-            "KURAL 4: Kullanıcı bir siteyi açmak veya görüntülemek isterse, os_open_browser_visible kullan. "
-            "KURAL 5: Kullanıcı YouTube'da VİDEO OYNATMAK veya ŞARKI AÇMAK isterse, os_open_browser_visible veya web_play_youtube_video_visible KULLANMALISIN. api_http_request KULLANMA. Fiziksel açma zorunludur. "
-            "KURAL 6: Kendin bilgi aramak istersen, web_search kullan. "
-            "KURAL 7: Kullanıcı hangi şarkı çalıyor diye sorarsa, HALÜSİNASYON YAPMA. os_get_now_playing kullan. "
-            "KURAL 8: Göreli yollar gerçek Windows kullanıcı profil dizininden çözümlenir. Asla yer tutucu kullanıcı adı kullanma. "
-            "KURAL 9: Kullanıcı IP, Ping, PC Bilgisi veya herhangi bir sistem bilgisi isterse, ilgili aracı çağıran bir JSON planı döndürmelisin. "
-            "KURAL 10: Kullanıcı ekranda ne var diye sorarsa, gui_analyze_screen kullan. "
-            "KURAL 11: BİR ARACI 2 KEZ BAŞARISIZ OLURSA, TEKRAR DENEME. Kullanıcıya tam olarak neyin başarısız olduğunu söyle. "
-            "KURAL 12: Sahte işaretçi metin üretme. Ham JSON planlarını doğrudan kullanıcıya gösterme.\n\n"
+            f"{mandated}\n\n"
             "## Kullanılabilir Araçlar\n"
             f"{tools_desc}\n\n"
             "## İlgili Hatıralar\n"
             f"{memory_context or '(yok)'}\n\n"
             "## Talimatlar\n"
-            "Kullanıcı herhangi bir sistem verisi veya eylem istediğinde, YALNIZCA bir JSON planıyla yanıt ver.\n"
-            "Asla 'görev yöneticisini aç' gibi genel tavsiyeler verme — araçları kullan.\n"
+            "Kullanıcı sistem verisi veya eylem istediğinde JSON plan üret.\n"
+            "Araç çıktısındaki ham veriyi eksiksiz aktar.\n"
             '```json\n{"needs_plan": true, "steps": [{"tool": "<arac_adi>", "description": "...", '
             '"parameters": {...}, "destructive": true/false}]}\n```\n'
-            "Yalnızca hiçbir araç yardımcı olamayacağı zaman konuşma tarzında yanıt ver.\n"
-            "Her zaman kısa, öz ve yardımcı ol. HER ZAMAN TÜRKÇE YANIT VER."
+            "Araçlar yetersizse kısa Türkçe açıklama yap."
         )
 
     async def _classify_intent(self, user_text: str, lc_messages: list) -> dict[str, Any]:

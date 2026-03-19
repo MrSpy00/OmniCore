@@ -110,6 +110,7 @@ class ApiWeather(BaseTool):
                     "humidity_percent": current.get("relative_humidity_2m"),
                     "weather_code": current.get("weather_code"),
                     "timezone": data.get("timezone"),
+                    "raw_response": data,
                 }
                 summary = (
                     f"{weather['temperature_c']}°C, "
@@ -147,12 +148,13 @@ class ApiDatetime(BaseTool):
                 tz_name = "UTC"
 
         now = datetime.now(tz)
+        raw_data = {
+            "iso": now.isoformat(),
+            "timezone": tz_name,
+            "date": now.strftime("%Y-%m-%d"),
+            "time": now.strftime("%H:%M:%S"),
+        }
         return self._success(
             now.strftime("%Y-%m-%d %H:%M:%S %Z"),
-            data={
-                "iso": now.isoformat(),
-                "timezone": tz_name,
-                "date": now.strftime("%Y-%m-%d"),
-                "time": now.strftime("%H:%M:%S"),
-            },
+            data={**raw_data, "raw_data": raw_data},
         )

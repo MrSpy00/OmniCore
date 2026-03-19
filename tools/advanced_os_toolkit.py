@@ -14,6 +14,7 @@ from typing import cast
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.base import force_window_foreground
 
 
 class OsResourceMonitor(BaseTool):
@@ -103,7 +104,11 @@ class OsLaunchApplication(BaseTool):
 
         try:
             await asyncio.to_thread(_launch_windows_app, app)
-            return self._success(f"Launch request sent for {app}")
+            foreground = await asyncio.to_thread(force_window_foreground, app)
+            return self._success(
+                f"Launch request sent for {app}",
+                data={"app": app, "foreground": foreground},
+            )
         except Exception as exc:
             return self._failure(str(exc))
 
@@ -231,7 +236,8 @@ class WebPlayYoutubeVideoVisible(BaseTool):
             url = query if query.startswith("http") else f"https://{query}"
             try:
                 await asyncio.to_thread(webbrowser.open_new_tab, url)
-                return self._success("Opened YouTube video", data={"url": url})
+                fg = await asyncio.to_thread(force_window_foreground, "YouTube")
+                return self._success("Opened YouTube video", data={"url": url, "foreground": fg})
             except Exception as exc:
                 return self._failure(str(exc))
 
@@ -243,12 +249,162 @@ class WebPlayYoutubeVideoVisible(BaseTool):
         )
         try:
             await asyncio.to_thread(webbrowser.open_new_tab, search_url)
+            fg = await asyncio.to_thread(force_window_foreground, "YouTube")
             return self._success(
                 f"Opened YouTube search for '{query}'",
-                data={"url": search_url, "query": query},
+                data={"url": search_url, "query": query, "foreground": fg},
             )
         except Exception as exc:
             return self._failure(str(exc))
+
+
+class SysForceForeground(BaseTool):
+    name = "sys_force_foreground"
+    description = "Find a window by title and force it to foreground."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        title = str(
+            self._first_param(params, "window_title", "title", "name", "target", default="")
+        )
+        if not title:
+            return self._failure("window_title is required")
+        try:
+            result = await asyncio.to_thread(force_window_foreground, title)
+            if not result.get("activated"):
+                return self._failure(
+                    f"Window activation failed for '{title}': {result.get('stderr') or result.get('error') or result}"
+                )
+            return self._success("Window forced to foreground", data=result)
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class SysGetAllInstalledApps(BaseTool):
+    name = "sys_get_all_installed_apps"
+    description = "List installed apps by querying Windows Uninstall registry keys."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            apps = await asyncio.to_thread(_list_installed_apps_from_registry)
+            return self._success(
+                f"Installed apps listed ({len(apps)} entries)",
+                data={"count": len(apps), "apps": apps},
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class MediaControlSpotifyNative(BaseTool):
+    name = "media_control_spotify_native"
+    description = "Control active Spotify/media session (play, pause, next, previous)."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        action = str(self._first_param(params, "action", "command", default="pause")).lower()
+        try:
+            result = await asyncio.to_thread(_media_control_native, action)
+            return self._success(f"Media control action completed: {action}", data=result)
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+def _list_installed_apps_from_registry() -> list[dict[str, str]]:
+    import winreg
+
+    uninstall_keys = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ]
+    apps: list[dict[str, str]] = []
+
+    for hive, base in uninstall_keys:
+        try:
+            with winreg.OpenKey(hive, base) as key:
+                subkey_count = winreg.QueryInfoKey(key)[0]
+                for i in range(subkey_count):
+                    try:
+                        sub_name = winreg.EnumKey(key, i)
+                        with winreg.OpenKey(key, sub_name) as app_key:
+                            display_name = _reg_query_str(app_key, "DisplayName")
+                            if not display_name:
+                                continue
+                            apps.append(
+                                {
+                                    "name": display_name,
+                                    "version": _reg_query_str(app_key, "DisplayVersion"),
+                                    "publisher": _reg_query_str(app_key, "Publisher"),
+                                    "install_location": _reg_query_str(app_key, "InstallLocation"),
+                                    "uninstall_string": _reg_query_str(app_key, "UninstallString"),
+                                }
+                            )
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+
+    dedup: dict[str, dict[str, str]] = {}
+    for app in apps:
+        name = app.get("name", "")
+        if not name:
+            continue
+        dedup.setdefault(name, app)
+    return sorted(dedup.values(), key=lambda a: a.get("name", "").lower())
+
+
+def _reg_query_str(key, value_name: str) -> str:
+    import winreg
+
+    try:
+        value, _ = winreg.QueryValueEx(key, value_name)
+        return str(value)
+    except OSError:
+        return ""
+
+
+def _media_control_native(action: str) -> dict[str, str]:
+    normalized = action.strip().lower()
+    if normalized not in {"play", "pause", "next", "previous", "prev", "toggle"}:
+        raise ValueError("Unsupported action. Use play|pause|next|previous|toggle")
+
+    key_map = {
+        "play": "[char]179",
+        "pause": "[char]179",
+        "toggle": "[char]179",
+        "next": "[char]176",
+        "previous": "[char]177",
+        "prev": "[char]177",
+    }
+    # Primary: media key via WScript (works for active media transport session including Spotify).
+    ps = f"$ws = New-Object -ComObject WScript.Shell; $ws.SendKeys({key_map[normalized]}); 'ok'"
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError((completed.stderr or completed.stdout or "media control failed").strip())
+
+    # Optional pycaw touch: ensure endpoint device is reachable for native session context.
+    try:
+        from pycaw.pycaw import AudioUtilities  # type: ignore[import-not-found]
+
+        _ = AudioUtilities.GetAllSessions()
+    except Exception:
+        pass
+
+    return {
+        "action": normalized,
+        "stdout": (completed.stdout or "").strip(),
+        "stderr": (completed.stderr or "").strip(),
+    }
 
 
 def _collect_resource_info() -> dict[str, float]:

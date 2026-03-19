@@ -28,7 +28,13 @@ class CommSendEmail(BaseTool):
             mailto = f"mailto:{quote(to_addr)}?subject={quote(subject)}&body={quote(body)}"
             await asyncio.to_thread(webbrowser.open, mailto)
             return self._success(
-                "Mail draft opened", data={"to": to_addr, "subject": subject, "body": body}
+                "Mail draft opened",
+                data={
+                    "to": to_addr,
+                    "subject": subject,
+                    "body": body,
+                    "mailto_url": mailto,
+                },
             )
         except Exception as exc:
             return self._failure(str(exc))
