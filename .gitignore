@@ -8,13 +8,19 @@ build/
 
 # Virtual environment
 .venv/
+venv/
 
 # Environment secrets
 .env
 
 # Data directories (runtime-generated)
 data/
-workspace/
+
+# Agent/session artifacts
+.agentignore
+.agents/
+prompt1.txt
+prompt2.txt
 
 # IDE
 .vscode/
@@ -30,3 +36,6 @@ Thumbs.db
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+node_modules/
+__pycache__/
+*.log

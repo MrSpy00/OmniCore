@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+import asyncio
 
 import aiosqlite
 
@@ -29,8 +30,9 @@ class DevExecutePythonCode(BaseTool):
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 path = Path(tmp_dir) / "snippet.py"
-                path.write_text(code, encoding="utf-8")
-                result = subprocess.run(
+                await asyncio.to_thread(path.write_text, code, encoding="utf-8")
+                result = await asyncio.to_thread(
+                    subprocess.run,
                     [sys.executable, str(path)],
                     capture_output=True,
                     text=True,

@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import ftplib
+import os
 import socket
 import subprocess
 import re
 import shutil
+from pathlib import Path
 
 import paramiko
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
+from tools.base import BaseTool, resolve_user_path
 
 
 class NetStealthPortScan(BaseTool):
@@ -179,7 +181,7 @@ class NetMonitorLiveTraffic(BaseTool):
 
 class OsDeepSearch(BaseTool):
     name = "os_deep_search"
-    description = "Search entire C: drive for filename pattern using PowerShell (or Everything CLI if available)."
+    description = "Search any drive/root for files by name with optimized native search backends."
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -187,12 +189,33 @@ class OsDeepSearch(BaseTool):
         filename = str(self._first_param(params, "filename", "name", "query", default="")).strip()
         if not filename:
             return self._failure("filename is required")
+
+        search_root_raw = str(
+            self._first_param(params, "search_root", "root", "path", default="")
+        ).strip()
+        if search_root_raw:
+            search_root, _ = resolve_user_path(search_root_raw)
+        else:
+            search_root = _default_search_root()
+
         limit = int(self._first_param(params, "limit", default=500) or 500)
+        timeout_seconds = int(
+            self._first_param(params, "timeout_seconds", "timeout", default=180) or 180
+        )
+        timeout_seconds = max(10, timeout_seconds)
+
         try:
-            result = await asyncio.to_thread(_deep_search_windows, filename, limit)
+            result = await asyncio.wait_for(
+                asyncio.to_thread(_deep_search_native, filename, search_root, limit),
+                timeout=timeout_seconds,
+            )
             return self._success(
                 f"Deep search completed ({result.get('count', 0)} matches)",
                 data=result,
+            )
+        except asyncio.TimeoutError:
+            return self._failure(
+                f"Search timed out after {timeout_seconds}s for root '{search_root}' and pattern '{filename}'"
             )
         except Exception as exc:
             return self._failure(str(exc))
@@ -346,45 +369,89 @@ def _parse_netstat_live_connections(raw_output: str) -> list[dict[str, str]]:
     return connections
 
 
-def _deep_search_windows(filename: str, limit: int) -> dict[str, object]:
-    # Prefer Everything CLI if present.
+def _default_search_root() -> Path:
+    if os.name == "nt":
+        return Path("C:\\")
+    return Path("/")
+
+
+def _deep_search_native(filename: str, search_root: Path, limit: int) -> dict[str, object]:
+    safe_limit = max(1, min(int(limit), 10_000))
+    if os.name == "nt":
+        return _deep_search_windows(filename, search_root, safe_limit)
+    return _deep_search_posix(filename, search_root, safe_limit)
+
+
+def _deep_search_windows(filename: str, search_root: Path, limit: int) -> dict[str, object]:
+    root = search_root
+
+    # Handle bare drive letters (e.g., "D:") by normalizing to root.
+    root_str = str(root)
+    if re.fullmatch(r"(?i)[a-z]:", root_str):
+        root = Path(f"{root_str}\\")
+
+    # Prefer Everything CLI if available, then filter to requested root.
     everything = shutil.which("es")
     if everything:
         completed = subprocess.run(
             [everything, filename],
             capture_output=True,
             text=True,
-            timeout=45,
+            timeout=90,
         )
         output = (completed.stdout or "") + (completed.stderr or "")
         lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
-        matches = lines[: max(1, limit)]
+        root_norm = str(root).lower()
+        matches = [ln for ln in lines if ln.lower().startswith(root_norm)]
+        matches = matches[:limit]
         return {
             "engine": "everything_cli",
+            "search_root": str(root),
             "count": len(matches),
             "matches": matches,
             "raw_output": output,
             "returncode": completed.returncode,
         }
 
-    # PowerShell fallback over C: (physical system search).
-    escaped = filename.replace("'", "''")
+    escaped_root = str(root).replace("'", "''")
+    escaped_name = filename.replace("'", "''")
     ps = (
         "$ErrorActionPreference='SilentlyContinue'; "
-        f"Get-ChildItem -Path 'C:\\' -Filter '{escaped}' -File -Recurse | "
+        f"Get-ChildItem -Path '{escaped_root}' -Filter '{escaped_name}' -File -Recurse -ErrorAction SilentlyContinue | "
         "Select-Object -ExpandProperty FullName"
     )
     completed = subprocess.run(
         ["powershell", "-NoProfile", "-Command", ps],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
     )
     output = (completed.stdout or "") + (completed.stderr or "")
     lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
-    matches = lines[: max(1, limit)]
+    matches = lines[:limit]
     return {
         "engine": "powershell_get_childitem",
+        "search_root": str(root),
+        "count": len(matches),
+        "matches": matches,
+        "raw_output": output,
+        "returncode": completed.returncode,
+    }
+
+
+def _deep_search_posix(filename: str, search_root: Path, limit: int) -> dict[str, object]:
+    completed = subprocess.run(
+        ["find", str(search_root), "-type", "f", "-name", filename],
+        capture_output=True,
+        text=True,
+        timeout=240,
+    )
+    output = (completed.stdout or "") + (completed.stderr or "")
+    lines = [ln.strip() for ln in (completed.stdout or "").splitlines() if ln.strip()]
+    matches = lines[:limit]
+    return {
+        "engine": "posix_find",
+        "search_root": str(search_root),
         "count": len(matches),
         "matches": matches,
         "raw_output": output,

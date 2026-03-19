@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+import asyncio
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
@@ -17,23 +18,7 @@ class SysCleanTempFiles(BaseTool):
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        temp_paths = [os.getenv("TEMP", ""), r"C:\Windows\Temp"]
-        freed = 0
-        for temp in temp_paths:
-            if not temp:
-                continue
-            temp_dir = Path(temp)
-            if not temp_dir.exists():
-                continue
-            for path in temp_dir.rglob("*"):
-                try:
-                    if path.is_file():
-                        freed += path.stat().st_size
-                        path.unlink()
-                    elif path.is_dir():
-                        shutil.rmtree(path, ignore_errors=True)
-                except Exception:
-                    continue
+        freed = await asyncio.to_thread(_clean_temp_files_sync)
         freed_mb = round(freed / (1024 * 1024), 2)
         return self._success("Temp files cleaned", data={"freed_mb": freed_mb})
 
@@ -47,16 +32,7 @@ class SysFindLargeFiles(BaseTool):
         min_mb = float(tool_input.parameters.get("min_mb", 100))
 
         root_path = Path(root).expanduser().resolve()
-        results = []
-        for path in root_path.rglob("*"):
-            if not path.is_file():
-                continue
-            size_mb = path.stat().st_size / (1024 * 1024)
-            if size_mb >= min_mb:
-                results.append({"path": str(path), "size_mb": round(size_mb, 2)})
-
-        results.sort(key=lambda x: x["size_mb"], reverse=True)
-        top = results[:10]
+        top = await asyncio.to_thread(_find_large_files_sync, root_path, min_mb)
         return self._success("Large files scanned", data={"files": top})
 
 
@@ -67,7 +43,8 @@ class SysFlushDnsCache(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["ipconfig", "/flushdns"],
                 capture_output=True,
                 text=True,
@@ -79,3 +56,37 @@ class SysFlushDnsCache(BaseTool):
             )
         except Exception as exc:
             return self._failure(str(exc))
+
+
+def _clean_temp_files_sync() -> int:
+    temp_paths = [os.getenv("TEMP", ""), r"C:\Windows\Temp"]
+    freed = 0
+    for temp in temp_paths:
+        if not temp:
+            continue
+        temp_dir = Path(temp)
+        if not temp_dir.exists():
+            continue
+        for path in temp_dir.rglob("*"):
+            try:
+                if path.is_file():
+                    freed += path.stat().st_size
+                    path.unlink()
+                elif path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
+            except Exception:
+                continue
+    return freed
+
+
+def _find_large_files_sync(root_path: Path, min_mb: float) -> list[dict[str, float | str]]:
+    results: list[dict[str, float | str]] = []
+    for path in root_path.rglob("*"):
+        if not path.is_file():
+            continue
+        size_mb = path.stat().st_size / (1024 * 1024)
+        if size_mb >= min_mb:
+            results.append({"path": str(path), "size_mb": round(size_mb, 2)})
+
+    results.sort(key=lambda x: float(x["size_mb"]), reverse=True)
+    return results[:10]

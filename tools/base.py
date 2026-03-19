@@ -12,9 +12,13 @@ import json
 import re
 import subprocess
 import time
-import winreg
 from pathlib import Path
 from typing import Any, Iterable
+
+try:
+    import winreg  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - non-Windows runtimes
+    winreg = None  # type: ignore[assignment]
 
 from models.tools import ToolInput, ToolOutput, ToolStatus
 
@@ -112,12 +116,17 @@ def fuzzy_get(params: dict[str, Any], possible_keys: Iterable[str], default: Any
 def resolve_user_path(path_str: str) -> tuple[Path, bool]:
     """Resolve a user path directly on the host OS.
 
-    Absolute paths are allowed as-is. Relative paths resolve against the real
-    Windows user profile directory. The second tuple item is retained for
-    backwards compatibility and is always ``False``.
+    - Any absolute path is preserved as-is (e.g. ``D:\\Games``, ``E:\\Backups``,
+      ``/etc``, ``/var/log``).
+    - Relative paths resolve against the real host home directory.
+    - On Windows, Desktop/Documents/Downloads aliases and ``<Username>``
+      placeholders are expanded using dynamic shell-folder resolution.
+
+    The second tuple item is retained for backwards compatibility and is
+    always ``False``.
     """
     home = _host_user_home()
-    special = _windows_special_folders()
+    special = _windows_special_folders() if _is_windows() else {}
     desktop = special.get("desktop") or (home / "Desktop")
     downloads = special.get("downloads") or (home / "Downloads")
     documents = special.get("documents") or (home / "Documents")
@@ -127,31 +136,40 @@ def resolve_user_path(path_str: str) -> tuple[Path, bool]:
         return home, False
 
     raw = os.path.expandvars(raw)
-    normalized_original = raw.replace("\\", "/")
-    placeholder_match = re.match(
-        r"^[a-z]:/users/<username>(?:/(.*))?$", normalized_original.lower()
-    )
-    if placeholder_match:
-        remainder = placeholder_match.group(1) or ""
-        # Map placeholder C:\Users\<Username> to dynamic home root.
-        if remainder:
-            remainder_norm = remainder.replace("\\", "/")
-            lower = remainder_norm.lower()
-            if lower == "desktop":
-                return desktop.resolve(), False
-            if lower.startswith("desktop/"):
-                return (desktop / remainder_norm[len("desktop/") :]).resolve(), False
-            if lower == "downloads":
-                return downloads.resolve(), False
-            if lower.startswith("downloads/"):
-                return (downloads / remainder_norm[len("downloads/") :]).resolve(), False
-            if lower in {"documents", "personal"}:
-                return documents.resolve(), False
-            if lower.startswith("documents/"):
-                return (documents / remainder_norm[len("documents/") :]).resolve(), False
-        return home.resolve(), False
+    if _is_windows():
+        normalized_original = raw.replace("\\", "/")
+        placeholder_match = re.match(
+            r"^[a-z]:/users/<username>(?:/(.*))?$", normalized_original.lower()
+        )
+        if placeholder_match:
+            remainder = placeholder_match.group(1) or ""
+            # Map placeholder C:\Users\<Username> to dynamic home root.
+            if remainder:
+                remainder_norm = remainder.replace("\\", "/")
+                lower = remainder_norm.lower()
+                if lower == "desktop":
+                    return desktop.resolve(), False
+                if lower.startswith("desktop/"):
+                    return (desktop / remainder_norm[len("desktop/") :]).resolve(), False
+                if lower == "downloads":
+                    return downloads.resolve(), False
+                if lower.startswith("downloads/"):
+                    return (downloads / remainder_norm[len("downloads/") :]).resolve(), False
+                if lower in {"documents", "personal"}:
+                    return documents.resolve(), False
+                if lower.startswith("documents/"):
+                    return (documents / remainder_norm[len("documents/") :]).resolve(), False
+            return home.resolve(), False
 
     raw = raw.replace("<Username>", home.name).replace("<username>", home.name)
+
+    if _is_windows() and re.fullmatch(r"[a-zA-Z]:", raw):
+        return Path(f"{raw}\\").resolve(), False
+
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute() or os.path.isabs(raw):
+        return candidate.resolve(), False
+
     normalized = raw.replace("\\", "/")
 
     alias_map = {
@@ -167,11 +185,11 @@ def resolve_user_path(path_str: str) -> tuple[Path, bool]:
             remainder = normalized[len(alias_prefix) :]
             return (base_path / remainder).resolve(), False
 
-    candidate = Path(raw).expanduser()
-    if candidate.is_absolute():
-        return candidate.resolve(), False
-
     return (home / raw).resolve(), False
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
 
 
 def _host_user_home() -> Path:
@@ -179,6 +197,10 @@ def _host_user_home() -> Path:
     userprofile = (os.environ.get("USERPROFILE") or "").strip()
     if userprofile:
         return Path(userprofile).expanduser().resolve()
+
+    home = (os.environ.get("HOME") or "").strip()
+    if home:
+        return Path(home).expanduser().resolve()
 
     homedrive = (os.environ.get("HOMEDRIVE") or "").strip()
     homepath = (os.environ.get("HOMEPATH") or "").strip()
@@ -193,6 +215,9 @@ def _windows_special_folders() -> dict[str, Path]:
 
     Handles OneDrive relocation and non-English Windows folder names.
     """
+    if not _is_windows() or winreg is None:
+        return {}
+
     home = _host_user_home()
     paths: dict[str, Path] = {}
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
