@@ -8,6 +8,9 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
 class Settings(BaseSettings):
     """Application-wide configuration.
 
@@ -17,7 +20,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_PROJECT_ROOT / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -92,8 +95,7 @@ class Settings(BaseSettings):
     # --- HITL Guardian -------------------------------------------------------
     hitl_timeout_minutes: int = 5
 
-    # --- Sandbox & Paths -----------------------------------------------------
-    sandbox_root: Path = Path("./workspace")
+    # --- Paths ---------------------------------------------------------------
     chroma_persist_dir: Path = Path("./data/chromadb")
     sqlite_db_path: Path = Path("./data/omnicore.db")
 

@@ -40,7 +40,6 @@ class TestToolRegistry:
 class TestOsToolkit:
     @pytest.mark.asyncio
     async def test_write_and_read_file(self, tmp_workspace, settings, monkeypatch):
-        monkeypatch.setenv("SANDBOX_ROOT", str(tmp_workspace))
         monkeypatch.setenv("USERPROFILE", str(tmp_workspace))
         from config.settings import get_settings
 
@@ -67,7 +66,6 @@ class TestOsToolkit:
 
     @pytest.mark.asyncio
     async def test_read_nonexistent_file(self, tmp_workspace, settings, monkeypatch):
-        monkeypatch.setenv("SANDBOX_ROOT", str(tmp_workspace))
         monkeypatch.setenv("USERPROFILE", str(tmp_workspace))
         from config.settings import get_settings
 
@@ -84,7 +82,6 @@ class TestOsToolkit:
 
     @pytest.mark.asyncio
     async def test_write_returns_raw_path_and_size(self, tmp_workspace, settings, monkeypatch):
-        monkeypatch.setenv("SANDBOX_ROOT", str(tmp_workspace))
         monkeypatch.setenv("USERPROFILE", str(tmp_workspace))
         from config.settings import get_settings
 

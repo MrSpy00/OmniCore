@@ -9,12 +9,15 @@ import os
 import subprocess
 import shutil
 import webbrowser
+import json
+from pathlib import Path
 
 from typing import cast
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
 from tools.base import force_window_foreground
+from tools.base import resolve_user_path
 
 
 class OsResourceMonitor(BaseTool):
@@ -155,8 +158,6 @@ class OsClipboardHistoryManager(BaseTool):
     )
     is_destructive = True
 
-    # In-memory clipboard history (survives within session).
-    _history: list[str] = []
     _MAX_HISTORY = 50
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -171,41 +172,45 @@ class OsClipboardHistoryManager(BaseTool):
 
             if action in ("store", "save", "push"):
                 text = await asyncio.to_thread(pyperclip.paste) or ""
-                if text and (not self._history or self._history[-1] != text):
-                    self._history.append(text)
-                    if len(self._history) > self._MAX_HISTORY:
-                        self._history = self._history[-self._MAX_HISTORY :]
+                history = _clipboard_history_load()
+                if text and (not history or history[-1] != text):
+                    history.append(text)
+                    if len(history) > self._MAX_HISTORY:
+                        history = history[-self._MAX_HISTORY :]
+                    _clipboard_history_save(history)
                 return self._success(
                     "Clipboard stored to history",
-                    data={"entries": len(self._history), "latest": text[:200]},
+                    data={"entries": len(history), "latest": text[:200], "source": "windows+disk"},
                 )
 
             if action in ("list", "history"):
-                recent = self._history[-10:] if self._history else []
+                history = _clipboard_history_load()
+                recent = history[-10:] if history else []
                 entries = [
-                    {"index": len(self._history) - len(recent) + i, "preview": e[:100]}
+                    {"index": len(history) - len(recent) + i, "preview": e[:100]}
                     for i, e in enumerate(recent)
                 ]
                 return self._success(
-                    f"Clipboard history ({len(self._history)} total)",
-                    data={"entries": entries},
+                    f"Clipboard history ({len(history)} total)",
+                    data={"entries": entries, "source": "windows+disk"},
                 )
 
             if action in ("restore", "get", "recall"):
+                history = _clipboard_history_load()
                 if index is None:
                     return self._failure("index is required for restore action")
                 idx = int(index)
-                if idx < 0 or idx >= len(self._history):
-                    return self._failure(f"Index {idx} out of range (0-{len(self._history) - 1})")
-                text = self._history[idx]
+                if idx < 0 or idx >= len(history):
+                    return self._failure(f"Index {idx} out of range (0-{len(history) - 1})")
+                text = history[idx]
                 await asyncio.to_thread(pyperclip.copy, text)
                 return self._success(
                     f"Restored entry {idx} to clipboard",
-                    data={"text": text[:200]},
+                    data={"text": text[:200], "source": "windows+disk"},
                 )
 
             if action == "clear":
-                self._history.clear()
+                _clipboard_history_save([])
                 return self._success("Clipboard history cleared")
 
             return self._failure(f"Unknown action: {action}")
@@ -311,6 +316,27 @@ class MediaControlSpotifyNative(BaseTool):
             return self._failure(str(exc))
 
 
+class SysReadNotifications(BaseTool):
+    name = "sys_read_notifications"
+    description = "Read recent Windows notifications from Event Log and app state data."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        limit = int(self._first_param(params, "limit", default=20) or 20)
+        try:
+            entries = await asyncio.to_thread(_read_windows_notifications, limit)
+            return self._success(
+                f"Read {len(entries)} notification records",
+                data={
+                    "notifications": entries,
+                    "count": len(entries),
+                    "source": "windows_eventlog",
+                },
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
 def _list_installed_apps_from_registry() -> list[dict[str, str]]:
     import winreg
 
@@ -405,6 +431,81 @@ def _media_control_native(action: str) -> dict[str, str]:
         "stdout": (completed.stdout or "").strip(),
         "stderr": (completed.stderr or "").strip(),
     }
+
+
+def _clipboard_history_file() -> Path:
+    base = resolve_user_path(r"%USERPROFILE%\AppData\Local\OmniCore")[0]
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "clipboard_history.json"
+
+
+def _clipboard_history_load() -> list[str]:
+    # Always include current clipboard at tail if unique.
+    file_path = _clipboard_history_file()
+    history: list[str] = []
+    if file_path.exists() and file_path.is_file():
+        try:
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+            if isinstance(payload, list):
+                history = [str(v) for v in payload if isinstance(v, str)]
+        except Exception:
+            history = []
+
+    try:
+        current = pyperclip.paste() or ""
+        if current and (not history or history[-1] != current):
+            history.append(current)
+    except Exception:
+        pass
+
+    if len(history) > OsClipboardHistoryManager._MAX_HISTORY:
+        history = history[-OsClipboardHistoryManager._MAX_HISTORY :]
+    return history
+
+
+def _clipboard_history_save(history: list[str]) -> None:
+    file_path = _clipboard_history_file()
+    file_path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _read_windows_notifications(limit: int) -> list[dict[str, str]]:
+    ps = (
+        "$limit = " + str(max(1, limit)) + "; "
+        "Get-WinEvent -LogName 'Microsoft-Windows-PushNotifications-Platform/Operational' "
+        "-MaxEvents $limit | "
+        "Select-Object TimeCreated, Id, LevelDisplayName, Message | "
+        "ConvertTo-Json -Depth 4"
+    )
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            (completed.stderr or completed.stdout or "notification read failed").strip()
+        )
+
+    raw = (completed.stdout or "").strip()
+    if not raw:
+        return []
+
+    parsed = json.loads(raw)
+    rows = parsed if isinstance(parsed, list) else [parsed]
+    result: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        result.append(
+            {
+                "time": str(row.get("TimeCreated", "")),
+                "id": str(row.get("Id", "")),
+                "level": str(row.get("LevelDisplayName", "")),
+                "message": str(row.get("Message", "")),
+            }
+        )
+    return result
 
 
 def _collect_resource_info() -> dict[str, float]:

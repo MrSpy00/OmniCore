@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import random
 import time
 from pathlib import Path
@@ -16,19 +15,13 @@ from PIL import Image  # type: ignore[import-not-found]
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.base import resolve_user_path
 from tools.vision_toolkit import REGION_TEXT_PROMPT, analyze_image_with_gemini
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
-    home = Path(os.environ.get("USERPROFILE") or str(Path.home())).expanduser().resolve()
-    raw = (path_str or "").strip()
-    if not raw:
-        return home
-    raw = os.path.expandvars(raw).replace("<Username>", home.name).replace("<username>", home.name)
-    candidate = Path(raw).expanduser()
-    if candidate.is_absolute():
-        return candidate.resolve()
-    return (home / raw).resolve()
+    target, _ = resolve_user_path(path_str)
+    return target
 
 
 class GuiClickImageOnScreen(BaseTool):
@@ -110,6 +103,49 @@ class GuiRecordScreen(BaseTool):
             return self._success("Screen recording saved", data={"path": str(save_path)})
         except Exception as exc:
             return self._failure(str(exc))
+
+
+class MediaScreenRecordInvisible(BaseTool):
+    name = "media_screen_record_invisible"
+    description = "Start/stop stealth screen recording in background while other tools run."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        action = str(self._first_param(params, "action", default="start")).lower()
+        if action == "start":
+            output_path = str(
+                self._first_param(
+                    params, "output_path", "path", default="screen_record_invisible.mp4"
+                )
+            )
+            fps = int(self._first_param(params, "fps", default=5) or 5)
+            try:
+                save_path = _resolve_sandboxed(output_path)
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                started = _start_background_recording(save_path, fps)
+                if not started:
+                    return self._failure("background recording is already running")
+                return self._success(
+                    "Background screen recording started",
+                    data={"path": str(save_path), "fps": fps, "recording": True},
+                )
+            except Exception as exc:
+                return self._failure(str(exc))
+
+        if action == "stop":
+            try:
+                stop_result = await asyncio.to_thread(_stop_background_recording)
+                if not stop_result.get("ok"):
+                    return self._failure(str(stop_result.get("error") or "recording not running"))
+                return self._success(
+                    "Background screen recording stopped",
+                    data=stop_result,
+                )
+            except Exception as exc:
+                return self._failure(str(exc))
+
+        return self._failure("Unsupported action. Use start|stop")
 
 
 class GuiExtractTextFromRegion(BaseTool):
@@ -241,3 +277,60 @@ def _locate_and_click_via_vision(element_desc: str) -> dict[str, Any]:
 
     pyautogui.click(x, y)
     return {"x": x, "y": y, "element": element_desc}
+
+
+_BACKGROUND_RECORDER: dict[str, Any] = {
+    "task": None,
+    "path": None,
+    "fps": 5,
+    "stop": False,
+}
+
+
+def _start_background_recording(path: Path, fps: int) -> bool:
+    task = _BACKGROUND_RECORDER.get("task")
+    if task is not None and not task.done():
+        return False
+
+    _BACKGROUND_RECORDER["path"] = path
+    _BACKGROUND_RECORDER["fps"] = max(1, int(fps))
+    _BACKGROUND_RECORDER["stop"] = False
+    _BACKGROUND_RECORDER["task"] = asyncio.create_task(_background_record_loop())
+    return True
+
+
+async def _background_record_loop() -> None:
+    path = cast(Path, _BACKGROUND_RECORDER["path"])
+    fps = int(_BACKGROUND_RECORDER.get("fps", 5) or 5)
+    frame_interval = 1.0 / max(1, fps)
+
+    with mss.mss() as sct:
+        monitor = sct.monitors[0]
+        with imageio.get_writer(path, format=cast(Any, "FFMPEG"), fps=fps) as writer:
+            append_data = cast(Any, writer).append_data
+            while not _BACKGROUND_RECORDER.get("stop"):
+                shot = await asyncio.to_thread(sct.grab, monitor)
+                frame = Image.frombytes("RGB", shot.size, shot.rgb)
+                append_data(frame)
+                await asyncio.sleep(frame_interval)
+
+
+def _stop_background_recording() -> dict[str, Any]:
+    task = _BACKGROUND_RECORDER.get("task")
+    if task is None or task.done():
+        _BACKGROUND_RECORDER["task"] = None
+        _BACKGROUND_RECORDER["path"] = None
+        return {"ok": False, "error": "background recording not running"}
+
+    _BACKGROUND_RECORDER["stop"] = True
+    try:
+        task.cancel()
+        if not task.done():
+            task.get_loop().call_soon_threadsafe(lambda: None)
+    except Exception:
+        pass
+
+    path = _BACKGROUND_RECORDER.get("path")
+    _BACKGROUND_RECORDER["task"] = None
+    _BACKGROUND_RECORDER["path"] = None
+    return {"ok": True, "path": str(path) if path else "", "recording": False}

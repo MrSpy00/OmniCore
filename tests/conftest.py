@@ -35,7 +35,7 @@ def settings(tmp_path: Path, tmp_workspace: Path, monkeypatch) -> Settings:
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key-not-real")
     monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
-    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_workspace))
+    monkeypatch.setenv("USERPROFILE", str(tmp_workspace))
     monkeypatch.setenv("CHROMA_PERSIST_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("SQLITE_DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("SCHEDULER_ENABLED", "false")
@@ -47,7 +47,6 @@ def settings(tmp_path: Path, tmp_workspace: Path, monkeypatch) -> Settings:
 
     s = Settings(
         google_api_key="test-key-not-real",
-        sandbox_root=tmp_workspace,
         chroma_persist_dir=tmp_path / "chroma",
         sqlite_db_path=tmp_path / "test.db",
         scheduler_enabled=False,

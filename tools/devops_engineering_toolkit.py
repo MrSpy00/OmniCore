@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from pathlib import Path
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.base import resolve_user_path
 
 
 class DevGitCommitPush(BaseTool):
     name = "dev_git_commit_push"
-    description = "Stage, commit, and push git changes."
+    description = "Stage, commit, and push git changes in a target repository path."
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -19,8 +21,10 @@ class DevGitCommitPush(BaseTool):
         message = str(
             self._first_param(params, "message", "commit_message", default="Update project")
         )
+        repo_path_raw = str(self._first_param(params, "repo_path", "path", "cwd", default="."))
         try:
-            result = await asyncio.to_thread(_git_commit_push, message)
+            repo_path = resolve_user_path(repo_path_raw)[0]
+            result = await asyncio.to_thread(_git_commit_push, message, repo_path)
             return self._success("Git commit/push completed", data=result)
         except Exception as exc:
             return self._failure(str(exc))
@@ -82,19 +86,37 @@ class DevDockerManage(BaseTool):
             return self._failure(str(exc))
 
 
-def _git_commit_push(message: str) -> dict[str, str | int]:
+def _git_commit_push(message: str, repo_path: Path) -> dict[str, object]:
+    if not repo_path.exists() or not repo_path.is_dir():
+        raise RuntimeError(f"Repository path not found: {repo_path}")
+
     commands = [
         ["git", "add", "."],
         ["git", "commit", "-m", message],
         ["git", "push"],
     ]
     last_output = ""
+    steps: list[dict[str, str | int]] = []
     for cmd in commands:
-        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=str(repo_path),
+        )
         last_output = completed.stdout + completed.stderr
+        steps.append(
+            {
+                "command": " ".join(cmd),
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+                "returncode": completed.returncode,
+            }
+        )
         if completed.returncode != 0:
             raise RuntimeError(last_output)
-    return {"output": last_output}
+    return {"output": last_output, "repo_path": str(repo_path), "steps": steps}
 
 
 def _lint_and_format(target: str) -> dict[str, str]:

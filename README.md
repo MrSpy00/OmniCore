@@ -1,6 +1,6 @@
 # OmniCore
 
-Autonomous OS-level AI assistant with modular architecture. Executes complex multi-step workflows, browses the web, manages files (sandboxed), and interacts via Telegram, CLI, or REST API.
+Autonomous OS-level AI assistant with modular architecture. Executes complex multi-step workflows, browses the web, manages files, and interacts via Telegram, CLI, or REST API.
 
 Provider-agnostic LLM support (Gemini or Groq) via LangChain.
 
@@ -43,7 +43,7 @@ Response summarized by LLM --> Gateway --> User
 
 ### Safety
 
-- All file operations sandboxed to `SANDBOX_ROOT`
+- File operations run against real host paths
 - Destructive actions (delete, overwrite, shell exec) require human-in-the-loop approval
 - HITL timeout: configurable (default 5 min), aborts on timeout
 - All approval decisions logged to SQLite `audit_log` table
@@ -88,7 +88,6 @@ cp .env.example .env
 | `TELEGRAM_ALLOWED_USERS` | No | (all) | Comma-separated Telegram user IDs |
 | `OMNI_LLM_MODEL` | No | `gemini-1.5-pro` | Gemini model name |
 | `HITL_TIMEOUT_MINUTES` | No | `5` | Approval timeout in minutes |
-| `SANDBOX_ROOT` | No | `./workspace` | Sandboxed directory for file ops |
 | `CHROMA_PERSIST_DIR` | No | `./data/chromadb` | ChromaDB storage path |
 | `SQLITE_DB_PATH` | No | `./data/omnicore.db` | SQLite database path |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
@@ -129,7 +128,7 @@ Endpoints:
 
 ## Tools
 
-### OS Toolkit (sandboxed)
+### OS Toolkit
 | Tool | Destructive | Description |
 |------|:-----------:|-------------|
 | `os_read_file` | No | Read file contents |

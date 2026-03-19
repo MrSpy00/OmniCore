@@ -142,6 +142,24 @@ class TestV18ToolDiscovery:
         tool = WebBypassCloudflare()
         assert tool.name == "web_bypass_cloudflare"
 
+    def test_os_deep_search_loadable(self):
+        from tools.network_infrastructure_toolkit import OsDeepSearch
+
+        tool = OsDeepSearch()
+        assert tool.name == "os_deep_search"
+
+    def test_sys_read_notifications_loadable(self):
+        from tools.advanced_os_toolkit import SysReadNotifications
+
+        tool = SysReadNotifications()
+        assert tool.name == "sys_read_notifications"
+
+    def test_media_screen_record_invisible_loadable(self):
+        from tools.computer_use_toolkit import MediaScreenRecordInvisible
+
+        tool = MediaScreenRecordInvisible()
+        assert tool.name == "media_screen_record_invisible"
+
 
 # ---------------------------------------------------------------------------
 # Anti-loop hardening (Turkish error messages)

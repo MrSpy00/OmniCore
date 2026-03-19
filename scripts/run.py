@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import signal
 import sys
 from pathlib import Path
+
+os.chdir(os.path.expanduser("~"))
 
 # Ensure project root is on sys.path so all local packages resolve.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent

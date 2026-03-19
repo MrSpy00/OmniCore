@@ -12,7 +12,7 @@ from tools.computer_use_toolkit import GuiExtractTextFromRegion, _record_screen
 async def test_region_extraction_uses_gemini_analysis(monkeypatch, tmp_workspace):
     from config.settings import get_settings
 
-    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_workspace))
+    monkeypatch.setenv("USERPROFILE", str(tmp_workspace))
     get_settings.cache_clear()
 
     captured = {}

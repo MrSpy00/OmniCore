@@ -12,6 +12,7 @@ import json
 import re
 import subprocess
 import time
+import winreg
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -108,16 +109,19 @@ def fuzzy_get(params: dict[str, Any], possible_keys: Iterable[str], default: Any
     return default
 
 
-def resolve_user_path(path_str: str, sandbox_root: Path | None = None) -> tuple[Path, bool]:
+def resolve_user_path(path_str: str) -> tuple[Path, bool]:
     """Resolve a user path directly on the host OS.
 
     Absolute paths are allowed as-is. Relative paths resolve against the real
     Windows user profile directory. The second tuple item is retained for
     backwards compatibility and is always ``False``.
     """
-    del sandbox_root
-
     home = _host_user_home()
+    special = _windows_special_folders()
+    desktop = special.get("desktop") or (home / "Desktop")
+    downloads = special.get("downloads") or (home / "Downloads")
+    documents = special.get("documents") or (home / "Documents")
+
     raw = (path_str or "").strip()
     if raw in {"", "."}:
         return home, False
@@ -129,15 +133,31 @@ def resolve_user_path(path_str: str, sandbox_root: Path | None = None) -> tuple[
     )
     if placeholder_match:
         remainder = placeholder_match.group(1) or ""
-        return (home / remainder).resolve(), False
+        # Map placeholder C:\Users\<Username> to dynamic home root.
+        if remainder:
+            remainder_norm = remainder.replace("\\", "/")
+            lower = remainder_norm.lower()
+            if lower == "desktop":
+                return desktop.resolve(), False
+            if lower.startswith("desktop/"):
+                return (desktop / remainder_norm[len("desktop/") :]).resolve(), False
+            if lower == "downloads":
+                return downloads.resolve(), False
+            if lower.startswith("downloads/"):
+                return (downloads / remainder_norm[len("downloads/") :]).resolve(), False
+            if lower in {"documents", "personal"}:
+                return documents.resolve(), False
+            if lower.startswith("documents/"):
+                return (documents / remainder_norm[len("documents/") :]).resolve(), False
+        return home.resolve(), False
 
     raw = raw.replace("<Username>", home.name).replace("<username>", home.name)
     normalized = raw.replace("\\", "/")
 
     alias_map = {
-        "desktop": home / "Desktop",
-        "downloads": home / "Downloads",
-        "documents": home / "Documents",
+        "desktop": desktop,
+        "downloads": downloads,
+        "documents": documents,
     }
     for alias, base_path in alias_map.items():
         alias_prefix = f"{alias}/"
@@ -155,21 +175,47 @@ def resolve_user_path(path_str: str, sandbox_root: Path | None = None) -> tuple[
 
 
 def _host_user_home() -> Path:
-    """Resolve host home, honoring USERPROFILE first for testability."""
+    """Resolve host home from USERPROFILE/HOMEDRIVE+HOMEPATH/Path.home."""
     userprofile = (os.environ.get("USERPROFILE") or "").strip()
     if userprofile:
         return Path(userprofile).expanduser().resolve()
 
-    username = (os.environ.get("USERNAME") or "").strip()
-    if username:
-        candidate = Path(f"C:/Users/{username}")
-        if candidate.exists():
-            return candidate.resolve()
-
-    if username:
-        return Path(f"C:/Users/{username}").resolve()
+    homedrive = (os.environ.get("HOMEDRIVE") or "").strip()
+    homepath = (os.environ.get("HOMEPATH") or "").strip()
+    if homedrive and homepath:
+        return Path(f"{homedrive}{homepath}").expanduser().resolve()
 
     return Path.home().expanduser().resolve()
+
+
+def _windows_special_folders() -> dict[str, Path]:
+    """Resolve Desktop/Documents/Downloads from User Shell Folders registry.
+
+    Handles OneDrive relocation and non-English Windows folder names.
+    """
+    home = _host_user_home()
+    paths: dict[str, Path] = {}
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+    value_map = {
+        "desktop": "Desktop",
+        "documents": "Personal",
+        "downloads": "{374DE290-123F-4565-9164-39C4925E467B}",
+    }
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            for alias, value_name in value_map.items():
+                try:
+                    raw_value, _ = winreg.QueryValueEx(key, value_name)
+                except OSError:
+                    continue
+                expanded = os.path.expandvars(str(raw_value)).replace("%USERPROFILE%", str(home))
+                if expanded.strip():
+                    paths[alias] = Path(expanded).expanduser().resolve()
+    except OSError:
+        pass
+
+    return paths
 
 
 def force_window_foreground(window_title: str, timeout_seconds: float = 5.0) -> dict[str, Any]:

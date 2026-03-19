@@ -41,7 +41,7 @@ class TerminalExecute(BaseTool):
         if cwd_param:
             cwd = str(resolve_user_path(str(cwd_param))[0])
         else:
-            cwd = os.environ.get("USERPROFILE", "C:\\")
+            cwd = str(resolve_user_path(".")[0])
 
         # Ensure working directory exists.
         os.makedirs(cwd, exist_ok=True)

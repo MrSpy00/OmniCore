@@ -4,6 +4,7 @@ import pytest
 
 from models.tools import ToolInput, ToolStatus
 from tools.os_toolkit import OsListDir
+import tools.base as base_mod
 
 
 @pytest.mark.asyncio
@@ -13,6 +14,15 @@ async def test_list_dir_resolves_placeholder_username(monkeypatch, tmp_path):
     desktop.mkdir(parents=True)
     (desktop / "note.txt").write_text("hello", encoding="utf-8")
     monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(
+        base_mod,
+        "_windows_special_folders",
+        lambda: {
+            "desktop": desktop.resolve(),
+            "documents": (home / "Documents").resolve(),
+            "downloads": (home / "Downloads").resolve(),
+        },
+    )
 
     tool = OsListDir()
     result = await tool.execute(

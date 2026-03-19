@@ -7,6 +7,7 @@ import ftplib
 import socket
 import subprocess
 import re
+import shutil
 
 import paramiko
 
@@ -176,6 +177,27 @@ class NetMonitorLiveTraffic(BaseTool):
             return self._failure(str(exc))
 
 
+class OsDeepSearch(BaseTool):
+    name = "os_deep_search"
+    description = "Search entire C: drive for filename pattern using PowerShell (or Everything CLI if available)."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        filename = str(self._first_param(params, "filename", "name", "query", default="")).strip()
+        if not filename:
+            return self._failure("filename is required")
+        limit = int(self._first_param(params, "limit", default=500) or 500)
+        try:
+            result = await asyncio.to_thread(_deep_search_windows, filename, limit)
+            return self._success(
+                f"Deep search completed ({result.get('count', 0)} matches)",
+                data=result,
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
 def _scan_ports(host: str, ports: list[int]) -> list[int]:
     open_ports: list[int] = []
     for port in ports:
@@ -322,3 +344,49 @@ def _parse_netstat_live_connections(raw_output: str) -> list[dict[str, str]]:
             }
         )
     return connections
+
+
+def _deep_search_windows(filename: str, limit: int) -> dict[str, object]:
+    # Prefer Everything CLI if present.
+    everything = shutil.which("es")
+    if everything:
+        completed = subprocess.run(
+            [everything, filename],
+            capture_output=True,
+            text=True,
+            timeout=45,
+        )
+        output = (completed.stdout or "") + (completed.stderr or "")
+        lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
+        matches = lines[: max(1, limit)]
+        return {
+            "engine": "everything_cli",
+            "count": len(matches),
+            "matches": matches,
+            "raw_output": output,
+            "returncode": completed.returncode,
+        }
+
+    # PowerShell fallback over C: (physical system search).
+    escaped = filename.replace("'", "''")
+    ps = (
+        "$ErrorActionPreference='SilentlyContinue'; "
+        f"Get-ChildItem -Path 'C:\\' -Filter '{escaped}' -File -Recurse | "
+        "Select-Object -ExpandProperty FullName"
+    )
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    output = (completed.stdout or "") + (completed.stderr or "")
+    lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
+    matches = lines[: max(1, limit)]
+    return {
+        "engine": "powershell_get_childitem",
+        "count": len(matches),
+        "matches": matches,
+        "raw_output": output,
+        "returncode": completed.returncode,
+    }
