@@ -417,9 +417,9 @@ class SysGetAllInstalledApps(BaseTool):
             return self._failure(str(exc))
 
 
-class MediaControlSpotifyNative(BaseTool):
-    name = "media_control_spotify_native"
-    description = "Control active Spotify/media session (play, pause, next, previous)."
+class MediaControlNative(BaseTool):
+    name = "media_control_native"
+    description = "Control active system media session (play, pause, next, previous, toggle)."
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -430,6 +430,19 @@ class MediaControlSpotifyNative(BaseTool):
             return self._success(f"Media control action completed: {action}", data=result)
         except Exception as exc:
             return self._failure(str(exc))
+
+
+class MediaControlSpotifyNative(MediaControlNative):
+    """Backward-compatible alias for legacy callers.
+
+    Kept for older orchestrations and tests that still invoke
+    `media_control_spotify_native`.
+    """
+
+    name = "media_control_spotify_native"
+    description = (
+        "Legacy alias for media control. Prefer media_control_native for universal control."
+    )
 
 
 class SysReadNotifications(BaseTool):

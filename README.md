@@ -1,77 +1,122 @@
-# OmniCore V28 - Zenith Edition
+# OmniCore V32.0 - THE-OMNICORE-APEX-SINGULARITY
 
-OmniCore is a production-oriented autonomous operations agent that plans, executes, verifies, and reports real actions across OS, browser, network, data, and workflow layers.
+OmniCore is an autonomous execution platform that turns natural-language intent into real, auditable system action across CLI, GUI, browser, and vision loops.
 
-This V28 release focuses on three major outcomes:
-- architectural hardening across `core/`, `memory/`, `models/`, `interfaces/`, and `tools/`
-- expanded high-value tool surface for analysis and validation workflows
-- operational documentation uplift with enterprise-ready onboarding quality
+V32.0 establishes **Universal App Mastery**: OmniCore no longer behaves like a fixed-app automation script. It behaves like a domain-adaptive control system that can discover, reason, and act across unknown software surfaces.
 
-## Executive Summary
+## Executive Positioning
 
-- **Mission**: Turn natural-language objectives into safe, auditable, tool-driven execution.
-- **Control Plane**: Cognitive Router + Planner + Guardian + Recovery Engine.
-- **Data Plane**: Dynamic tool registry with structured input/output contracts.
-- **Memory**: Short-term sliding context + long-term semantic memory + SQLite state/audit.
-- **Interface Layer**: CLI and Telegram gateways (REST scaffold present in project layout).
+- Mission: Convert intent into safe execution with evidence-backed outcomes.
+- Principle: Plan -> Verify -> Execute -> Audit -> Recover.
+- Outcome: A production-grade, multi-domain control plane for real environments.
 
-## What Is New in V28
+## V32.0 Core Leap
 
-### Architectural Hardening
+V32.0 delivers five strategic upgrades:
 
-- Strengthened SQLite state safety with guarded connection access (`_require_db`) and explicit runtime initialization errors.
-- Added serialized write path (`_write_lock` + `_execute_write`) for safer concurrent task/audit/job commits.
-- Enabled database safety pragmas and deterministic table-creation commit behavior.
-- Added duplicate tool-name detection during dynamic discovery with structured warning logs.
+1. Universal App Mastery (not app-specific macros)
+2. Bilingual enterprise documentation standard (EN + TR)
+3. Zero-defect polish and lint discipline
+4. Immortal rate-limit continuity with no-wait key rotation
+5. Vision-first GUI completion loop for unknown UI states
 
-### New Advanced Tools
+## Universal App Mastery
 
-The following tools were introduced in `tools/insight_toolkit.py`:
+OmniCore now operates through a hybrid execution model:
 
-- `data_hash_text` - deterministic text hashing (`md5`, `sha1`, `sha256`, `sha512`)
-- `text_profile_basic` - structural text profiling (chars/words/lines/top tokens)
-- `data_validate_json` - JSON validation with optional required-key assertions
-- `data_csv_profile` - CSV profiling (columns, row counts, null-like density, preview)
-- `os_path_inspect` - host path metadata inspection (existence/type/size/timestamps)
+- CLI/Process actions for deterministic shell-level control
+- GUI actions for native desktop interfaces
+- Vision-guided correction for uncertain screen state
+- Browser automation for web surfaces
 
-These tools are auto-registered by the existing dynamic discovery mechanism.
+When an app or domain is unknown, OmniCore can:
 
-## Core Architecture
+1. Gather context with `web_deep_crawl`
+2. Build a domain understanding snapshot
+3. Compose the right tool chain dynamically
+4. Execute with Guardian-governed safety checks
+
+This turns OmniCore from static automation into adaptive operational intelligence.
+
+## 10 Core Domains
+
+OmniCore V32.0 is organized around ten execution domains:
+
+1. System
+2. Filesystem
+3. Process
+4. Network
+5. UI
+6. Media
+7. Vision
+8. Browser
+9. DevOps
+10. Security
+
+## Risk Model and Guardian Governance
+
+Every action is classified by risk and routed through policy:
+
+- Low: read-only observation
+- Medium: controlled non-destructive mutation
+- High: impactful system/process/network changes
+- Critical: irreversible or security-sensitive operations
+
+Guardian enforces human-in-the-loop checkpoints for high and critical paths, with explicit intent validation and audit trace retention.
+
+## Immortal 429 Rotator (No-Wait Continuity)
+
+Provider rate-limit failures are handled with immediate, sequential API key rotation:
+
+- Detect 429
+- Rotate key instantly
+- Retry immediately (no blocking wait)
+- Continue until success or pool exhaustion
+
+This preserves operational flow under provider-side quota pressure.
+
+## Universal Vision-GUI Loop
+
+For uncertain or changing interfaces, OmniCore executes a closed correction cycle:
+
+1. Observe screen state
+2. Ground target intent
+3. Execute interaction
+4. Re-observe and validate
+5. Retry/correct if mismatch
+
+This enables stable completion even in dynamic, non-deterministic GUI conditions.
+
+## Architecture Overview
 
 ```text
 User Intent
-  -> Interface Gateway (CLI / Telegram / REST)
-  -> Cognitive Router (LLM routing + plan decision)
-  -> Planner (step graph)
-  -> Guardian (HITL policy for destructive actions)
-  -> Recovery Engine (retry + fallback orchestration)
-  -> Tool Registry (dynamic runtime inventory)
-  -> Execution + Audit + Memory persistence
-  -> Final response synthesis
+  -> Interface Layer (CLI / Telegram / API)
+  -> Cognitive Router
+  -> Planner
+  -> Guardian (Risk + HITL)
+  -> Recovery Engine
+  -> Dynamic Tool Registry
+  -> Execution (CLI + GUI + Vision + Browser)
+  -> Audit + Memory Persistence
+  -> Final Response
 ```
 
 ## Repository Structure
 
 ```text
-config/          runtime settings, env contract, logging
+config/          runtime settings and environment contracts
 core/            router, planner, guardian, recovery
-interfaces/      cli, telegram, rest api gateways
-memory/          short-term, long-term, sqlite state tracker
-models/          canonical pydantic contracts
-scheduler/       autonomous pulse / scheduled workflows
-scripts/         application entrypoints
+interfaces/      CLI, Telegram, API gateways
+memory/          short-term, long-term, sqlite state/audit
+models/          typed contracts and schemas
+scheduler/       autonomous job and pulse flows
+scripts/         startup entrypoints
 tools/           dynamically discovered toolkits
-tests/           regression and behavior test suite
+tests/           regression and behavior verification
 ```
 
-## Runtime Requirements
-
-- Python 3.12+
-- `uv` package manager/runtime
-- Playwright Chromium (for web automation features)
-- Optional platform-specific dependencies for selected advanced toolkits
-
-## Quick Start
+## Setup
 
 ```bash
 git clone <repo-url>
@@ -81,7 +126,7 @@ uv run playwright install chromium
 cp .env.example .env
 ```
 
-## Run Modes
+## Run
 
 ```bash
 # CLI mode
@@ -91,131 +136,125 @@ uv run python scripts/run.py --mode cli
 uv run python scripts/run.py --mode telegram
 ```
 
-## Configuration Overview
-
-Primary environment variables include:
-
-- `LLM_PROVIDER`
-- `OMNI_LLM_MODEL`
-- `GOOGLE_API_KEY`, `GOOGLE_API_KEY_2`, `GOOGLE_API_KEY_3`
-- `GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, `GROQ_API_KEY_3`
-- `GROQ_PRIMARY_MODEL`, `GROQ_FALLBACK_MODEL_1`, `GROQ_FALLBACK_MODEL_2`
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`
-- `HITL_TIMEOUT_MINUTES`
-- `HYBRID_FALLBACK_ENABLED`, `HYBRID_FALLBACK_MAX_STEPS`
-
-## Safety and Governance
-
-- Destructive operations are flagged by tool metadata and routed through Guardian approval logic.
-- Execution outcomes are recorded into audit logs with structured status context.
-- Recovery Engine provides resilience via retry strategies and fallback pathways.
-- Router-side key/model rotation mitigates provider-level transient quotas and rate limits.
-
-## Development Workflow
-
-Quality gate commands:
+## Quality Gates
 
 ```bash
 uv run ruff check --fix .
 uv run pytest -v
 ```
 
-Recommended branch discipline:
+## Security and Operations Notes
 
-- Keep commits atomic by concern (tooling, memory, docs, tests).
-- Avoid committing local runtime artifacts and secret-bearing files.
-- Validate all interfaces after changes that affect shared models.
-
-## Versioning Intent
-
-- **V26** established robust desktop execution reliability.
-- **V27** delivered key-rotation and fallback resilience improvements.
-- **V28** extends toward a "Zenith" milestone: architecture integrity + richer tool intelligence + enterprise-grade documentation.
-
-## License and Usage Notes
-
-This repository is designed for controlled automation use. Before production deployment, ensure policy alignment for:
-
-- local system automation permissions
-- third-party API quota and billing controls
-- audit retention and compliance obligations
+- Do not commit secrets or local runtime artifacts.
+- Keep destructive operations behind Guardian policy.
+- Keep retries observable and auditable.
+- Prefer adaptive domain discovery over hardcoded one-off logic.
 
 ---
 
-# OmniCore V28 - Zenith Surumu (Turkce)
+# OmniCore V32.0 - THE-OMNICORE-APEX-SINGULARITY (Turkce)
 
-OmniCore, dogal dil ile verilen hedefleri guvenli, izlenebilir ve arac odakli sekilde gercek sistem eylemlerine donusturen uretim odakli otonom operasyon ajanidir.
+OmniCore, dogal dil ile verilen hedefleri gercek ve izlenebilir sistem aksiyonlarina donusturen otonom bir yurutme platformudur. CLI, GUI, browser ve vision akislari birlikte calisir.
 
-V28 surumu uc ana basliga odaklanir:
-- `core/`, `memory/`, `models/`, `interfaces/`, `tools/` katmanlarinda mimari sertlestirme
-- analiz/dogrulama odakli yuksek degerli yeni araclar
-- kurumsal kullanim seviyesinde kapsamli dokumantasyon iyilestirmesi
+V32.0 ile OmniCore, sabit uygulama otomasyonundan cikarak **Evrensel Uygulama Hakimiyeti** seviyesine tasinmistir.
 
-## Ozet
+## Stratejik Konum
 
-- **Misyon**: Kullanici niyetini planla, araclarla uygula, sonucu dogrula ve raporla.
-- **Kontrol Duzlemi**: Cognitive Router + Planner + Guardian + Recovery Engine.
-- **Veri Duzlemi**: Yapilandirilmis girdi/cikti kontratlarina sahip dinamik arac kaydi.
-- **Bellek**: Kisa sureli baglam + uzun sureli anlamsal bellek + SQLite durum/kayit sistemi.
-- **Arayuz Katmani**: CLI ve Telegram gecitleri (REST iskeleti proje yapisinda mevcut).
+- Misyon: Niyeti guvenli sekilde eyleme donusturmek.
+- Prensip: Planla -> Dogrula -> Uygula -> Kaydet -> Kurtar.
+- Cikti: Uretim seviyesi, cok-domain, denetlenebilir kontrol duzlemi.
 
-## V28 Ile Gelen Yenilikler
+## V32.0 Buyuk Sicrama
 
-### Mimari Sertlestirme
+V32.0 bes ana yetenek getirir:
 
-- SQLite durum yonetimi guclendirildi: korumali baglanti erisimi (`_require_db`) ve acik baslatma hatasi.
-- Eszamanli yazma guvenligi icin seri yazma yolu eklendi (`_write_lock` + `_execute_write`).
-- Veritabani pragmalari ve tablo olusturma adiminda kararlı commit davranisi iyilestirildi.
-- Dinamik arac kesfinde ayni isimli araclar icin tespit + uyari loglari eklendi.
+1. Evrensel uygulama kontrolu (uygulama-ozel makro degil)
+2. Kurumsal cift dilli dokumantasyon standardi (EN + TR)
+3. Sifir-kusur cilasi ve lint disiplini
+4. Beklemesiz 429 anahtar rotasyonu ile kesintisiz devam
+5. Bilinmeyen arayuzlerde vision destekli GUI tamamlama dongusu
 
-### Yeni Gelismis Araclar
+## Evrensel Uygulama Hakimiyeti
 
-`tools/insight_toolkit.py` dosyasi ile eklenen araclar:
+OmniCore artik hibrit yurutme modelinde calisir:
 
-- `data_hash_text` - metin icin deterministik hash (md5/sha1/sha256/sha512)
-- `text_profile_basic` - metin yapisal profili (karakter/kelime/satir/en sik token)
-- `data_validate_json` - JSON dogrulama ve zorunlu anahtar kontrolu
-- `data_csv_profile` - CSV profil analizi (sutun/satir/null benzeri deger yogunlugu/onizleme)
-- `os_path_inspect` - yol metadatasi inceleme (varlik/tip/boyut/zaman damgalari)
+- CLI/Process ile deterministik kontrol
+- GUI ile masaustu etkileşim
+- Vision ile durum dogrulama ve duzeltme
+- Browser otomasyonu ile web yuzeyleri
 
-Bu araclar mevcut dinamik kesif mekanizmasi ile otomatik kaydedilir.
+Bilinmeyen bir domain veya uygulamada OmniCore:
 
-## Cekirdek Mimari
+1. `web_deep_crawl` ile hizli bilgi toplar
+2. Domain baglamini cikarir
+3. Uygun arac zincirini dinamik kurar
+4. Guardian guvencesi ile yurutur
+
+Boylece OmniCore, sabit script mantigindan cikarak adaptif operasyon zekasina donusur.
+
+## 10 Cekirdek Domain
+
+1. System
+2. Filesystem
+3. Process
+4. Network
+5. UI
+6. Media
+7. Vision
+8. Browser
+9. DevOps
+10. Security
+
+## Risk Modeli ve Guardian
+
+Her aksiyon risk sinifina gore yonetilir:
+
+- Low: sadece gozlem
+- Medium: kontrollu, geri alinabilir degisiklik
+- High: etkili sistem/process/network mutasyonu
+- Critical: geri donusu zor veya guvenlik-hassas adim
+
+Guardian, High ve Critical aksiyonlarda insan-onayli guvenlik kapisi uygular ve denetim kaydi olusturur.
+
+## Immortal 429 Rotator (Bekleme Yok)
+
+Rate-limit durumunda akis asagidaki gibi calisir:
+
+- 429 algilanir
+- Anahtar aninda degistirilir
+- Beklemeden tekrar denenir
+- Basari veya havuz bitene kadar devam edilir
+
+Bu mimari, kota baskisinda dahi operasyon surekliligi saglar.
+
+## Evrensel Vision-GUI Dongusu
+
+Arayuz belirsizse OmniCore kapali bir duzeltme dongusu kullanir:
+
+1. Ekrani gozlemle
+2. Hedefi sabitle
+3. Etkilesimi uygula
+4. Yeniden gozlemle
+5. Sapma varsa duzelt ve tekrar dene
+
+Bu sayede degisken GUI durumlarinda dahi tamamlanma kalitesi korunur.
+
+## Mimari Ozet
 
 ```text
-Kullanici Istegi
-  -> Arayuz Gecidi (CLI / Telegram / REST)
-  -> Cognitive Router (LLM yonlendirme + plan karari)
-  -> Planner (adim plani)
-  -> Guardian (yikici islemler icin HITL onayi)
-  -> Recovery Engine (retry + fallback)
-  -> Tool Registry (dinamik arac envanteri)
-  -> Calistirma + Audit + Bellek kaliciligi
-  -> Son cevap sentezi
+Kullanici Niyeti
+  -> Arayuz Katmani (CLI / Telegram / API)
+  -> Cognitive Router
+  -> Planner
+  -> Guardian (Risk + HITL)
+  -> Recovery Engine
+  -> Dynamic Tool Registry
+  -> Execution (CLI + GUI + Vision + Browser)
+  -> Audit + Memory
+  -> Sonuc
 ```
 
-## Proje Dizinleri
-
-```text
-config/          ayarlar, ortam degiskenleri, logging
-core/            router, planner, guardian, recovery
-interfaces/      cli, telegram, rest api gecitleri
-memory/          kisa/uzun bellek, sqlite state tracker
-models/          pydantic veri kontratlari
-scheduler/       otonom zamanlayici akislar
-scripts/         giris komutlari
-tools/           dinamik kesfedilen arac kutuphaneleri
-tests/           regresyon ve davranis testleri
-```
-
-## Calisma Gereksinimleri
-
-- Python 3.12+
-- `uv` paket yoneticisi
-- Playwright Chromium (web otomasyon ozellikleri icin)
-- Bazi gelismis araclar icin platforma bagli opsiyonel bagimliliklar
-
-## Hizli Kurulum
+## Kurulum
 
 ```bash
 git clone <repo-url>
@@ -225,7 +264,7 @@ uv run playwright install chromium
 cp .env.example .env
 ```
 
-## Calistirma Modlari
+## Calistirma
 
 ```bash
 # CLI modu
@@ -235,51 +274,16 @@ uv run python scripts/run.py --mode cli
 uv run python scripts/run.py --mode telegram
 ```
 
-## Konfigurasyon Ozet
-
-Temel ortam degiskenleri:
-
-- `LLM_PROVIDER`
-- `OMNI_LLM_MODEL`
-- `GOOGLE_API_KEY`, `GOOGLE_API_KEY_2`, `GOOGLE_API_KEY_3`
-- `GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, `GROQ_API_KEY_3`
-- `GROQ_PRIMARY_MODEL`, `GROQ_FALLBACK_MODEL_1`, `GROQ_FALLBACK_MODEL_2`
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`
-- `HITL_TIMEOUT_MINUTES`
-- `HYBRID_FALLBACK_ENABLED`, `HYBRID_FALLBACK_MAX_STEPS`
-
-## Guvenlik ve Yonetisim
-
-- Yikici islemler arac metadata'si ile isaretlenir ve Guardian onay katmanina gider.
-- Calistirma sonuclari, durum bilgisi ile audit kaydina yazilir.
-- Recovery Engine, retry ve fallback stratejileriyle dayaniklilik saglar.
-- Router tarafindaki key/model rotasyonu kota ve rate-limit sorunlarini azaltir.
-
-## Gelistirme Akisi
-
-Kalite komutlari:
+## Kalite Kapilari
 
 ```bash
 uv run ruff check --fix .
 uv run pytest -v
 ```
 
-Onereilen disiplin:
+## Operasyon Notlari
 
-- Commitleri konu bazli atomik tut (tooling, memory, docs, tests).
-- Yerel calisma artefaktlari ve gizli dosyalari commit etme.
-- Ortak modelleri etkileyen degisikliklerde tum arayuzleri dogrula.
-
-## Surum Yonelimi
-
-- **V26** masaustu eylem guvenilirligini saglamlastirdi.
-- **V27** key-rotation ve fallback dayanikliligini guclendirdi.
-- **V28** "Zenith" hedefine ilerler: mimari butunluk + daha zengin arac zekasi + kurumsal dokumantasyon kalitesi.
-
-## Lisans ve Kullanim Notu
-
-Bu repo kontrollu otomasyon amaciyla tasarlanmistir. Uretimde kullanmadan once su basliklarda uygunluk kontrolu yapilmalidir:
-
-- sistem otomasyon yetkileri
-- ucuncu taraf API kota ve faturalama yonetimi
-- audit kayit saklama ve uyumluluk zorunluluklari
+- Gizli bilgi ve runtime artefaktlarini commitlemeyin.
+- Yikici aksiyonlari Guardian politikasi arkasinda tutun.
+- Retry davranisini her zaman denetlenebilir kilin.
+- Sabit tekil scriptler yerine domain-adaptif yaklasimi tercih edin.
