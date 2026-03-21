@@ -7,15 +7,13 @@ import base64
 from pathlib import Path
 
 import mss  # type: ignore[import-not-found]
-from PIL import Image  # type: ignore[import-not-found]
 from google import genai
 from google.genai import types
+from PIL import Image  # type: ignore[import-not-found]
 
 from config.settings import get_settings
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import resolve_user_path
-
+from tools.base import BaseTool, resolve_user_path
 
 SCREEN_ANALYSIS_PROMPT = (
     "Read all visible text on this screen exactly. If there is no readable text, "

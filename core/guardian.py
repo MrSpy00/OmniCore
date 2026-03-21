@@ -8,8 +8,8 @@ request times out.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from enum import StrEnum
-from typing import Callable, Awaitable
 
 from config.logging import get_logger
 
@@ -113,7 +113,7 @@ class Guardian:
             )
             logger.info("guardian.result", action=action_description, result=result)
             return result
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "guardian.timed_out",
                 action=action_description,

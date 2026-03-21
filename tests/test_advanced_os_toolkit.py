@@ -3,8 +3,7 @@ from __future__ import annotations
 import pytest
 
 from models.tools import ToolInput, ToolStatus
-from tools.advanced_os_toolkit import OsLaunchApplication
-from tools.advanced_os_toolkit import MediaControlSpotifyNative
+from tools.advanced_os_toolkit import MediaControlSpotifyNative, OsLaunchApplication
 
 
 @pytest.mark.asyncio

@@ -14,8 +14,7 @@ import pyautogui
 from PIL import Image  # type: ignore[import-not-found]
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import resolve_user_path
+from tools.base import BaseTool, resolve_user_path
 from tools.vision_toolkit import REGION_TEXT_PROMPT, analyze_image_with_gemini
 
 

@@ -6,14 +6,15 @@ tool without knowing its internals.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-import os
 import json
+import os
 import re
 import subprocess
 import time
+from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 try:
     import winreg  # type: ignore[import-not-found]

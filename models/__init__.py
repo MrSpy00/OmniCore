@@ -1,7 +1,7 @@
 """OmniCore data models."""
 
-from models.messages import Message, MessageRole, Conversation
-from models.tasks import TaskPlan, TaskStep, StepStatus, TaskStatus
+from models.messages import Conversation, Message, MessageRole
+from models.tasks import StepStatus, TaskPlan, TaskStatus, TaskStep
 from models.tools import ToolInput, ToolOutput, ToolStatus
 
 __all__ = [

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from urllib.parse import urljoin, urlparse
 
 import httpx

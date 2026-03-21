@@ -2,22 +2,20 @@
 
 from __future__ import annotations
 
-import psutil
-import pyperclip
 import asyncio
-import os
-import subprocess
-import shutil
-import webbrowser
 import json
+import os
+import shutil
+import subprocess
+import webbrowser
 from pathlib import Path
-
 from typing import cast
 
+import psutil
+import pyperclip
+
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import force_window_foreground
-from tools.base import resolve_user_path
+from tools.base import BaseTool, force_window_foreground, resolve_user_path
 
 
 class OsResourceMonitor(BaseTool):
@@ -278,9 +276,8 @@ class SysForceForeground(BaseTool):
         try:
             result = await asyncio.to_thread(force_window_foreground, title)
             if not result.get("activated"):
-                return self._failure(
-                    f"Window activation failed for '{title}': {result.get('stderr') or result.get('error') or result}"
-                )
+                reason = result.get("stderr") or result.get("error") or result
+                return self._failure(f"Window activation failed for '{title}': {reason}")
             return self._success("Window forced to foreground", data=result)
         except Exception as exc:
             return self._failure(str(exc))
@@ -595,8 +592,12 @@ def _get_now_playing_powershell() -> dict[str, str]:
     # --- Strategy 1: SMTC API ---
     script = (
         "Add-Type -AssemblyName System.Runtime.WindowsRuntime; "
-        "$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime]; "
-        "$mgr = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync().GetAwaiter().GetResult(); "
+        "$null = [Windows.Media.Control."
+        "GlobalSystemMediaTransportControlsSessionManager, "
+        "Windows.Media.Control, ContentType=WindowsRuntime]; "
+        "$mgr = [Windows.Media.Control."
+        "GlobalSystemMediaTransportControlsSessionManager]::"
+        "RequestAsync().GetAwaiter().GetResult(); "
         "$session = $mgr.GetCurrentSession(); "
         "if (-not $session) { exit 1 }; "
         "$props = $session.TryGetMediaPropertiesAsync().GetAwaiter().GetResult(); "

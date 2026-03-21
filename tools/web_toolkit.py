@@ -10,9 +10,7 @@ import asyncio
 
 from config.logging import get_logger
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import force_window_foreground
-from tools.base import resolve_user_path
+from tools.base import BaseTool, force_window_foreground, resolve_user_path
 
 logger = get_logger(__name__)
 
@@ -227,3 +225,36 @@ class WebDownloadFile(BaseTool):
                 await page.close()
         except Exception as exc:
             return self._failure(f"Download failed: {exc}")
+
+
+class WebExecuteJavaScript(BaseTool):
+    name = "web_execute_javascript"
+    description = "Execute JavaScript on a page URL and return the result."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        url = str(self._first_param(params, "url", "target", default="")).strip()
+        script = str(self._first_param(params, "script", "javascript", "code", default="")).strip()
+
+        if not url:
+            return self._failure("url is required")
+        if not script:
+            return self._failure("script is required")
+        if not url.startswith("http"):
+            url = "https://" + url
+
+        try:
+            context = await _get_browser()
+            page = await context.new_page()
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                result = await page.evaluate(script)
+                return self._success(
+                    "JavaScript executed",
+                    data={"url": url, "result": result},
+                )
+            finally:
+                await page.close()
+        except Exception as exc:
+            return self._failure(f"JavaScript execution failed: {exc}")

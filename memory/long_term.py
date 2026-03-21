@@ -7,9 +7,8 @@ exact keyword match.
 
 from __future__ import annotations
 
-from typing import Any
-
 import hashlib
+from typing import Any
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings

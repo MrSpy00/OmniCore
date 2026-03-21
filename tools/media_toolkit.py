@@ -6,8 +6,7 @@ import re
 from pathlib import Path
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import resolve_user_path
+from tools.base import BaseTool, resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
@@ -26,8 +25,9 @@ class MediaDownloadYoutubeAudio(BaseTool):
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        from yt_dlp import YoutubeDL
         from typing import Any, cast
+
+        from yt_dlp import YoutubeDL
 
         url = tool_input.parameters.get("url", "")
         output_path = tool_input.parameters.get("output_path", "youtube_audio.mp3")
@@ -66,8 +66,9 @@ class MediaGetYoutubeTranscript(BaseTool):
     description = "Fetch the transcript for a YouTube video by URL or ID."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        from youtube_transcript_api import YouTubeTranscriptApi
         from typing import Any, cast
+
+        from youtube_transcript_api import YouTubeTranscriptApi
 
         url = tool_input.parameters.get("url")
         video_id = tool_input.parameters.get("video_id")

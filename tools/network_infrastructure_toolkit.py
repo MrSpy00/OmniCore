@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import ftplib
 import os
-import socket
-import subprocess
 import re
 import shutil
+import socket
+import subprocess
 from pathlib import Path
 
 import paramiko
@@ -213,9 +213,10 @@ class OsDeepSearch(BaseTool):
                 f"Deep search completed ({result.get('count', 0)} matches)",
                 data=result,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return self._failure(
-                f"Search timed out after {timeout_seconds}s for root '{search_root}' and pattern '{filename}'"
+                "Search timed out after "
+                f"{timeout_seconds}s for root '{search_root}' and pattern '{filename}'"
             )
         except Exception as exc:
             return self._failure(str(exc))
@@ -417,7 +418,8 @@ def _deep_search_windows(filename: str, search_root: Path, limit: int) -> dict[s
     escaped_name = filename.replace("'", "''")
     ps = (
         "$ErrorActionPreference='SilentlyContinue'; "
-        f"Get-ChildItem -Path '{escaped_root}' -Filter '{escaped_name}' -File -Recurse -ErrorAction SilentlyContinue | "
+        f"Get-ChildItem -Path '{escaped_root}' -Filter '{escaped_name}' "
+        "-File -Recurse -ErrorAction SilentlyContinue | "
         "Select-Object -ExpandProperty FullName"
     )
     completed = subprocess.run(

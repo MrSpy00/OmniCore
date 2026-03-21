@@ -10,9 +10,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import signal
 import sys
 from pathlib import Path
+
+from config.logging import get_logger, setup_logging
+from config.settings import get_settings
+from core.router import CognitiveRouter
+from memory.long_term import LongTermMemory
+from memory.short_term import ShortTermMemory
+from memory.state import StateTracker
+from scheduler.pulse import AutonomousPulse
+from tools.registry import ToolRegistry, discover_tool_classes
+from tools.web_toolkit import shutdown_browser
 
 os.chdir(os.path.expanduser("~"))
 
@@ -20,17 +29,6 @@ os.chdir(os.path.expanduser("~"))
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
-
-from config.logging import setup_logging, get_logger
-from config.settings import get_settings
-from memory.short_term import ShortTermMemory
-from memory.long_term import LongTermMemory
-from memory.state import StateTracker
-from tools.registry import ToolRegistry, discover_tool_classes
-from tools.web_toolkit import shutdown_browser
-from core.router import CognitiveRouter
-from scheduler.pulse import AutonomousPulse
-
 
 logger = get_logger(__name__)
 

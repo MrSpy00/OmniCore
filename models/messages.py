@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -26,7 +26,7 @@ class Message(BaseModel):
     content: str
     channel: str = "unknown"  # telegram, cli, rest, scheduler
     user_id: str = ""
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict = Field(default_factory=dict)
 
 
@@ -35,7 +35,7 @@ class Conversation(BaseModel):
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     messages: list[Message] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def add(self, message: Message) -> None:
         """Append a message to the conversation."""

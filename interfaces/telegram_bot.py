@@ -11,9 +11,9 @@ from __future__ import annotations
 import asyncio
 import html
 import uuid
-from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -26,7 +26,6 @@ from telegram.ext import (
 from config.logging import get_logger
 from config.settings import get_settings
 from core.guardian import ApprovalResult
-from telegram.constants import ParseMode
 from core.router import CognitiveRouter
 from models.messages import Message, MessageRole
 
@@ -241,7 +240,8 @@ class TelegramGateway:
                 text=(
                     "<b>APPROVAL REQUIRED</b>\n\n"
                     f"Action: <code>{_escape_html(action_description)}</code>\n\n"
-                    f"This will time out in <code>{self._settings.hitl_timeout_minutes}</code> minutes."
+                    "This will time out in "
+                    f"<code>{self._settings.hitl_timeout_minutes}</code> minutes."
                 ),
                 reply_markup=keyboard,
                 parse_mode=ParseMode.HTML,

@@ -203,8 +203,9 @@ class TestRecoveryAntiLoop:
 # ---------------------------------------------------------------------------
 class TestTurkishPrompt:
     def test_prompt_is_turkish(self):
-        from core.router import CognitiveRouter
         from typing import Any, cast
+
+        from core.router import CognitiveRouter
 
         router = CognitiveRouter.__new__(CognitiveRouter)
         router._registry = cast(

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from urllib.parse import quote
 import webbrowser
+from urllib.parse import quote
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool

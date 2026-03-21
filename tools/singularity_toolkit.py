@@ -14,11 +14,10 @@ import feedparser
 import httpx
 import pandas as pd
 import pygetwindow as gw
-from PIL import Image, ImageOps, ImageStat  # type: ignore[import-not-found]
+from PIL import Image, ImageOps  # type: ignore[import-not-found]
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import resolve_user_path
+from tools.base import BaseTool, resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
@@ -94,7 +93,6 @@ class DocPdfToTextAdvanced(BaseTool):
     description = "Convert a PDF to text using page-aware extraction."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        from PyPDF2 import PdfReader
 
         path = str(self._first_param(self._params(tool_input), "path", default=""))
         if not path:
@@ -352,7 +350,8 @@ def _get_toast_notifier():
     except ModuleNotFoundError as exc:
         if exc.name == "pkg_resources":
             raise RuntimeError(
-                "Desktop notifications require setuptools because win10toast depends on pkg_resources"
+                "Desktop notifications require setuptools because win10toast "
+                "depends on pkg_resources"
             ) from exc
         raise
     return ToastNotifier()

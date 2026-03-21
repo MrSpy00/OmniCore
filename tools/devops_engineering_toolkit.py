@@ -7,8 +7,7 @@ import subprocess
 from pathlib import Path
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import resolve_user_path
+from tools.base import BaseTool, resolve_user_path
 
 
 class DevGitCommitPush(BaseTool):

@@ -7,7 +7,6 @@ without requiring Telegram credentials.
 from __future__ import annotations
 
 import asyncio
-import sys
 
 from config.logging import get_logger
 from core.guardian import ApprovalResult

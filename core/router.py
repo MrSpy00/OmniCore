@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import re
 import threading
 from collections.abc import Awaitable, Callable
@@ -227,7 +228,8 @@ class CognitiveRouter:
             if self._key_rotator.current
             else "<empty>",
         )
-        self._llm = self._build_llm(self._settings)
+        self._destroy_current_llm()
+        self._llm = self._create_groq_client(self._key_rotator.current, self._model_rotator.current)
 
     @retry(
         reraise=True,
@@ -247,34 +249,9 @@ class CognitiveRouter:
                     and self._key_rotator is not None
                     and self._model_rotator is not None
                 ):
-                    # Hard reset path: destroy client, rotate route, and instantiate fresh.
-                    old_key = self._key_rotator.current
-                    old_model = self._model_rotator.current
-
-                    self._destroy_current_llm()
-
-                    prev_key = self._key_rotator.current
-                    new_key = self._key_rotator.next_key()
-                    wrapped = (
-                        len(self._key_rotator) > 1
-                        and new_key == self._key_rotator.first
-                        and prev_key != new_key
-                    )
-                    if len(self._key_rotator) == 1:
-                        wrapped = True
-                    if wrapped:
-                        self._model_rotator.next_model()
-
-                    new_model = self._model_rotator.current
-                    self._llm = self._create_groq_client(new_key, new_model)
-
-                    logger.warning(
-                        "router.groq_hard_reinstantiated",
-                        old_model=old_model,
-                        new_model=new_model,
-                        old_key_suffix=f"...{old_key[-6:]}" if old_key else "<empty>",
-                        new_key_suffix=f"...{new_key[-6:]}" if new_key else "<empty>",
-                    )
+                    # Hard reset path on 429/rate-limit/timeouts:
+                    # destroy current client -> rotate key/model -> instantiate fresh client.
+                    self._rotate_groq_route_and_rebuild()
                 else:
                     self._rotate_groq_route_and_rebuild()
             raise
@@ -356,7 +333,11 @@ class CognitiveRouter:
             "DİĞER API ANAHTARINA GEÇ VE İŞLEMİ TAMAMLA! "
             "KURAL 5: BEN BİR ŞEYİ ONAYLADIYSAM (APPROVE YES), "
             "HİÇBİR İZİN VEYA GÜVENLİK DUVARINA TAKILMADAN "
-            "O İŞLEMİ ZORLA YAPACAKSIN!"
+            "O İŞLEMİ ZORLA YAPACAKSIN! "
+            "KURAL 6: HAVA DURUMUNU ASLA UYDURMA. "
+            "HAVA İSTEKLERİNDE SADECE api_weather aracı veya "
+            "wttr.in gibi gerçek kaynakları kullan, "
+            "sahte URL/domain üretme."
         )
         return (
             f"{mandated}\n\n"
@@ -375,11 +356,12 @@ class CognitiveRouter:
     async def _classify_intent(self, user_text: str, lc_messages: list) -> dict[str, Any]:
         """Ask the LLM to decide: plan or direct answer."""
         classification_prompt = (
-            f"Decide whether the following request requires executing tools "
-            f"or is a simple conversational reply.\n"
-            f"Request: {user_text}\n\n"
-            f"Respond ONLY with JSON: "
-            f'{{"needs_plan": true/false, "steps": [...] or []}}'
+            "Aşağıdaki isteğin araç çalıştırmayı gerektirip gerektirmediğine karar ver.\n"
+            f"İstek: {user_text}\n\n"
+            "ÖNEMLİ: Hava durumu isteklerinde mutlaka api_weather veya güvenilir gerçek kaynak "
+            "(örn. wttr.in) kullanılmalı; sahte bağlantı üretilmez.\n"
+            "SADECE JSON döndür:\n"
+            '{"needs_plan": true/false, "steps": [...] or []}'
         )
         lc_messages_copy = list(lc_messages) + [HumanMessage(content=classification_prompt)]
 
@@ -557,6 +539,8 @@ class CognitiveRouter:
         if explicit is not True and not retryable:
             return None
 
+        source_query = str(params.get("query") or user_message.content or "")
+        source_url = str(params.get("url") or "")
         fallback_input = ToolInput(
             tool_name="gui_autonomous_explorer",
             parameters={
@@ -566,8 +550,8 @@ class CognitiveRouter:
                 ),
                 "source_tool": step.tool_name,
                 "source_error": str(getattr(primary_output, "error", "") or ""),
-                "query": str(params.get("query") or params.get("url") or ""),
-                "url": str(params.get("url") or ""),
+                "query": source_query,
+                "url": source_url,
                 "max_steps": int(params.get("fallback_steps", 4) or 4),
             },
             requires_approval=fallback_tool.is_destructive,
@@ -601,6 +585,87 @@ class CognitiveRouter:
                     fallback_tool="gui_autonomous_explorer",
                 )
                 return fallback_output
+
+            # Secondary fallback sequence (Windows): Win+R -> type target -> Enter -> OCR
+            # This keeps behavior human-like when primary GUI explorer cannot complete.
+            if os.name == "nt":
+                hotkey_tool = self._registry.get("gui_press_hotkey")
+                type_tool = self._registry.get("gui_type_text")
+                analyze_tool = self._registry.get("gui_analyze_screen")
+
+                if hotkey_tool and type_tool and analyze_tool:
+                    target = source_url.strip()
+                    if not target:
+                        query_encoded = source_query.strip().replace(" ", "+")
+                        target = f"https://www.google.com/search?q={query_encoded}"
+
+                    sequence_tools = [hotkey_tool, type_tool, analyze_tool]
+                    if any(
+                        t.requires_approval(ToolInput(tool_name=t.name, parameters={}))
+                        for t in sequence_tools
+                    ):
+                        approval = await self._guardian.request_approval(
+                            action_description=(
+                                "GUI fallback sequence: gui_press_hotkey + "
+                                "gui_type_text + gui_analyze_screen"
+                            ),
+                            user_id=user_message.user_id,
+                        )
+                        if approval != ApprovalResult.APPROVED:
+                            return None
+
+                    step_hotkey = await self._recovery.execute_with_retry(
+                        hotkey_tool,
+                        ToolInput(
+                            tool_name="gui_press_hotkey",
+                            parameters={"keys": ["win", "r"]},
+                            requires_approval=hotkey_tool.is_destructive,
+                        ),
+                        step,
+                    )
+                    if step_hotkey.status.value != "success":
+                        return None
+
+                    step_type = await self._recovery.execute_with_retry(
+                        type_tool,
+                        ToolInput(
+                            tool_name="gui_type_text",
+                            parameters={"text": target, "interval": 0.01},
+                            requires_approval=type_tool.is_destructive,
+                        ),
+                        step,
+                    )
+                    if step_type.status.value != "success":
+                        return None
+
+                    step_enter = await self._recovery.execute_with_retry(
+                        hotkey_tool,
+                        ToolInput(
+                            tool_name="gui_press_hotkey",
+                            parameters={"keys": ["enter"]},
+                            requires_approval=hotkey_tool.is_destructive,
+                        ),
+                        step,
+                    )
+                    if step_enter.status.value != "success":
+                        return None
+
+                    step_ocr = await self._recovery.execute_with_retry(
+                        analyze_tool,
+                        ToolInput(
+                            tool_name="gui_analyze_screen",
+                            parameters={"max_chars": 5000},
+                            requires_approval=analyze_tool.is_destructive,
+                        ),
+                        step,
+                    )
+                    if step_ocr.status.value == "success":
+                        logger.info(
+                            "router.hybrid_fallback_success",
+                            source_tool=step.tool_name,
+                            fallback_tool="gui_hotkey_type_analyze",
+                        )
+                        return step_ocr
 
             logger.warning(
                 "router.hybrid_fallback_failed",

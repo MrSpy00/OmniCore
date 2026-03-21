@@ -6,8 +6,7 @@ import asyncio
 from pathlib import Path
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import resolve_user_path
+from tools.base import BaseTool, resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
@@ -27,11 +26,9 @@ class DocReadPdf(BaseTool):
         try:
             target = _resolve_sandboxed(path)
             if target.suffix.lower() == ".pdf":
-                from PyPDF2 import PdfReader
 
                 text = await asyncio.to_thread(_read_pdf, target)
             elif target.suffix.lower() == ".docx":
-                from docx import Document
 
                 text = await asyncio.to_thread(_read_docx, target)
             else:

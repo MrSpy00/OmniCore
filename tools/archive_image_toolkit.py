@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
 import zipfile
 from pathlib import Path
 
 from PIL import Image  # type: ignore[import-not-found]
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import resolve_user_path
+from tools.base import BaseTool, resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:

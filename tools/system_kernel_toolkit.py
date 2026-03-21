@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import winreg
-from pathlib import Path
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
@@ -174,7 +173,11 @@ def _wifi_passwords() -> list[dict[str, str]]:
 
 def _control_hardware(target: str, value: int) -> str:
     if target == "brightness":
-        command = f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{value})"
+        command = (
+            "(Get-WmiObject -Namespace root/WMI "
+            "-Class WmiMonitorBrightnessMethods)."
+            f"WmiSetBrightness(1,{value})"
+        )
         completed = subprocess.run(
             ["powershell", "-NoProfile", "-Command", command],
             capture_output=True,
@@ -186,7 +189,11 @@ def _control_hardware(target: str, value: int) -> str:
         if value <= 0:
             command = "(new-object -com wscript.shell).SendKeys([char]173)"
         else:
-            command = f"1..{max(1, value // 2)} | ForEach-Object {{ (New-Object -ComObject WScript.Shell).SendKeys([char]175) }}"
+            command = (
+                f"1..{max(1, value // 2)} | ForEach-Object {{ "
+                "(New-Object -ComObject WScript.Shell)."
+                "SendKeys([char]175) }"
+            )
         completed = subprocess.run(
             ["powershell", "-NoProfile", "-Command", command],
             capture_output=True,

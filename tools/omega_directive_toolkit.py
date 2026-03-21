@@ -389,6 +389,8 @@ def _gui_autonomous_explore_sync(url: str, query: str, max_steps: int) -> dict[s
 
     import webbrowser
 
+    import pyautogui
+
     webbrowser.open_new_tab(target_url)
     steps.append({"action": "open_new_tab", "target": target_url})
 
@@ -400,6 +402,18 @@ def _gui_autonomous_explore_sync(url: str, query: str, max_steps: int) -> dict[s
     if not force.get("activated"):
         force = force_window_foreground("Browser")
     steps.append({"action": "force_foreground", "target": json.dumps(force, ensure_ascii=True)})
+
+    # Human-like fallback actions: search bar focus + type + enter + settle.
+    try:
+        pyautogui.hotkey("ctrl", "l")
+        steps.append({"action": "hotkey", "target": "ctrl+l"})
+        pyautogui.write(target_url, interval=0.01)
+        steps.append({"action": "type", "target": target_url})
+        pyautogui.press("enter")
+        steps.append({"action": "press", "target": "enter"})
+        time.sleep(1.5)
+    except Exception as exc:
+        steps.append({"action": "input_sequence_error", "target": str(exc)})
 
     return {
         "url": target_url,

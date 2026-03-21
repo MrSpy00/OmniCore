@@ -102,7 +102,8 @@ class RecoveryEngine:
                         reason="2_ardisik_istisna",
                     )
                     last_output.error = (
-                        f"[DÖNGÜ KORUMASI] {tool.name} araci 2 kez istisna firlatarak basarisiz oldu. "
+                        f"[DÖNGÜ KORUMASI] {tool.name} araci 2 kez "
+                        "istisna firlatarak basarisiz oldu. "
                         f"Son hata: {type(exc).__name__}: {exc}"
                     )
                     return last_output

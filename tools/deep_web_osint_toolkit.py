@@ -6,15 +6,13 @@ import asyncio
 import re
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
-from typing import cast
 
 import dns.resolver
 import httpx
 from bs4 import BeautifulSoup
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import resolve_user_path
+from tools.base import BaseTool, resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:

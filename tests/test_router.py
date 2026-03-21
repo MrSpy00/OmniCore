@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
-from models.messages import Message, MessageRole
 
 
 class TestRouterIntentClassification:
@@ -19,7 +17,7 @@ class TestRouterIntentClassification:
         from core.router import CognitiveRouter
 
         with patch.object(CognitiveRouter, "__init__", lambda self, **kw: None):
-            router = CognitiveRouter.__new__(CognitiveRouter)
+            CognitiveRouter.__new__(CognitiveRouter)
             result = {"needs_plan": False, "steps": []}
             assert result["needs_plan"] is False
             assert result["steps"] == []

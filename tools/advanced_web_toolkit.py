@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from urllib.parse import urljoin
-from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup

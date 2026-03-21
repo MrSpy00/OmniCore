@@ -9,9 +9,8 @@ import subprocess
 from pathlib import Path
 
 from config.logging import get_logger
-from tools.base import resolve_user_path
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
+from tools.base import BaseTool, resolve_user_path
 
 logger = get_logger(__name__)
 
@@ -82,8 +81,6 @@ class OsWriteFile(BaseTool):
     is_destructive = True  # can overwrite
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
-        params = self._params(tool_input)
-        path = str(self._first_param(params, "file_path", "path", "value", default=""))
         return self.is_destructive
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -104,8 +101,9 @@ class OsWriteFile(BaseTool):
                     str(content),
                 )
                 if not elevation_result.get("ok"):
+                    elevate_error = elevation_result.get("error") or elevation_result
                     return self._failure(
-                        f"Permission denied and elevation failed: {exc}; {elevation_result.get('error') or elevation_result}"
+                        f"Permission denied and elevation failed: {exc}; {elevate_error}"
                     )
             if not path.exists() or not path.is_file():
                 return self._failure(f"Write verification failed: {path}")
@@ -160,9 +158,6 @@ class OsMoveFile(BaseTool):
     is_destructive = True
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
-        params = self._params(tool_input)
-        src = str(self._first_param(params, "source", "src", default=""))
-        dst = str(self._first_param(params, "destination", "dest", default=""))
         return self.is_destructive
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -193,8 +188,6 @@ class OsDeleteFile(BaseTool):
     is_destructive = True
 
     def requires_approval(self, tool_input: ToolInput) -> bool:
-        params = self._params(tool_input)
-        path = str(self._first_param(params, "file_path", "path", "value", default=""))
         return self.is_destructive
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -263,7 +256,11 @@ def _attempt_windows_elevation_write(path: Path, content: str) -> dict[str, obje
     """Attempt elevated write by relaunching python with RunAs."""
     escaped_path = str(path).replace("'", "''")
     escaped_content = content.replace("'", "''")
-    py_code = f"from pathlib import Path; Path(r'''{escaped_path}''').write_text(r'''{escaped_content}''', encoding='utf-8')"
+    py_code = (
+        "from pathlib import Path; "
+        f"Path(r'''{escaped_path}''').write_text(r'''{escaped_content}''', "
+        "encoding='utf-8')"
+    )
     command = (
         "$py = (Get-Command python).Source; "
         f"$args = @('-c', '{py_code}'); "

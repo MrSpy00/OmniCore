@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -14,9 +11,9 @@ from memory.short_term import ShortTermMemory
 from memory.state import StateTracker
 from models.messages import Message, MessageRole
 from models.tools import ToolInput
-from tools.registry import ToolRegistry
-from tools.os_toolkit import OsReadFile, OsWriteFile, OsListDir
 from tools.api_toolkit import ApiDatetime
+from tools.os_toolkit import OsListDir, OsReadFile, OsWriteFile
+from tools.registry import ToolRegistry
 
 
 # ---------------------------------------------------------------------------

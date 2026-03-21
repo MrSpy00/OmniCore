@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
 from core.planner import Planner
-from models.tasks import StepStatus
 
 
 class TestPlannerBuildPlan:

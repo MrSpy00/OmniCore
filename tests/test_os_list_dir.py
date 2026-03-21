@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+import tools.base as base_mod
 from models.tools import ToolInput, ToolStatus
 from tools.os_toolkit import OsListDir
-import tools.base as base_mod
 
 
 @pytest.mark.asyncio

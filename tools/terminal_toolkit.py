@@ -11,8 +11,7 @@ import os
 
 from config.logging import get_logger
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import resolve_user_path
+from tools.base import BaseTool, resolve_user_path
 
 logger = get_logger(__name__)
 
@@ -90,7 +89,7 @@ class TerminalExecute(BaseTool):
                 },
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("terminal.timeout", command=command, timeout=timeout)
             return self._failure(f"Command timed out after {timeout}s")
         except Exception as exc:

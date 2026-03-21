@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -53,7 +53,7 @@ class TaskPlan(BaseModel):
     user_request: str  # the original natural-language request
     steps: list[TaskStep] = Field(default_factory=list)
     status: TaskStatus = TaskStatus.PLANNING
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
     error_summary: str = ""
 
@@ -76,10 +76,10 @@ class TaskPlan(BaseModel):
     def mark_complete(self) -> None:
         """Mark the plan as completed."""
         self.status = TaskStatus.COMPLETED
-        self.completed_at = datetime.now(timezone.utc)
+        self.completed_at = datetime.now(UTC)
 
     def mark_failed(self, error: str) -> None:
         """Mark the plan as failed with an error summary."""
         self.status = TaskStatus.FAILED
         self.error_summary = error
-        self.completed_at = datetime.now(timezone.utc)
+        self.completed_at = datetime.now(UTC)

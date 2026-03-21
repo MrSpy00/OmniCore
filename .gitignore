@@ -12,6 +12,8 @@ venv/
 
 # Environment secrets
 .env
+.env.*
+!.env.example
 
 # Data directories (runtime-generated)
 data/
@@ -21,6 +23,15 @@ data/
 .agents/
 prompt1.txt
 prompt2.txt
+prompt*.txt
+START.txt
+
+# Secret and local override files
+*.secrets
+*.secret
+secrets.*
+local.*
+*.local
 
 # IDE
 .vscode/
@@ -39,6 +50,9 @@ Thumbs.db
 node_modules/
 __pycache__/
 *.log
+*.db
+*.mp4
+*.png
 
 # Omega toolkit generated artifacts
 omnicore_packet_capture.txt

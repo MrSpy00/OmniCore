@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pyautogui
 import mss  # type: ignore[import-not-found]
+import pyautogui
 from PIL import Image  # type: ignore[import-not-found]
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
-from tools.base import resolve_user_path
+from tools.base import BaseTool, resolve_user_path
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
@@ -77,14 +76,46 @@ class GuiPressHotkey(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        keys = params.get("keys", [])
+        keys = self._first_param(params, "keys", "hotkey", "key", default=[])
         if isinstance(keys, str):
-            keys = [keys]
+            normalized = keys.replace("+", " ").replace(",", " ").split()
+            keys = normalized if normalized else [keys]
         if not keys:
             return self._failure("keys is required")
         try:
-            pyautogui.hotkey(*keys)
-            return self._success(f"Pressed hotkey: {'+'.join(keys)}")
+            key_list = [str(k).strip() for k in keys if str(k).strip()]
+            if not key_list:
+                return self._failure("keys is required")
+            pyautogui.hotkey(*key_list)
+            return self._success(f"Pressed hotkey: {'+'.join(key_list)}")
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class GuiScrollMouse(BaseTool):
+    name = "gui_scroll_mouse"
+    description = "Scroll mouse wheel by a number of clicks."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        clicks = self._first_param(params, "clicks", "amount", "delta", default=0)
+        x = self._first_param(params, "x")
+        y = self._first_param(params, "y")
+
+        try:
+            clicks_int = int(clicks)
+        except Exception:
+            return self._failure("clicks must be an integer")
+
+        try:
+            if x is not None and y is not None:
+                pyautogui.moveTo(int(x), int(y), duration=0.1)
+            pyautogui.scroll(clicks_int)
+            return self._success(
+                f"Scrolled mouse by {clicks_int} clicks",
+                data={"clicks": clicks_int, "x": x, "y": y},
+            )
         except Exception as exc:
             return self._failure(str(exc))
 

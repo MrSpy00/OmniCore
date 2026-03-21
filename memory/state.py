@@ -7,7 +7,7 @@ and scheduler.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
@@ -78,7 +78,8 @@ class StateTracker:
         """Fetch a task by ID."""
         assert self._db
         async with self._db.execute(
-            "SELECT id, user_request, status, plan_json, created_at, updated_at FROM tasks WHERE id = ?",
+            "SELECT id, user_request, status, plan_json, created_at, updated_at "
+            "FROM tasks WHERE id = ?",
             (task_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -97,10 +98,16 @@ class StateTracker:
         """List tasks, optionally filtered by status."""
         assert self._db
         if status:
-            query = "SELECT id, user_request, status, created_at, updated_at FROM tasks WHERE status = ? ORDER BY updated_at DESC LIMIT ?"
+            query = (
+                "SELECT id, user_request, status, created_at, updated_at "
+                "FROM tasks WHERE status = ? ORDER BY updated_at DESC LIMIT ?"
+            )
             params: tuple = (status, limit)
         else:
-            query = "SELECT id, user_request, status, created_at, updated_at FROM tasks ORDER BY updated_at DESC LIMIT ?"
+            query = (
+                "SELECT id, user_request, status, created_at, updated_at "
+                "FROM tasks ORDER BY updated_at DESC LIMIT ?"
+            )
             params = (limit,)
         async with self._db.execute(query, params) as cursor:
             rows = await cursor.fetchall()
@@ -127,7 +134,8 @@ class StateTracker:
         """Append an entry to the audit log."""
         assert self._db
         await self._db.execute(
-            "INSERT INTO audit_log (event_type, detail, user_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO audit_log (event_type, detail, user_id, metadata_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
             (event_type, detail, user_id, json.dumps(metadata or {}), _now_iso()),
         )
         await self._db.commit()
@@ -136,7 +144,8 @@ class StateTracker:
         """Retrieve recent audit entries."""
         assert self._db
         async with self._db.execute(
-            "SELECT id, event_type, detail, user_id, metadata_json, created_at FROM audit_log ORDER BY id DESC LIMIT ?",
+            "SELECT id, event_type, detail, user_id, metadata_json, created_at "
+            "FROM audit_log ORDER BY id DESC LIMIT ?",
             (limit,),
         ) as cursor:
             rows = await cursor.fetchall()
@@ -210,7 +219,7 @@ class StateTracker:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 _SCHEMA = """

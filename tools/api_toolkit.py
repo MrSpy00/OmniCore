@@ -13,7 +13,7 @@ subclassing ``BaseTool`` and registering with the ``ToolRegistry``.
 
 from __future__ import annotations
 
-import json
+from datetime import UTC
 
 import httpx
 
@@ -131,8 +131,8 @@ class ApiDatetime(BaseTool):
     description = "Get the current date and time, optionally for a specific timezone."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        from datetime import datetime, timezone
         import zoneinfo
+        from datetime import datetime
 
         default_tz = "Europe/Istanbul"
         params = self._params(tool_input)
@@ -144,7 +144,7 @@ class ApiDatetime(BaseTool):
                 tz_name = default_tz
                 tz = zoneinfo.ZoneInfo(tz_name)
             except Exception:
-                tz = timezone.utc
+                tz = UTC
                 tz_name = "UTC"
 
         now = datetime.now(tz)

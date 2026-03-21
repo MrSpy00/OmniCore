@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import tools.base as base_mod
 from tools.base import resolve_user_path
 
