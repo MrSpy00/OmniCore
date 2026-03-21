@@ -23,7 +23,6 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from pydantic import SecretStr
-from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
 from config.logging import get_logger
 from config.settings import get_settings
@@ -323,19 +322,29 @@ class CognitiveRouter:
             ],
         }
 
-    @retry(
-        reraise=True,
-        stop=stop_after_attempt(2),
-        wait=wait_fixed(2),
-        retry=retry_if_exception(_is_retryable_llm_error),
-    )
+    def _compute_retry_budget(self) -> int:
+        groq_routes = 1
+        if self._key_rotator is not None and self._model_rotator is not None:
+            groq_routes = max(1, len(self._key_rotator) * len(self._model_rotator))
+        google_routes = max(1, len(self._settings.google_api_keys))
+        return max(3, groq_routes + google_routes + 2)
+
     async def _ainvoke_with_retry(self, messages: list) -> Any:
-        try:
-            if self._llm is None:
-                self._llm = self._build_llm(self._settings)
-            return await self._llm.ainvoke(messages)
-        except Exception as exc:
-            if _is_retryable_llm_error(exc):
+        attempt = 0
+        max_attempts = self._compute_retry_budget()
+        last_exc: Exception | None = None
+
+        while attempt < max_attempts:
+            attempt += 1
+            try:
+                if self._llm is None:
+                    self._llm = self._build_llm(self._settings)
+                return await self._llm.ainvoke(messages)
+            except Exception as exc:
+                if not _is_retryable_llm_error(exc):
+                    raise
+
+                last_exc = exc
                 provider = self._runtime_provider
                 self._destroy_current_llm()
                 if provider == "groq":
@@ -355,7 +364,10 @@ class CognitiveRouter:
                     )
                     if single_route or any(marker in detail for marker in exhausted_markers):
                         logger.warning(
-                            "router.provider_fallback", from_provider="groq", to_provider="gemini"
+                            "router.provider_fallback",
+                            from_provider="groq",
+                            to_provider="gemini",
+                            attempt=attempt,
                         )
                         self._switch_provider("gemini")
                     else:
@@ -364,7 +376,10 @@ class CognitiveRouter:
                     self._rotate_google_route_and_rebuild()
                 else:
                     self._llm = self._build_llm(self._settings)
-            raise
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("LLM invocation failed")
 
     # -- public API -----------------------------------------------------------
 

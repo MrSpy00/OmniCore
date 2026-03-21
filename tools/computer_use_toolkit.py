@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import random
+import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, cast
 
 import imageio.v2 as imageio  # type: ignore[import-not-found]
-import mss  # type: ignore[import-not-found]
+
+try:
+    import mss  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - optional backend
+    mss = None  # type: ignore[assignment]
+
 import pyautogui
 from PIL import Image  # type: ignore[import-not-found]
 
@@ -242,25 +250,106 @@ def _human_type(text: str) -> None:
 def _record_screen(path: Path, seconds: float, fps: int) -> None:
     frames = []
     frame_count = max(1, int(seconds * fps))
-    with mss.mss() as sct:
-        monitor = sct.monitors[0]
+
+    if mss is not None:
+        try:
+            with mss.mss() as sct:
+                monitor = sct.monitors[0]
+                for _ in range(frame_count):
+                    shot = sct.grab(monitor)
+                    frames.append(Image.frombytes("RGB", shot.size, shot.rgb))
+                    time.sleep(1 / max(1, fps))
+        except Exception:
+            frames = []
+
+    if not frames:
         for _ in range(frame_count):
-            shot = sct.grab(monitor)
-            frames.append(Image.frombytes("RGB", shot.size, shot.rgb))
+            frames.append(_capture_frame_dotnet())
             time.sleep(1 / max(1, fps))
+
     with imageio.get_writer(path, format=cast(Any, "FFMPEG"), fps=fps) as writer:
         append_data = cast(Any, writer).append_data
         for frame in frames:
             append_data(frame)
 
 
+def _capture_frame_dotnet() -> Image.Image:
+    if os.name != "nt":
+        raise RuntimeError(".NET screen capture is only available on Windows")
+
+    temp_path = Path(tempfile.gettempdir()) / "omnicore_frame_capture.png"
+    escaped = str(temp_path).replace("'", "''")
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "Add-Type -AssemblyName System.Drawing; "
+        "$vs=[System.Windows.Forms.SystemInformation]::VirtualScreen; "
+        "$bmp=New-Object System.Drawing.Bitmap $vs.Width,$vs.Height; "
+        "$gfx=[System.Drawing.Graphics]::FromImage($bmp); "
+        "$gfx.CopyFromScreen($vs.Left,$vs.Top,0,0,$bmp.Size,"
+        "[System.Drawing.CopyPixelOperation]::SourceCopy); "
+        f"$bmp.Save('{escaped}', [System.Drawing.Imaging.ImageFormat]::Png); "
+        "$gfx.Dispose(); $bmp.Dispose();"
+    )
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=25,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            (completed.stderr or completed.stdout or "dotnet frame capture failed").strip()
+        )
+
+    with Image.open(temp_path) as img:
+        frame = img.copy()
+    try:
+        temp_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return frame
+
+
 def _capture_region(path: Path, region: dict[str, int]) -> None:
     if region["width"] <= 0 or region["height"] <= 0:
         raise ValueError("width and height must be greater than zero")
-    with mss.mss() as sct:
-        shot = sct.grab(region)
-        image = Image.frombytes("RGB", shot.size, shot.rgb)
-        image.save(path)
+    if mss is not None:
+        mss_backend = cast(Any, mss)
+        with mss_backend.mss() as sct:
+            shot = sct.grab(region)
+            image = Image.frombytes("RGB", shot.size, shot.rgb)
+            image.save(path)
+        return
+
+    if os.name != "nt":
+        raise RuntimeError("Region capture requires mss on non-Windows platforms")
+
+    left = int(region["left"])
+    top = int(region["top"])
+    width = int(region["width"])
+    height = int(region["height"])
+    escaped = str(path).replace("'", "''")
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "Add-Type -AssemblyName System.Drawing; "
+        f"$left={left}; $top={top}; $width={width}; $height={height}; "
+        "$bmp=New-Object System.Drawing.Bitmap $width,$height; "
+        "$gfx=[System.Drawing.Graphics]::FromImage($bmp); "
+        "$gfx.CopyFromScreen($left,$top,0,0,$bmp.Size,"
+        "[System.Drawing.CopyPixelOperation]::SourceCopy); "
+        f"$bmp.Save('{escaped}', [System.Drawing.Imaging.ImageFormat]::Png); "
+        "$gfx.Dispose(); $bmp.Dispose();"
+    )
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=25,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            (completed.stderr or completed.stdout or "dotnet region capture failed").strip()
+        )
 
 
 def _locate_and_click_via_vision(element_desc: str) -> dict[str, Any]:
@@ -273,10 +362,14 @@ def _locate_and_click_via_vision(element_desc: str) -> dict[str, Any]:
     import tempfile
 
     # Capture full screen.
-    with mss.mss() as sct:
-        monitor = sct.monitors[0]
-        shot = sct.grab(monitor)
-        img = Image.frombytes("RGB", shot.size, shot.rgb)
+    if mss is not None:
+        mss_backend = cast(Any, mss)
+        with mss_backend.mss() as sct:
+            monitor = sct.monitors[0]
+            shot = sct.grab(monitor)
+            img = Image.frombytes("RGB", shot.size, shot.rgb)
+    else:
+        img = _capture_frame_dotnet()
 
     tmp_path = Path(tempfile.gettempdir()) / "omnicore_locate_click.png"
     img.save(tmp_path)
@@ -331,13 +424,20 @@ async def _background_record_loop() -> None:
     fps = int(_BACKGROUND_RECORDER.get("fps", 5) or 5)
     frame_interval = 1.0 / max(1, fps)
 
-    with mss.mss() as sct:
-        monitor = sct.monitors[0]
-        with imageio.get_writer(path, format=cast(Any, "FFMPEG"), fps=fps) as writer:
-            append_data = cast(Any, writer).append_data
+    with imageio.get_writer(path, format=cast(Any, "FFMPEG"), fps=fps) as writer:
+        append_data = cast(Any, writer).append_data
+        if mss is not None:
+            mss_backend = cast(Any, mss)
+            with mss_backend.mss() as sct:
+                monitor = sct.monitors[0]
+                while not _BACKGROUND_RECORDER.get("stop"):
+                    shot = await asyncio.to_thread(sct.grab, monitor)
+                    frame = Image.frombytes("RGB", shot.size, shot.rgb)
+                    append_data(frame)
+                    await asyncio.sleep(frame_interval)
+        else:
             while not _BACKGROUND_RECORDER.get("stop"):
-                shot = await asyncio.to_thread(sct.grab, monitor)
-                frame = Image.frombytes("RGB", shot.size, shot.rgb)
+                frame = await asyncio.to_thread(_capture_frame_dotnet)
                 append_data(frame)
                 await asyncio.sleep(frame_interval)
 

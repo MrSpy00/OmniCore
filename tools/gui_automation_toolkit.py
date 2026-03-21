@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 
-import mss  # type: ignore[import-not-found]
+try:
+    import mss  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - optional backend
+    mss = None  # type: ignore[assignment]
+
 import pyautogui
 from PIL import Image  # type: ignore[import-not-found]
 
@@ -92,7 +98,13 @@ class GuiPressHotkey(BaseTool):
             key_list = [str(k).strip() for k in keys if str(k).strip()]
             if not key_list:
                 return self._failure("keys is required")
-            pyautogui.hotkey(*key_list)
+            if os.name == "nt":
+                if any(k.lower() in {"win", "windows", "meta", "super"} for k in key_list):
+                    _send_hotkey_user32_windows(key_list)
+                else:
+                    _send_hotkey_sendkeys_windows(key_list)
+            else:
+                pyautogui.hotkey(*key_list)
             return self._success(f"Pressed hotkey: {'+'.join(key_list)}")
         except Exception as exc:
             return self._failure(str(exc))
@@ -147,19 +159,19 @@ class GuiTakeScreenshot(BaseTool):
             elif str(output_path).strip().lower() in {"desktop", "downloads", "documents"}:
                 save_path = _resolve_output_target(str(output_path)) / "screenshot.png"
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            with mss.mss() as sct:
-                if region:
-                    bbox = {
-                        "left": int(region.get("left", 0)),
-                        "top": int(region.get("top", 0)),
-                        "width": int(region.get("width", 0)),
-                        "height": int(region.get("height", 0)),
-                    }
-                else:
-                    bbox = sct.monitors[0]
-                shot = sct.grab(bbox)
-                img = Image.frombytes("RGB", shot.size, shot.rgb)
-                img.save(save_path)
+            if os.name == "nt":
+                try:
+                    _capture_screen_dotnet(save_path, region if isinstance(region, dict) else None)
+                except Exception as dotnet_exc:
+                    try:
+                        _capture_screen_mss(save_path, region if isinstance(region, dict) else None)
+                    except Exception as mss_exc:
+                        raise RuntimeError(
+                            f"Screenshot capture failed (.NET + mss): {dotnet_exc}; {mss_exc}"
+                        ) from mss_exc
+            else:
+                _capture_screen_mss(save_path, region if isinstance(region, dict) else None)
+
             return self._success(
                 f"Screenshot saved to {save_path.name}",
                 data={"path": str(save_path)},
@@ -181,3 +193,201 @@ class GuiGetMousePosition(BaseTool):
             )
         except Exception as exc:
             return self._failure(str(exc))
+
+
+def _capture_screen_mss(path: Path, region: dict | None = None) -> None:
+    if mss is None:
+        raise RuntimeError("mss backend is unavailable")
+
+    with mss.mss() as sct:
+        if region:
+            bbox = {
+                "left": int(region.get("left", 0)),
+                "top": int(region.get("top", 0)),
+                "width": int(region.get("width", 0)),
+                "height": int(region.get("height", 0)),
+            }
+        else:
+            bbox = sct.monitors[0]
+        shot = sct.grab(bbox)
+        img = Image.frombytes("RGB", shot.size, shot.rgb)
+        img.save(path)
+
+
+def _capture_screen_dotnet(path: Path, region: dict | None = None) -> None:
+    escaped_path = str(path).replace("'", "''")
+    if region:
+        left = int(region.get("left", 0))
+        top = int(region.get("top", 0))
+        width = int(region.get("width", 0))
+        height = int(region.get("height", 0))
+        if width <= 0 or height <= 0:
+            raise ValueError("region width/height must be greater than zero")
+        sizing = f"$left={left}; $top={top}; $width={width}; $height={height}; "
+    else:
+        sizing = (
+            "$vs=[System.Windows.Forms.SystemInformation]::VirtualScreen; "
+            "$left=$vs.Left; $top=$vs.Top; $width=$vs.Width; $height=$vs.Height; "
+        )
+
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "Add-Type -AssemblyName System.Drawing; "
+        + sizing
+        + "$bmp=New-Object System.Drawing.Bitmap $width,$height; "
+        "$gfx=[System.Drawing.Graphics]::FromImage($bmp); "
+        "$gfx.CopyFromScreen($left,$top,0,0,$bmp.Size,"
+        "[System.Drawing.CopyPixelOperation]::SourceCopy); "
+        f"$bmp.Save('{escaped_path}', [System.Drawing.Imaging.ImageFormat]::Png); "
+        "$gfx.Dispose(); $bmp.Dispose();"
+    )
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=25,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            (completed.stderr or completed.stdout or "dotnet capture failed").strip()
+        )
+
+
+def _send_hotkey_sendkeys_windows(keys: list[str]) -> None:
+    send_seq = _keys_to_sendkeys_sequence(keys)
+    escaped_seq = send_seq.replace("'", "''")
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        f"[System.Windows.Forms.SendKeys]::SendWait('{escaped_seq}')"
+    )
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError((completed.stderr or completed.stdout or "sendkeys failed").strip())
+
+
+def _send_hotkey_user32_windows(keys: list[str]) -> None:
+    vk_codes = [_key_to_vk(key) for key in keys]
+    if any(code is None for code in vk_codes):
+        unknown = [keys[i] for i, code in enumerate(vk_codes) if code is None]
+        raise ValueError(f"Unsupported key(s) for user32 injection: {unknown}")
+
+    vk_expr = ",".join(str(int(code or 0)) for code in vk_codes)
+    script = (
+        'Add-Type -TypeDefinition @"\n'
+        "using System;\n"
+        "using System.Runtime.InteropServices;\n"
+        "public static class Keyboard {\n"
+        '  [DllImport("user32.dll")]\n'
+        "  public static extern void keybd_event("
+        "byte bVk, byte bScan, int dwFlags, int dwExtraInfo);\n"
+        "}\n"
+        '"@ -Language CSharp; '
+        f"$keys=@({vk_expr}); "
+        "foreach($vk in $keys){ [Keyboard]::keybd_event([byte]$vk,0,0,0) }; "
+        "Start-Sleep -Milliseconds 70; "
+        "for($i=$keys.Count-1; $i -ge 0; $i--){ [Keyboard]::keybd_event([byte]$keys[$i],0,2,0) }"
+    )
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError((completed.stderr or completed.stdout or "user32 hotkey failed").strip())
+
+
+def _keys_to_sendkeys_sequence(keys: list[str]) -> str:
+    modifiers: list[str] = []
+    main_key = ""
+    for key in keys:
+        normalized = key.strip().lower()
+        if not normalized:
+            continue
+        if normalized in {"ctrl", "control"}:
+            modifiers.append("^")
+            continue
+        if normalized == "alt":
+            modifiers.append("%")
+            continue
+        if normalized == "shift":
+            modifiers.append("+")
+            continue
+        if normalized in {"win", "windows", "meta", "super"}:
+            raise ValueError("Windows key hotkeys must use user32 backend")
+        main_key = _key_to_sendkeys_token(normalized)
+        break
+
+    if not main_key:
+        raise ValueError("No primary key provided for hotkey")
+    return "".join(modifiers) + main_key
+
+
+def _key_to_sendkeys_token(key: str) -> str:
+    mapping = {
+        "enter": "{ENTER}",
+        "return": "{ENTER}",
+        "esc": "{ESC}",
+        "escape": "{ESC}",
+        "tab": "{TAB}",
+        "space": " ",
+        "backspace": "{BACKSPACE}",
+        "delete": "{DELETE}",
+        "home": "{HOME}",
+        "end": "{END}",
+        "pgup": "{PGUP}",
+        "pageup": "{PGUP}",
+        "pgdn": "{PGDN}",
+        "pagedown": "{PGDN}",
+        "up": "{UP}",
+        "down": "{DOWN}",
+        "left": "{LEFT}",
+        "right": "{RIGHT}",
+        "f1": "{F1}",
+        "f2": "{F2}",
+        "f3": "{F3}",
+        "f4": "{F4}",
+        "f5": "{F5}",
+        "f6": "{F6}",
+        "f7": "{F7}",
+        "f8": "{F8}",
+        "f9": "{F9}",
+        "f10": "{F10}",
+        "f11": "{F11}",
+        "f12": "{F12}",
+    }
+    if key in mapping:
+        return mapping[key]
+    if len(key) == 1:
+        return key
+    return "{" + key.upper() + "}"
+
+
+def _key_to_vk(key: str) -> int | None:
+    k = key.strip().lower()
+    if k in {"win", "windows", "meta", "super"}:
+        return 0x5B
+    if k in {"ctrl", "control"}:
+        return 0x11
+    if k == "alt":
+        return 0x12
+    if k == "shift":
+        return 0x10
+    if k in {"enter", "return"}:
+        return 0x0D
+    if k in {"esc", "escape"}:
+        return 0x1B
+    if k == "tab":
+        return 0x09
+    if k == "space":
+        return 0x20
+    if len(k) == 1:
+        ch = k.upper()
+        if "A" <= ch <= "Z" or "0" <= ch <= "9":
+            return ord(ch)
+    return None

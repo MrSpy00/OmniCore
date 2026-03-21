@@ -13,22 +13,22 @@ import os
 import sys
 from pathlib import Path
 
-from config.logging import get_logger, setup_logging
-from config.settings import get_settings
-from core.router import CognitiveRouter
-from memory.long_term import LongTermMemory
-from memory.short_term import ShortTermMemory
-from memory.state import StateTracker
-from scheduler.pulse import AutonomousPulse
-from tools.registry import ToolRegistry, discover_tool_classes
-from tools.web_toolkit import shutdown_browser
-
-os.chdir(os.path.expanduser("~"))
-
 # Ensure project root is on sys.path so all local packages resolve.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+
+from config.logging import get_logger, setup_logging  # noqa: E402
+from config.settings import get_settings  # noqa: E402
+from core.router import CognitiveRouter  # noqa: E402
+from memory.long_term import LongTermMemory  # noqa: E402
+from memory.short_term import ShortTermMemory  # noqa: E402
+from memory.state import StateTracker  # noqa: E402
+from scheduler.pulse import AutonomousPulse  # noqa: E402
+from tools.registry import ToolRegistry, discover_tool_classes  # noqa: E402
+from tools.web_toolkit import shutdown_browser  # noqa: E402
+
+os.chdir(os.path.expanduser("~"))
 
 logger = get_logger(__name__)
 

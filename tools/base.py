@@ -252,6 +252,14 @@ def force_window_foreground(window_title: str, timeout_seconds: float = 5.0) -> 
 
     last_error = ""
 
+    # Primary (Windows): C# user32 injection through PowerShell.
+    if _is_windows():
+        native = _force_window_foreground_windows_native(title_hint, timeout_seconds)
+        if bool(native.get("activated")):
+            return native
+        last_error = str(native.get("error") or native.get("stderr") or "")
+
+    # Secondary: pygetwindow activation.
     try:
         import pygetwindow as gw  # type: ignore[import-not-found]
 
@@ -285,6 +293,7 @@ def force_window_foreground(window_title: str, timeout_seconds: float = 5.0) -> 
     except Exception as exc:
         last_error = str(exc)
 
+    # Tertiary: AppActivate fallback for title-based activation.
     escaped = title_hint.replace("'", "''")
     script = (
         "$ws = New-Object -ComObject WScript.Shell; "
@@ -313,3 +322,82 @@ def force_window_foreground(window_title: str, timeout_seconds: float = 5.0) -> 
             "error": str(exc),
             "last_error": last_error,
         }
+
+
+def _force_window_foreground_windows_native(
+    title_hint: str, timeout_seconds: float
+) -> dict[str, Any]:
+    escaped = title_hint.replace("'", "''")
+    timeout_ms = int(max(0.1, timeout_seconds) * 1000)
+
+    csharp = (
+        "using System;\n"
+        "using System.Runtime.InteropServices;\n"
+        "public static class WinApi {\n"
+        '  [DllImport("user32.dll")]\n'
+        "  public static extern bool SetForegroundWindow(IntPtr hWnd);\n"
+        '  [DllImport("user32.dll")]\n'
+        "  public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);\n"
+        '  [DllImport("user32.dll")]\n'
+        "  public static extern IntPtr GetForegroundWindow();\n"
+        "}\n"
+    )
+
+    script = (
+        "$ErrorActionPreference='Stop'; "
+        + "Add-Type -TypeDefinition @'\n"
+        + csharp
+        + "'@ -Language CSharp; "
+        + f"$needle='{escaped}'; $deadline=(Get-Date).AddMilliseconds({timeout_ms}); "
+        + "$proc=$null; "
+        + "while((Get-Date) -lt $deadline){ "
+        + "$proc = Get-Process | Where-Object { "
+        + "$_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like ('*' + $needle + '*') "
+        + "} | Select-Object -First 1; "
+        + "if($proc){ break }; Start-Sleep -Milliseconds 120 } "
+        + "if(-not $proc){ "
+        + "$out=[PSCustomObject]@{activated=$false;method='powershell_user32';"
+        + "error='window_not_found'}; $out|ConvertTo-Json -Compress; exit 2 } "
+        + "$h=[IntPtr]$proc.MainWindowHandle; "
+        + "[WinApi]::ShowWindowAsync($h,9) | Out-Null; Start-Sleep -Milliseconds 60; "
+        + "$ok=[WinApi]::SetForegroundWindow($h); "
+        + "$active=[WinApi]::GetForegroundWindow(); "
+        + "$activated=($active -eq $h) -or $ok; "
+        + "$out=[PSCustomObject]@{"
+        + "activated=[bool]$activated;method='powershell_user32';"
+        + "matched_title=$proc.MainWindowTitle;process=$proc.ProcessName;pid=$proc.Id}; "
+        + "$out|ConvertTo-Json -Compress"
+    )
+
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=max(10, int(timeout_seconds + 5)),
+        )
+    except Exception as exc:
+        return {
+            "activated": False,
+            "method": "powershell_user32",
+            "error": str(exc),
+        }
+
+    stdout = (completed.stdout or "").strip()
+    if stdout:
+        try:
+            parsed = json.loads(stdout)
+            if isinstance(parsed, dict):
+                parsed.setdefault("returncode", completed.returncode)
+                parsed.setdefault("stderr", completed.stderr)
+                return parsed
+        except Exception:
+            pass
+
+    return {
+        "activated": completed.returncode == 0,
+        "method": "powershell_user32",
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "returncode": completed.returncode,
+    }
