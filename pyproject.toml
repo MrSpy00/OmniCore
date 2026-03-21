@@ -43,6 +43,7 @@ dependencies = [
     "openpyxl>=3.1.0",
     # Audio
     "edge-tts>=6.1.0",
+    "SpeechRecognition>=3.10.4",
     # Security
     "cryptography>=42.0.0",
     "paramiko>=3.5.0",

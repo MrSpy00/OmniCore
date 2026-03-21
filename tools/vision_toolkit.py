@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import time
 from pathlib import Path
+from typing import Any, cast
 
 import mss  # type: ignore[import-not-found]
 import pyautogui
@@ -38,6 +40,20 @@ def _resolve_sandboxed(path_str: str) -> Path:
     return target
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(str(value))
+    except Exception:
+        return default
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(str(value))
+    except Exception:
+        return default
+
+
 class GuiAnalyzeScreen(BaseTool):
     name = "gui_analyze_screen"
     description = "Take a screenshot and extract visible text using Gemini vision."
@@ -57,31 +73,70 @@ class GuiAnalyzeScreen(BaseTool):
         click = bool(params.get("click", False))
         verify_after_click = bool(params.get("verify_after_click", False))
         max_attempts = int(params.get("max_attempts", 2) or 2)
+        scroll_retries = int(params.get("scroll_retries", 3) or 3)
+        scroll_clicks = int(params.get("scroll_clicks", -700) or -700)
 
         try:
             save_path = _resolve_sandboxed(output_path)
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
-            await asyncio.to_thread(_capture_screen, save_path, region)
-            text = await asyncio.to_thread(
-                analyze_image_with_gemini, save_path, SCREEN_ANALYSIS_PROMPT
-            )
+            text = ""
             max_chars = int(params.get("max_chars", 20_000))
-            if len(text) > max_chars:
-                text = text[:max_chars] + "\n... (truncated)"
+            payload: dict[str, Any] = {"path": str(save_path), "text": text}
 
-            payload = {"path": str(save_path), "text": text}
+            locator_attempts: list[dict[str, Any]] = []
+            located: dict[str, Any] | None = None
+            attempts = max(0, scroll_retries) + 1
+
+            for attempt in range(1, attempts + 1):
+                await asyncio.to_thread(_capture_screen, save_path, region)
+                text = await asyncio.to_thread(
+                    analyze_image_with_gemini, save_path, SCREEN_ANALYSIS_PROMPT
+                )
+                if len(text) > max_chars:
+                    text = text[:max_chars] + "\n... (truncated)"
+                payload["text"] = text
+
+                if not target:
+                    break
+
+                located = await asyncio.to_thread(_locate_target_with_vision, save_path, target)
+                located_conf = _as_float(located.get("confidence", 0.0), 0.0)
+                located_x = _as_int(located.get("x", 0), 0)
+                located_y = _as_int(located.get("y", 0), 0)
+                locator_attempts.append(
+                    {
+                        "attempt": attempt,
+                        "found": bool(located.get("found")),
+                        "confidence": located_conf,
+                        "x": located_x,
+                        "y": located_y,
+                    }
+                )
+
+                if bool(located.get("found")):
+                    break
+
+                if attempt < attempts:
+                    await asyncio.to_thread(pyautogui.scroll, scroll_clicks)
+                    await asyncio.to_thread(time.sleep, 0.25)
 
             if target:
-                located = await asyncio.to_thread(_locate_target_with_vision, save_path, target)
                 payload["target"] = target
-                payload["locator"] = located
+                payload["locator"] = located or {
+                    "found": False,
+                    "x": 0,
+                    "y": 0,
+                    "confidence": 0.0,
+                    "reason": "Target not found after scroll retries",
+                }
+                payload["locator_attempts"] = locator_attempts
 
-                if click and bool(located.get("found")):
+                if click and located and bool(located.get("found")):
                     click_result = await asyncio.to_thread(
                         _click_with_self_correction,
-                        int(located.get("x", 0) or 0),
-                        int(located.get("y", 0) or 0),
+                        _as_int(located.get("x", 0), 0),
+                        _as_int(located.get("y", 0), 0),
                         target,
                         max(1, max_attempts),
                         verify_after_click,
@@ -158,7 +213,7 @@ def analyze_image_with_gemini(path: Path, prompt: str = SCREEN_ANALYSIS_PROMPT) 
     raise RuntimeError("Vision analysis failed")
 
 
-def _locate_target_with_vision(path: Path, target: str) -> dict[str, object]:
+def _locate_target_with_vision(path: Path, target: str) -> dict[str, Any]:
     prompt = f"{TARGET_LOCATE_PROMPT} Target description: {target}"
     raw = analyze_image_with_gemini(path, prompt)
     text = raw.strip()
@@ -170,11 +225,11 @@ def _locate_target_with_vision(path: Path, target: str) -> dict[str, object]:
                 text = text[4:]
             text = text.strip()
 
-    parsed = json.loads(text)
+    parsed = cast(dict[str, Any], json.loads(text))
     found = bool(parsed.get("found", False))
-    x = int(parsed.get("x", 0) or 0)
-    y = int(parsed.get("y", 0) or 0)
-    confidence = float(parsed.get("confidence", 0.0) or 0.0)
+    x = _as_int(parsed.get("x", 0), 0)
+    y = _as_int(parsed.get("y", 0), 0)
+    confidence = _as_float(parsed.get("confidence", 0.0), 0.0)
     reason = str(parsed.get("reason", "") or "")
     return {
         "found": found,
@@ -192,8 +247,8 @@ def _click_with_self_correction(
     target: str,
     max_attempts: int,
     verify_after_click: bool,
-) -> dict[str, object]:
-    attempts: list[dict[str, object]] = []
+) -> dict[str, Any]:
+    attempts: list[dict[str, Any]] = []
     current_x = x
     current_y = y
 
@@ -208,17 +263,17 @@ def _click_with_self_correction(
 
         temp_path = Path(pathlib_temp_dir()) / "vision_verify_after_click.png"
         _capture_screen(temp_path, None)
-        locator = _locate_target_with_vision(temp_path, target)
+        locator = cast(dict[str, Any], _locate_target_with_vision(temp_path, target))
         entry["verify_found"] = bool(locator.get("found"))
-        entry["verify_confidence"] = float(locator.get("confidence", 0.0) or 0.0)
+        entry["verify_confidence"] = _as_float(locator.get("confidence", 0.0), 0.0)
 
         if not bool(locator.get("found")):
             entry["status"] = "completed"
             attempts.append(entry)
             return {"status": "completed", "attempts": attempts}
 
-        current_x = int(locator.get("x", current_x) or current_x)
-        current_y = int(locator.get("y", current_y) or current_y)
+        current_x = _as_int(locator.get("x", current_x), current_x)
+        current_y = _as_int(locator.get("y", current_y), current_y)
         entry["status"] = "retry"
         attempts.append(entry)
 

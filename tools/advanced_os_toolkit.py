@@ -8,6 +8,7 @@ import os
 import platform
 import shutil
 import subprocess
+import tempfile
 import webbrowser
 from pathlib import Path
 from typing import cast
@@ -35,13 +36,47 @@ def _run_elevated_command(command: str, timeout: int = 120) -> dict[str, object]
             text=True,
             timeout=timeout,
         )
-        return {
-            "platform": "windows",
-            "command": command,
-            "returncode": completed.returncode,
-            "stdout": (completed.stdout or "")[:4000],
-            "stderr": (completed.stderr or "")[:4000],
-        }
+        if completed.returncode == 0:
+            return {
+                "platform": "windows",
+                "command": command,
+                "backend": "powershell_start_process",
+                "returncode": completed.returncode,
+                "stdout": (completed.stdout or "")[:4000],
+                "stderr": (completed.stderr or "")[:4000],
+            }
+
+        # Fallback: VBScript RunAs launcher for systems where Start-Process cannot elevate.
+        vbs_path = Path(tempfile.gettempdir()) / "omnicore_elevated_run.vbs"
+        vbs_path.write_text(
+            'Set UAC = CreateObject("Shell.Application")\n'
+            + (
+                'UAC.ShellExecute "powershell.exe", '
+                f'"-NoProfile -ExecutionPolicy Bypass -Command {command_json}", '
+                '"", "runas", 0\n'
+            ),
+            encoding="utf-8",
+        )
+        try:
+            vbs_run = subprocess.run(
+                ["wscript", str(vbs_path)],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            return {
+                "platform": "windows",
+                "command": command,
+                "backend": "vbs_runas_fallback",
+                "returncode": vbs_run.returncode,
+                "stdout": ((completed.stdout or "") + "\n" + (vbs_run.stdout or ""))[:4000],
+                "stderr": ((completed.stderr or "") + "\n" + (vbs_run.stderr or ""))[:4000],
+            }
+        finally:
+            try:
+                vbs_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     if system == "darwin":
         wrapped = f"sudo -n /bin/zsh -lc {json.dumps(command)}"
@@ -418,6 +453,59 @@ class SysReadNotifications(BaseTool):
             return self._failure(str(exc))
 
 
+class SysAutoTroubleshooter(BaseTool):
+    name = "sys_auto_troubleshooter"
+    description = "Collect system diagnostics and suggest likely root causes for common failures."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        symptom = str(self._first_param(params, "symptom", "issue", "query", default="")).strip()
+        if not symptom:
+            symptom = "general system instability"
+
+        try:
+            diagnostics = await asyncio.to_thread(_collect_basic_diagnostics)
+            findings = _infer_diagnostic_findings(symptom, diagnostics)
+            return self._success(
+                "System auto-troubleshooter completed",
+                data={
+                    "symptom": symptom,
+                    "diagnostics": diagnostics,
+                    "findings": findings,
+                },
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class OsPhantomFileHider(BaseTool):
+    name = "os_phantom_file_hider"
+    description = "Toggle hidden attribute on a file or directory (Windows only)."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        if os.name != "nt":
+            return self._failure("os_phantom_file_hider is supported only on Windows")
+
+        params = self._params(tool_input)
+        path_raw = str(self._first_param(params, "path", "target", "file_path", default="")).strip()
+        action = str(self._first_param(params, "action", default="hide")).strip().lower()
+        if not path_raw:
+            return self._failure("path is required")
+        if action not in {"hide", "unhide"}:
+            return self._failure("action must be hide or unhide")
+
+        try:
+            target_path, _ = resolve_user_path(path_raw)
+            result = await asyncio.to_thread(_toggle_hidden_attribute, target_path, action)
+            return self._success(
+                f"Phantom file action completed: {action}",
+                data=result,
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
 def _list_installed_apps_from_registry() -> list[dict[str, str]]:
     import winreg
 
@@ -594,6 +682,120 @@ def _collect_resource_info() -> dict[str, float]:
         "cpu_percent": psutil.cpu_percent(interval=0.2),
         "memory_used_percent": psutil.virtual_memory().percent,
         "disk_used_percent": psutil.disk_usage("/").percent,
+    }
+
+
+def _collect_basic_diagnostics() -> dict[str, object]:
+    vm = psutil.virtual_memory()
+    du = psutil.disk_usage("/")
+    cpu = psutil.cpu_percent(interval=0.3)
+
+    top = []
+    for proc in psutil.process_iter(attrs=["pid", "name", "cpu_percent", "memory_percent"]):
+        info = proc.info
+        top.append(
+            {
+                "pid": int(info.get("pid") or 0),
+                "name": str(info.get("name") or ""),
+                "cpu_percent": _to_float(info.get("cpu_percent"), 0.0),
+                "memory_percent": _to_float(info.get("memory_percent"), 0.0),
+            }
+        )
+    top.sort(key=lambda row: (row["cpu_percent"], row["memory_percent"]), reverse=True)
+    return {
+        "platform": platform.platform(),
+        "cpu_percent": cpu,
+        "memory_used_percent": vm.percent,
+        "disk_used_percent": du.percent,
+        "top_processes": top[:10],
+    }
+
+
+def _infer_diagnostic_findings(
+    symptom: str, diagnostics: dict[str, object]
+) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    cpu = _to_float(diagnostics.get("cpu_percent"), 0.0)
+    mem = _to_float(diagnostics.get("memory_used_percent"), 0.0)
+    disk = _to_float(diagnostics.get("disk_used_percent"), 0.0)
+    symptom_l = symptom.lower()
+
+    if cpu >= 85.0:
+        findings.append(
+            {
+                "severity": "high",
+                "cause": "High CPU saturation",
+                "suggestion": "Close or restart top CPU processes and retry.",
+            }
+        )
+    if mem >= 90.0:
+        findings.append(
+            {
+                "severity": "high",
+                "cause": "Memory pressure",
+                "suggestion": "Free RAM by closing heavy apps or rebooting.",
+            }
+        )
+    if disk >= 92.0:
+        findings.append(
+            {
+                "severity": "high",
+                "cause": "Disk nearly full",
+                "suggestion": "Free disk space and rerun the failed operation.",
+            }
+        )
+
+    if "network" in symptom_l or "internet" in symptom_l:
+        findings.append(
+            {
+                "severity": "medium",
+                "cause": "Network-related symptom reported",
+                "suggestion": "Run net_intercept_and_analyze for connection-level diagnostics.",
+            }
+        )
+
+    if not findings:
+        findings.append(
+            {
+                "severity": "low",
+                "cause": "No obvious system bottleneck detected",
+                "suggestion": "Collect app-specific logs and retry with elevated diagnostics.",
+            }
+        )
+    return findings
+
+
+def _to_float(value: object, default: float = 0.0) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _toggle_hidden_attribute(target_path: Path, action: str) -> dict[str, object]:
+    if not target_path.exists():
+        raise FileNotFoundError(f"Path does not exist: {target_path}")
+
+    cmd = ["attrib", "+h" if action == "hide" else "-h", str(target_path)]
+    completed = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError((completed.stderr or completed.stdout or "attrib failed").strip())
+
+    return {
+        "path": str(target_path),
+        "action": action,
+        "returncode": completed.returncode,
+        "stdout": (completed.stdout or "").strip(),
+        "stderr": (completed.stderr or "").strip(),
     }
 
 

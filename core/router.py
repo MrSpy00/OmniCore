@@ -174,6 +174,7 @@ class CognitiveRouter:
         self._key_rotator: _GroqKeyRotator | None = None
         self._model_rotator: _GroqModelRotator | None = None
         self._google_key_rotator: _ApiKeyRotator | None = None
+        self._runtime_provider = settings.llm_provider.strip().lower() or "gemini"
         self._settings = settings
         self._llm = self._build_llm(settings)
         self._planner = Planner(self._llm)
@@ -184,7 +185,7 @@ class CognitiveRouter:
         self._recovery = RecoveryEngine()
 
     def _build_llm(self, settings) -> Any:
-        provider = settings.llm_provider.strip().lower()
+        provider = self._runtime_provider
         if provider == "groq":
             api_keys = settings.groq_api_keys
             if not api_keys:
@@ -223,6 +224,11 @@ class CognitiveRouter:
             )
 
         raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+
+    def _switch_provider(self, provider: str) -> None:
+        self._runtime_provider = provider.strip().lower() or "gemini"
+        self._destroy_current_llm()
+        self._llm = self._build_llm(self._settings)
 
     def _create_groq_client(self, api_key: str, model_name: str) -> Any:
         """Create a fresh ChatGroq instance for the given route."""
@@ -330,10 +336,30 @@ class CognitiveRouter:
             return await self._llm.ainvoke(messages)
         except Exception as exc:
             if _is_retryable_llm_error(exc):
-                provider = self._settings.llm_provider.strip().lower()
+                provider = self._runtime_provider
                 self._destroy_current_llm()
                 if provider == "groq":
-                    self._rotate_groq_route_and_rebuild()
+                    exhausted_markers = (
+                        "all configured groq",
+                        "all keys",
+                        "exhausted",
+                        "quota",
+                        "resource_exhausted",
+                    )
+                    detail = str(exc).lower()
+                    single_route = (
+                        self._key_rotator is not None
+                        and self._model_rotator is not None
+                        and len(self._key_rotator) <= 1
+                        and len(self._model_rotator) <= 1
+                    )
+                    if single_route or any(marker in detail for marker in exhausted_markers):
+                        logger.warning(
+                            "router.provider_fallback", from_provider="groq", to_provider="gemini"
+                        )
+                        self._switch_provider("gemini")
+                    else:
+                        self._rotate_groq_route_and_rebuild()
                 elif provider in ("", "gemini"):
                     self._rotate_google_route_and_rebuild()
                 else:
@@ -531,6 +557,17 @@ class CognitiveRouter:
 
             # Execute with recovery.
             output = await self._recovery.execute_with_retry(tool, tool_input, step)
+
+            if output.status.value == "success" and _is_generic_or_empty_success(output):
+                output = output.model_copy(
+                    update={
+                        "status": "failure",
+                        "error": (
+                            "Tool returned generic/empty success without actionable data; "
+                            "treated as failure for safety"
+                        ),
+                    }
+                )
 
             if output.status.value != "success":
                 fallback_output = await self._attempt_hybrid_gui_fallback(
@@ -788,3 +825,34 @@ def _contains_dummy_markers(text: str) -> bool:
     ]
     lowered = text.lower()
     return any(re.search(p, lowered) for p in patterns)
+
+
+def _is_generic_or_empty_success(output) -> bool:
+    if getattr(output, "status", None) != "success":
+        return False
+
+    result = str(getattr(output, "result", "") or "").strip().lower()
+    data = getattr(output, "data", {}) or {}
+
+    if not result and not data:
+        return True
+
+    generic_markers = {
+        "ok",
+        "success",
+        "completed",
+        "done",
+        "işlem tamamlandı",
+        "islem tamamlandi",
+        "command completed",
+        "command executed",
+    }
+    if result in generic_markers and not data:
+        return True
+
+    if isinstance(data, dict):
+        flattened = " ".join(str(v).strip().lower() for v in data.values())
+        if "success" in flattened and "result" not in data and len(data) <= 1:
+            return True
+
+    return False

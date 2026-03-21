@@ -32,17 +32,45 @@ class GuiClickImageOnScreen(BaseTool):
         params = self._params(tool_input)
         image_path = str(self._first_param(params, "image_path", "path", default=""))
         confidence = float(self._first_param(params, "confidence", default=0.8) or 0.8)
+        scroll_retries = int(self._first_param(params, "scroll_retries", default=3) or 3)
+        scroll_clicks = int(self._first_param(params, "scroll_clicks", default=-700) or -700)
+        ocr_fallback = bool(self._first_param(params, "ocr_fallback", default=True))
         if not image_path:
             return self._failure("image_path is required")
         try:
             target = _resolve_sandboxed(image_path)
-            point = await asyncio.to_thread(
-                pyautogui.locateCenterOnScreen, str(target), confidence=confidence
-            )
-            if point is None:
-                return self._failure("Image not found on screen")
-            await asyncio.to_thread(pyautogui.click, point.x, point.y)
-            return self._success("Image found and clicked", data={"x": point.x, "y": point.y})
+            point = None
+            attempts = max(0, scroll_retries) + 1
+            for attempt in range(1, attempts + 1):
+                point = await asyncio.to_thread(
+                    pyautogui.locateCenterOnScreen, str(target), confidence=confidence
+                )
+                if point is not None:
+                    await asyncio.to_thread(pyautogui.click, point.x, point.y)
+                    return self._success(
+                        "Image found and clicked",
+                        data={"x": point.x, "y": point.y, "method": "template", "attempt": attempt},
+                    )
+                if attempt < attempts:
+                    await asyncio.to_thread(pyautogui.scroll, scroll_clicks)
+                    await asyncio.to_thread(time.sleep, 0.25)
+
+            if ocr_fallback:
+                desc = str(
+                    self._first_param(
+                        params,
+                        "target",
+                        "description",
+                        "query",
+                        default=Path(image_path).stem,
+                    )
+                ).strip()
+                result = await asyncio.to_thread(_locate_and_click_via_vision, desc)
+                return self._success(
+                    "OCR fallback clicked target", data={**result, "method": "vision_ocr"}
+                )
+
+            return self._failure("Image not found on screen")
         except Exception as exc:
             return self._failure(str(exc))
 

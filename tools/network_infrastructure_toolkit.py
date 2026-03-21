@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ftplib
+import ipaddress
 import os
 import re
 import shutil
@@ -222,6 +223,31 @@ class OsDeepSearch(BaseTool):
             return self._failure(str(exc))
 
 
+class NetInterceptAndAnalyze(BaseTool):
+    name = "net_intercept_and_analyze"
+    description = "Capture a live socket snapshot and return a basic risk analysis."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        max_rows = int(self._first_param(params, "max_rows", "limit", default=200) or 200)
+        max_rows = max(10, min(max_rows, 2000))
+
+        try:
+            snapshot = await asyncio.to_thread(_collect_socket_snapshot)
+            analyzed = _analyze_socket_snapshot(snapshot)
+            total = len(analyzed)
+            return self._success(
+                f"Intercepted {total} socket rows and analyzed network risk",
+                data={
+                    "count": total,
+                    "rows": analyzed[:max_rows],
+                    "suspicious_count": sum(1 for row in analyzed if row.get("risk") != "low"),
+                },
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
 def _scan_ports(host: str, ports: list[int]) -> list[int]:
     open_ports: list[int] = []
     for port in ports:
@@ -416,11 +442,19 @@ def _deep_search_windows(filename: str, search_root: Path, limit: int) -> dict[s
 
     escaped_root = str(root).replace("'", "''")
     escaped_name = filename.replace("'", "''")
+    # Prefer .NET enumeration to explicitly skip inaccessible/protected directories.
     ps = (
         "$ErrorActionPreference='SilentlyContinue'; "
-        f"Get-ChildItem -Path '{escaped_root}' -Filter '{escaped_name}' "
-        "-File -Recurse -ErrorAction SilentlyContinue | "
-        "Select-Object -ExpandProperty FullName"
+        f"$root='{escaped_root}'; $name='{escaped_name}'; "
+        "$opts=[System.IO.EnumerationOptions]::new(); "
+        "$opts.RecurseSubdirectories=$true; "
+        "$opts.IgnoreInaccessible=$true; "
+        "$opts.ReturnSpecialDirectories=$false; "
+        + (
+            "$opts.AttributesToSkip=[System.IO.FileAttributes]::System "
+            "-bor [System.IO.FileAttributes]::Offline; "
+        )
+        + "[System.IO.Directory]::EnumerateFiles($root,$name,$opts)"
     )
     completed = subprocess.run(
         ["powershell", "-NoProfile", "-Command", ps],
@@ -459,3 +493,67 @@ def _deep_search_posix(filename: str, search_root: Path, limit: int) -> dict[str
         "raw_output": output,
         "returncode": completed.returncode,
     }
+
+
+def _collect_socket_snapshot() -> str:
+    if os.name == "nt":
+        completed = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return (completed.stdout or "") + (completed.stderr or "")
+
+    completed = subprocess.run(
+        ["netstat", "-tunap"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return (completed.stdout or "") + (completed.stderr or "")
+
+
+def _analyze_socket_snapshot(raw_output: str) -> list[dict[str, str]]:
+    parsed = _parse_netstat_live_connections(raw_output)
+    results: list[dict[str, str]] = []
+    for row in parsed:
+        remote_ip = str(row.get("remote_ip", ""))
+        risk, reason = _classify_remote_ip(remote_ip, str(row.get("remote", "")))
+        enriched = {
+            "protocol": str(row.get("protocol", "")),
+            "local": str(row.get("local", "")),
+            "remote": str(row.get("remote", "")),
+            "remote_ip": remote_ip,
+            "state": str(row.get("state", "")),
+            "pid": str(row.get("pid", "")),
+            "risk": risk,
+            "reason": reason,
+        }
+        results.append(enriched)
+    return results
+
+
+def _classify_remote_ip(remote_ip: str, remote_raw: str) -> tuple[str, str]:
+    if not remote_ip:
+        return "low", "no_remote_ip"
+
+    port = ""
+    if ":" in remote_raw:
+        port = remote_raw.rsplit(":", 1)[-1]
+
+    high_risk_ports = {"23", "2323", "445", "3389", "5900", "21"}
+    if port in high_risk_ports:
+        return "high", f"sensitive_port:{port}"
+
+    try:
+        ip_obj = ipaddress.ip_address(remote_ip)
+        if ip_obj.is_loopback:
+            return "low", "loopback"
+        if ip_obj.is_private:
+            return "low", "private_network"
+        if ip_obj.is_multicast or ip_obj.is_reserved:
+            return "medium", "special_range"
+        return "medium", "public_ip"
+    except ValueError:
+        return "medium", "non_ip_remote"

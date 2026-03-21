@@ -89,6 +89,50 @@ class MediaGenerateTtsHuman(BaseTool):
         return await AudioTextToSpeech().execute(tool_input)
 
 
+class MediaExtractTextFromVideo(BaseTool):
+    name = "media_extract_text_from_video"
+    description = "Extract text transcript from a local video by converting audio and applying STT."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        import tempfile
+
+        import speech_recognition as sr  # type: ignore[import-not-found]
+
+        params = self._params(tool_input)
+        source = str(self._first_param(params, "source", "path", "video_path", default="")).strip()
+        language = str(self._first_param(params, "language", default="en-US")).strip() or "en-US"
+        if not source:
+            return self._failure("source is required")
+
+        src = _resolve_sandboxed(source)
+        if not src.exists():
+            return self._failure(f"source not found: {src}")
+
+        wav_path = Path(tempfile.gettempdir()) / f"omnicore_stt_{src.stem}.wav"
+        try:
+            await asyncio.to_thread(_ffmpeg_extract_wav_mono, src, wav_path)
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(str(wav_path)) as audio_file:
+                audio_data = recognizer.record(audio_file)
+            text = await asyncio.to_thread(recognizer.recognize_google, audio_data, language)
+            return self._success(
+                "Video text extraction completed",
+                data={
+                    "source": str(src),
+                    "language": language,
+                    "text": text,
+                },
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+        finally:
+            try:
+                wav_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def _ffmpeg_convert_video(src: Path, dst: Path) -> None:
     subprocess.run(
         ["ffmpeg", "-y", "-i", str(src), str(dst)],
@@ -117,3 +161,23 @@ def _watermark_image(src: Path, dst: Path, text: str) -> None:
     draw.text((20, image.height - 40), text, fill=(255, 255, 255, 180), font=font)
     combined = Image.alpha_composite(image, overlay)
     combined.convert("RGB").save(dst)
+
+
+def _ffmpeg_extract_wav_mono(src: Path, dst: Path) -> None:
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(src),
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            str(dst),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=True,
+    )
