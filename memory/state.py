@@ -6,6 +6,7 @@ and scheduler.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +34,7 @@ class StateTracker:
         settings = get_settings()
         self._db_path = str(db_path or settings.sqlite_db_path)
         self._db: aiosqlite.Connection | None = None
+        self._write_lock = asyncio.Lock()
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -41,6 +43,7 @@ class StateTracker:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(self._db_path)
         await self._db.execute("PRAGMA journal_mode=WAL;")
+        await self._db.execute("PRAGMA foreign_keys=ON;")
         await self._create_tables()
         logger.info("state_tracker.initialized", db_path=self._db_path)
 
@@ -60,8 +63,7 @@ class StateTracker:
         plan_json: str = "",
     ) -> None:
         """Insert or update a task record."""
-        assert self._db
-        await self._db.execute(
+        await self._execute_write(
             """
             INSERT INTO tasks (id, user_request, status, plan_json, updated_at)
             VALUES (?, ?, ?, ?, ?)
@@ -72,12 +74,11 @@ class StateTracker:
             """,
             (task_id, user_request, status, plan_json, _now_iso()),
         )
-        await self._db.commit()
 
     async def get_task(self, task_id: str) -> dict | None:
         """Fetch a task by ID."""
-        assert self._db
-        async with self._db.execute(
+        db = self._require_db()
+        async with db.execute(
             "SELECT id, user_request, status, plan_json, created_at, updated_at "
             "FROM tasks WHERE id = ?",
             (task_id,),
@@ -96,7 +97,7 @@ class StateTracker:
 
     async def list_tasks(self, status: str | None = None, limit: int = 50) -> list[dict]:
         """List tasks, optionally filtered by status."""
-        assert self._db
+        db = self._require_db()
         if status:
             query = (
                 "SELECT id, user_request, status, created_at, updated_at "
@@ -109,7 +110,7 @@ class StateTracker:
                 "FROM tasks ORDER BY updated_at DESC LIMIT ?"
             )
             params = (limit,)
-        async with self._db.execute(query, params) as cursor:
+        async with db.execute(query, params) as cursor:
             rows = await cursor.fetchall()
             return [
                 {
@@ -132,18 +133,16 @@ class StateTracker:
         metadata: dict | None = None,
     ) -> None:
         """Append an entry to the audit log."""
-        assert self._db
-        await self._db.execute(
+        await self._execute_write(
             "INSERT INTO audit_log (event_type, detail, user_id, metadata_json, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
             (event_type, detail, user_id, json.dumps(metadata or {}), _now_iso()),
         )
-        await self._db.commit()
 
     async def get_audit_log(self, limit: int = 100) -> list[dict]:
         """Retrieve recent audit entries."""
-        assert self._db
-        async with self._db.execute(
+        db = self._require_db()
+        async with db.execute(
             "SELECT id, event_type, detail, user_id, metadata_json, created_at "
             "FROM audit_log ORDER BY id DESC LIMIT ?",
             (limit,),
@@ -172,8 +171,7 @@ class StateTracker:
         config_json: str = "{}",
     ) -> None:
         """Insert or update a scheduled job definition."""
-        assert self._db
-        await self._db.execute(
+        await self._execute_write(
             """
             INSERT INTO scheduled_jobs (id, job_name, cron_expr, enabled, config_json, updated_at)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -186,17 +184,16 @@ class StateTracker:
             """,
             (job_id, job_name, cron_expr, enabled, config_json, _now_iso()),
         )
-        await self._db.commit()
 
     async def list_scheduled_jobs(self, enabled_only: bool = True) -> list[dict]:
         """List scheduled jobs."""
-        assert self._db
+        db = self._require_db()
         query = (
             "SELECT id, job_name, cron_expr, enabled, config_json, updated_at FROM scheduled_jobs"
         )
         if enabled_only:
             query += " WHERE enabled = 1"
-        async with self._db.execute(query) as cursor:
+        async with db.execute(query) as cursor:
             rows = await cursor.fetchall()
             return [
                 {
@@ -214,8 +211,20 @@ class StateTracker:
 
     async def _create_tables(self) -> None:
         """Create tables if they don't already exist."""
-        assert self._db
-        await self._db.executescript(_SCHEMA)
+        db = self._require_db()
+        await db.executescript(_SCHEMA)
+        await db.commit()
+
+    def _require_db(self) -> aiosqlite.Connection:
+        if self._db is None:
+            raise RuntimeError("StateTracker not initialized. Call initialize() before use.")
+        return self._db
+
+    async def _execute_write(self, query: str, params: tuple) -> None:
+        db = self._require_db()
+        async with self._write_lock:
+            await db.execute(query, params)
+            await db.commit()
 
 
 def _now_iso() -> str:

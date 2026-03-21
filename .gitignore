@@ -25,6 +25,8 @@ prompt1.txt
 prompt2.txt
 prompt*.txt
 START.txt
+sonuc.txt
+tmp_*
 
 # Secret and local override files
 *.secrets

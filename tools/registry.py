@@ -74,6 +74,7 @@ class ToolRegistry:
 def discover_tool_classes(tools_package_path: Path) -> list[type[BaseTool]]:
     """Discover all concrete BaseTool subclasses under the tools package."""
     discovered: list[type[BaseTool]] = []
+    discovered_names: set[str] = set()
     package_name = "tools"
 
     for module_info in pkgutil.iter_modules([str(tools_package_path)]):
@@ -96,6 +97,14 @@ def discover_tool_classes(tools_package_path: Path) -> list[type[BaseTool]]:
                 continue
             if not getattr(obj, "name", ""):
                 continue
+            if obj.name in discovered_names:
+                logger.warning(
+                    "tool_registry.duplicate_discovered_name",
+                    tool=obj.name,
+                    module=module_name,
+                )
+                continue
+            discovered_names.add(obj.name)
             discovered.append(obj)
 
     discovered.sort(key=lambda cls: cls.name)
