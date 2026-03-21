@@ -236,10 +236,12 @@ class WebExecuteJavaScript(BaseTool):
         params = self._params(tool_input)
         url = str(self._first_param(params, "url", "target", default="")).strip()
         script = str(self._first_param(params, "script", "javascript", "code", default="")).strip()
+        scroll_to_bottom = bool(params.get("scroll_to_bottom", False))
+        wait_ms = int(self._first_param(params, "wait_ms", default=1200) or 1200)
 
         if not url:
             return self._failure("url is required")
-        if not script:
+        if not script and not scroll_to_bottom:
             return self._failure("script is required")
         if not url.startswith("http"):
             url = "https://" + url
@@ -249,10 +251,33 @@ class WebExecuteJavaScript(BaseTool):
             page = await context.new_page()
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                if scroll_to_bottom:
+                    steps = int(self._first_param(params, "steps", default=20) or 20)
+                    step_size = int(self._first_param(params, "step_size", default=1200) or 1200)
+                    steps = max(1, min(200, steps))
+                    step_size = max(100, min(5000, step_size))
+                    for _ in range(steps):
+                        await page.mouse.wheel(0, step_size)
+                        await page.wait_for_timeout(max(10, wait_ms // max(1, steps)))
+                    page_height = await page.evaluate(
+                        "document.body ? document.body.scrollHeight : 0"
+                    )
+                    viewport_y = await page.evaluate("window.scrollY")
+                    if not script:
+                        return self._success(
+                            "Page scrolled to bottom (physical wheel simulation)",
+                            data={
+                                "url": url,
+                                "scroll_y": viewport_y,
+                                "scroll_height": page_height,
+                                "steps": steps,
+                                "step_size": step_size,
+                            },
+                        )
                 result = await page.evaluate(script)
                 return self._success(
                     "JavaScript executed",
-                    data={"url": url, "result": result},
+                    data={"url": url, "result": result, "scrolled": scroll_to_bottom},
                 )
             finally:
                 await page.close()

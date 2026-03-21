@@ -204,6 +204,9 @@ class OsGetNowPlaying(BaseTool):
             result = await asyncio.to_thread(_get_now_playing_powershell)
             if not result:
                 return self._failure("No active media session found")
+            title = str(result.get("title", "")).strip()
+            if not title:
+                return self._failure("No active media session found")
             return self._success("Now playing detected", data=result)
         except Exception as exc:
             return self._failure(str(exc))

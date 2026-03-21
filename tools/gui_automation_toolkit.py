@@ -76,7 +76,13 @@ class GuiPressHotkey(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        keys = self._first_param(params, "keys", "hotkey", "key", default=[])
+        values = list(params.values()) if params else []
+        keys = (
+            params.get("keys")
+            or params.get("key")
+            or params.get("hotkey")
+            or (values[0] if values else [])
+        )
         if isinstance(keys, str):
             normalized = keys.replace("+", " ").replace(",", " ").split()
             keys = normalized if normalized else [keys]

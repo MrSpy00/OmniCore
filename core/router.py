@@ -99,9 +99,44 @@ class _GroqModelRotator:
         return len(self._models)
 
 
+class _ApiKeyRotator:
+    """Generic thread-safe round-robin API key selector."""
+
+    def __init__(self, keys: list[str]) -> None:
+        self._keys = keys or [""]
+        self._cycle = itertools.cycle(self._keys)
+        self._lock = threading.Lock()
+        self._current: str = ""
+        self.next_key()
+
+    @property
+    def current(self) -> str:
+        return self._current
+
+    @property
+    def first(self) -> str:
+        return self._keys[0]
+
+    def next_key(self) -> str:
+        with self._lock:
+            self._current = next(self._cycle)
+        return self._current
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+
 def _is_retryable_llm_error(exc: BaseException) -> bool:
     text = str(exc).lower()
-    return "429" in text or "rate limit" in text or "timeout" in text
+    markers = (
+        "429",
+        "rate limit",
+        "quota exceeded",
+        "resource_exhausted",
+        "too many requests",
+        "timeout",
+    )
+    return any(marker in text for marker in markers)
 
 
 class CognitiveRouter:
@@ -138,6 +173,7 @@ class CognitiveRouter:
         settings = get_settings()
         self._key_rotator: _GroqKeyRotator | None = None
         self._model_rotator: _GroqModelRotator | None = None
+        self._google_key_rotator: _ApiKeyRotator | None = None
         self._settings = settings
         self._llm = self._build_llm(settings)
         self._planner = Planner(self._llm)
@@ -176,9 +212,12 @@ class CognitiveRouter:
                 temperature=settings.llm_temperature,
             )
         if provider in ("", "gemini"):
+            if self._google_key_rotator is None:
+                self._google_key_rotator = _ApiKeyRotator(settings.google_api_keys)
+            active_google_key = self._google_key_rotator.current
             return ChatGoogleGenerativeAI(
                 model=settings.omni_llm_model,
-                google_api_key=settings.google_api_key,
+                google_api_key=active_google_key,
                 temperature=settings.llm_temperature,
                 max_output_tokens=settings.llm_max_output_tokens,
             )
@@ -231,6 +270,22 @@ class CognitiveRouter:
         self._destroy_current_llm()
         self._llm = self._create_groq_client(self._key_rotator.current, self._model_rotator.current)
 
+    def _rotate_google_route_and_rebuild(self) -> None:
+        """Rotate to next Gemini key route and rebuild LLM client."""
+        if self._google_key_rotator is None:
+            self._google_key_rotator = _ApiKeyRotator(self._settings.google_api_keys)
+
+        old_key = self._google_key_rotator.current
+        new_key = self._google_key_rotator.next_key()
+        logger.warning(
+            "router.google_route_rotated",
+            old_key_suffix=f"...{old_key[-6:]}" if old_key else "<empty>",
+            new_key_suffix=f"...{new_key[-6:]}" if new_key else "<empty>",
+            key_pool=len(self._google_key_rotator),
+        )
+        self._destroy_current_llm()
+        self._llm = self._build_llm(self._settings)
+
     def _create_tool_learning_plan(self, step: TaskStep, user_message: Message) -> dict[str, Any]:
         query = str(step.parameters.get("query") or user_message.content or step.description)
         return {
@@ -275,16 +330,14 @@ class CognitiveRouter:
             return await self._llm.ainvoke(messages)
         except Exception as exc:
             if _is_retryable_llm_error(exc):
-                if (
-                    self._settings.llm_provider.strip().lower() == "groq"
-                    and self._key_rotator is not None
-                    and self._model_rotator is not None
-                ):
-                    # Hard reset path on 429/rate-limit/timeouts:
-                    # destroy current client -> rotate key/model -> instantiate fresh client.
+                provider = self._settings.llm_provider.strip().lower()
+                self._destroy_current_llm()
+                if provider == "groq":
                     self._rotate_groq_route_and_rebuild()
+                elif provider in ("", "gemini"):
+                    self._rotate_google_route_and_rebuild()
                 else:
-                    self._rotate_groq_route_and_rebuild()
+                    self._llm = self._build_llm(self._settings)
             raise
 
     # -- public API -----------------------------------------------------------

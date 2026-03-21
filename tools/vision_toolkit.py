@@ -111,22 +111,51 @@ def _capture_screen(path: Path, region: dict | None) -> None:
 
 def analyze_image_with_gemini(path: Path, prompt: str = SCREEN_ANALYSIS_PROMPT) -> str:
     settings = get_settings()
-    if not settings.google_api_key:
+    api_keys = settings.google_api_keys
+    if not any(k.strip() for k in api_keys):
         raise RuntimeError("GOOGLE_API_KEY is required for vision analysis")
-
-    client = genai.Client(api_key=settings.google_api_key)
     encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=[
-            prompt,
-            types.Part.from_bytes(data=base64.b64decode(encoded), mime_type="image/png"),
-        ],
-    )
-    text = getattr(response, "text", "")
-    if not text:
-        raise RuntimeError("Vision model returned empty output")
-    return text
+
+    last_exc: Exception | None = None
+    for idx, key in enumerate(api_keys, start=1):
+        try:
+            client = genai.Client(api_key=key)
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=base64.b64decode(encoded), mime_type="image/png"),
+                ],
+            )
+            text = getattr(response, "text", "")
+            if text:
+                return text
+            raise RuntimeError("Vision model returned empty output")
+        except Exception as exc:
+            last_exc = exc
+            detail = str(exc).lower()
+            retryable = any(
+                marker in detail
+                for marker in (
+                    "429",
+                    "quota",
+                    "resource_exhausted",
+                    "rate limit",
+                    "too many requests",
+                )
+            )
+            if retryable and idx < len(api_keys):
+                continue
+            if retryable:
+                raise RuntimeError(
+                    "Vision quota exhausted across all configured Gemini keys; "
+                    "fallback to GUI/CLI flow is required"
+                ) from exc
+            raise
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Vision analysis failed")
 
 
 def _locate_target_with_vision(path: Path, target: str) -> dict[str, object]:

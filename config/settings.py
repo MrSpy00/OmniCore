@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     # --- LLM -----------------------------------------------------------------
     llm_provider: str = "gemini"
     google_api_key: str = ""
+    google_api_key_2: str = ""
+    google_api_key_3: str = ""
     omni_llm_model: str = "gemini-1.5-pro"
     groq_api_key: str = ""
     groq_api_key_1: str = ""
@@ -83,6 +85,17 @@ class Settings(BaseSettings):
         if not chain:
             chain = ["llama-3.1-8b-instant"]
         return chain
+
+    @property
+    def google_api_keys(self) -> list[str]:
+        """Return configured Google/Gemini API keys in rotation order."""
+        keys = [
+            k.strip() for k in (self.google_api_key, self.google_api_key_2, self.google_api_key_3)
+        ]
+        keys = [k for k in keys if k]
+        if not keys:
+            return [""]
+        return keys
 
     # --- Telegram Gateway ----------------------------------------------------
     telegram_bot_token: str = ""
