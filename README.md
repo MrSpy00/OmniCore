@@ -2,6 +2,24 @@
 
 OmniCore is a host-level AGI-style operations agent with dynamic tool loading, multi-step planning, memory, and guarded execution. It is designed to run real actions across your machine and network with minimal abstraction between intent and execution.
 
+## V26.0 Highlights (The OpenClaw Singularity)
+
+- Platform-aware terminal execution in `terminal_execute`:
+  - Windows -> PowerShell (UTF-8 enforced)
+  - macOS -> zsh (bash fallback)
+  - Linux -> bash (sh fallback)
+- New elevated execution tool:
+  - `os_execute_elevated` (admin/root command path by host OS)
+- Vision action loop upgrade in `gui_analyze_screen`:
+  - optional target localization (`target`)
+  - optional click action (`click=true`)
+  - optional self-correcting verification loop (`verify_after_click=true`)
+- Router hardening:
+  - stronger Turkish mandate for real-source behavior
+  - explicit fallback protocol for missing tools (`learn_build_execute` plan payload)
+- Groq route reset path remains hard reset oriented:
+  - destroy client -> rotate key/model -> instantiate fresh client
+
 ## V24.0 Highlights (Omega Directive)
 
 - Hybrid CLI -> GUI fallback protocol added at router execution layer.

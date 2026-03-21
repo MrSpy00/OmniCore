@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 from pathlib import Path
 
 import mss  # type: ignore[import-not-found]
+import pyautogui
 from google import genai
 from google.genai import types
 from PIL import Image  # type: ignore[import-not-found]
@@ -18,6 +20,12 @@ from tools.base import BaseTool, resolve_user_path
 SCREEN_ANALYSIS_PROMPT = (
     "Read all visible text on this screen exactly. If there is no readable text, "
     "briefly describe the visible UI."
+)
+TARGET_LOCATE_PROMPT = (
+    "Find the target UI element described by the user. "
+    "Return ONLY strict JSON with keys: x, y, found, confidence, reason. "
+    "x and y must be integer center coordinates in current screenshot pixel space. "
+    "If not found, return found=false and x=0,y=0."
 )
 REGION_TEXT_PROMPT = (
     "Read all visible text in this screenshot region exactly. If there is no readable text, "
@@ -43,6 +51,12 @@ class GuiAnalyzeScreen(BaseTool):
         region = params.get("region")
         if isinstance(region, str):
             region = None
+        target = str(
+            self._first_param(params, "target", "element", "query", default="") or ""
+        ).strip()
+        click = bool(params.get("click", False))
+        verify_after_click = bool(params.get("verify_after_click", False))
+        max_attempts = int(params.get("max_attempts", 2) or 2)
 
         try:
             save_path = _resolve_sandboxed(output_path)
@@ -56,10 +70,25 @@ class GuiAnalyzeScreen(BaseTool):
             if len(text) > max_chars:
                 text = text[:max_chars] + "\n... (truncated)"
 
-            return self._success(
-                "Screen analyzed",
-                data={"path": str(save_path), "text": text},
-            )
+            payload = {"path": str(save_path), "text": text}
+
+            if target:
+                located = await asyncio.to_thread(_locate_target_with_vision, save_path, target)
+                payload["target"] = target
+                payload["locator"] = located
+
+                if click and bool(located.get("found")):
+                    click_result = await asyncio.to_thread(
+                        _click_with_self_correction,
+                        int(located.get("x", 0) or 0),
+                        int(located.get("y", 0) or 0),
+                        target,
+                        max(1, max_attempts),
+                        verify_after_click,
+                    )
+                    payload["action"] = click_result
+
+            return self._success("Screen analyzed", data=payload)
         except Exception as exc:
             return self._failure(str(exc))
 
@@ -98,3 +127,76 @@ def analyze_image_with_gemini(path: Path, prompt: str = SCREEN_ANALYSIS_PROMPT) 
     if not text:
         raise RuntimeError("Vision model returned empty output")
     return text
+
+
+def _locate_target_with_vision(path: Path, target: str) -> dict[str, object]:
+    prompt = f"{TARGET_LOCATE_PROMPT} Target description: {target}"
+    raw = analyze_image_with_gemini(path, prompt)
+    text = raw.strip()
+    if "```" in text:
+        parts = text.split("```")
+        if len(parts) >= 2:
+            text = parts[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.strip()
+
+    parsed = json.loads(text)
+    found = bool(parsed.get("found", False))
+    x = int(parsed.get("x", 0) or 0)
+    y = int(parsed.get("y", 0) or 0)
+    confidence = float(parsed.get("confidence", 0.0) or 0.0)
+    reason = str(parsed.get("reason", "") or "")
+    return {
+        "found": found,
+        "x": x,
+        "y": y,
+        "confidence": confidence,
+        "reason": reason,
+        "raw": raw[:4000],
+    }
+
+
+def _click_with_self_correction(
+    x: int,
+    y: int,
+    target: str,
+    max_attempts: int,
+    verify_after_click: bool,
+) -> dict[str, object]:
+    attempts: list[dict[str, object]] = []
+    current_x = x
+    current_y = y
+
+    for attempt in range(1, max_attempts + 1):
+        pyautogui.click(current_x, current_y)
+        entry: dict[str, object] = {"attempt": attempt, "x": current_x, "y": current_y}
+
+        if not verify_after_click:
+            entry["status"] = "clicked"
+            attempts.append(entry)
+            return {"status": "clicked", "attempts": attempts}
+
+        temp_path = Path(pathlib_temp_dir()) / "vision_verify_after_click.png"
+        _capture_screen(temp_path, None)
+        locator = _locate_target_with_vision(temp_path, target)
+        entry["verify_found"] = bool(locator.get("found"))
+        entry["verify_confidence"] = float(locator.get("confidence", 0.0) or 0.0)
+
+        if not bool(locator.get("found")):
+            entry["status"] = "completed"
+            attempts.append(entry)
+            return {"status": "completed", "attempts": attempts}
+
+        current_x = int(locator.get("x", current_x) or current_x)
+        current_y = int(locator.get("y", current_y) or current_y)
+        entry["status"] = "retry"
+        attempts.append(entry)
+
+    return {"status": "max_attempts_reached", "attempts": attempts}
+
+
+def pathlib_temp_dir() -> str:
+    import tempfile
+
+    return tempfile.gettempdir()

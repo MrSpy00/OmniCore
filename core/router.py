@@ -231,6 +231,37 @@ class CognitiveRouter:
         self._destroy_current_llm()
         self._llm = self._create_groq_client(self._key_rotator.current, self._model_rotator.current)
 
+    def _create_tool_learning_plan(self, step: TaskStep, user_message: Message) -> dict[str, Any]:
+        query = str(step.parameters.get("query") or user_message.content or step.description)
+        return {
+            "mode": "learn_build_execute",
+            "missing_tool": step.tool_name,
+            "steps": [
+                {
+                    "tool": "web_read_main_article",
+                    "reason": "Research unknown tool behavior from real web sources",
+                    "parameters": {
+                        "url": f"https://duckduckgo.com/?q={query.replace(' ', '+')}",
+                        "max_chars": 8000,
+                    },
+                },
+                {
+                    "tool": "dev_execute_python_code",
+                    "reason": "Generate executable adaptation script for missing capability",
+                    "parameters": {
+                        "code": (
+                            "import json\n"
+                            "print(json.dumps({\n"
+                            "  'status': 'generated_fallback',\n"
+                            "  'tool': '" + step.tool_name + "',\n"
+                            "  'note': 'Tool missing in registry; executed adaptive script path'\n"
+                            "}, ensure_ascii=True))"
+                        )
+                    },
+                },
+            ],
+        }
+
     @retry(
         reraise=True,
         stop=stop_after_attempt(2),
@@ -337,7 +368,10 @@ class CognitiveRouter:
             "KURAL 6: HAVA DURUMUNU ASLA UYDURMA. "
             "HAVA İSTEKLERİNDE SADECE api_weather aracı veya "
             "wttr.in gibi gerçek kaynakları kullan, "
-            "sahte URL/domain üretme."
+            "sahte URL/domain üretme. "
+            "KURAL 7: EĞER İSTENEN YETENEK İÇİN ARAÇ YOKSA, "
+            "ÖNCE GERÇEK KAYNAKTAN ARAŞTIR, SONRA GEÇİCİ ÇÖZÜM ÜRET, "
+            "SONRA İŞİ TAMAMLA VE KULLANICIYA AÇIKÇA RAPORLA."
         )
         return (
             f"{mandated}\n\n"
@@ -407,9 +441,13 @@ class CognitiveRouter:
             tool = self._registry.get(step.tool_name)
 
             if tool is None:
+                learning = self._create_tool_learning_plan(step, user_message)
                 step.status = StepStatus.FAILED
                 step.error = f"Unknown tool: {step.tool_name}"
-                results_summary.append(f"[FAIL] {step.description}: {step.error}")
+                fallback_json = json.dumps(learning, ensure_ascii=True)
+                results_summary.append(
+                    f"[FAIL] {step.description}: {step.error} | fallback={fallback_json}"
+                )
                 continue
 
             temp_input = ToolInput(tool_name=step.tool_name, parameters=step.parameters)

@@ -18,12 +18,16 @@ async def test_terminal_execute_sets_utf8_env(monkeypatch, tmp_path):
         async def communicate(self):
             return b"ok", b""
 
-    async def fake_create_subprocess_shell(*args, **kwargs):
+    async def fake_create_subprocess_exec(*args, **kwargs):
         recorded["args"] = args
         recorded.update(kwargs)
         return DummyProcess()
 
-    monkeypatch.setattr(asyncio, "create_subprocess_shell", fake_create_subprocess_shell)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(
+        "tools.terminal_toolkit._build_shell_command",
+        lambda command: (["fake-shell", "-c", command], "fake-shell"),
+    )
 
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
@@ -35,5 +39,6 @@ async def test_terminal_execute_sets_utf8_env(monkeypatch, tmp_path):
     assert result.status == ToolStatus.SUCCESS
     assert recorded["env"]["PYTHONIOENCODING"] == "utf-8"
     assert recorded["env"]["PYTHONUTF8"] == "1"
-    assert recorded["args"][0] == "chcp 65001 >NUL && dir"
+    assert recorded["args"] == ("fake-shell", "-c", "dir")
     assert recorded["cwd"] == str(tmp_path)
+    assert result.data["shell"] == "fake-shell"

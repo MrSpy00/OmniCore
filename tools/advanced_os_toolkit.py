@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import platform
 import shutil
 import subprocess
 import webbrowser
@@ -16,6 +17,86 @@ import pyperclip
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool, force_window_foreground, resolve_user_path
+
+
+def _run_elevated_command(command: str, timeout: int = 120) -> dict[str, object]:
+    system = platform.system().lower()
+
+    if os.name == "nt":
+        command_json = json.dumps(command)
+        ps = (
+            "Start-Process powershell "
+            f"-ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',{command_json} "
+            "-Verb RunAs -WindowStyle Hidden"
+        )
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return {
+            "platform": "windows",
+            "command": command,
+            "returncode": completed.returncode,
+            "stdout": (completed.stdout or "")[:4000],
+            "stderr": (completed.stderr or "")[:4000],
+        }
+
+    if system == "darwin":
+        wrapped = f"sudo -n /bin/zsh -lc {json.dumps(command)}"
+        completed = subprocess.run(
+            ["/bin/zsh", "-lc", wrapped],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return {
+            "platform": "macos",
+            "command": wrapped,
+            "returncode": completed.returncode,
+            "stdout": (completed.stdout or "")[:4000],
+            "stderr": (completed.stderr or "")[:4000],
+        }
+
+    wrapped = f"sudo -n /bin/bash -lc {json.dumps(command)}"
+    completed = subprocess.run(
+        ["/bin/bash", "-lc", wrapped],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    return {
+        "platform": "linux",
+        "command": wrapped,
+        "returncode": completed.returncode,
+        "stdout": (completed.stdout or "")[:4000],
+        "stderr": (completed.stderr or "")[:4000],
+    }
+
+
+class OsExecuteElevated(BaseTool):
+    name = "os_execute_elevated"
+    description = "Execute a command with admin/root elevation based on host OS."
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        command = str(self._first_param(params, "command", "cmd", "value", default="")).strip()
+        timeout = int(self._first_param(params, "timeout", default=120) or 120)
+
+        if not command:
+            return self._failure("command is required")
+
+        try:
+            result = await asyncio.to_thread(_run_elevated_command, command, max(10, timeout))
+            returncode_raw = result.get("returncode", 1)
+            returncode = int(returncode_raw) if isinstance(returncode_raw, (int, str)) else 1
+            if returncode != 0:
+                return self._failure(json.dumps(result, ensure_ascii=True))
+            return self._success("Elevated command executed", data=result)
+        except Exception as exc:
+            return self._failure(str(exc))
 
 
 class OsResourceMonitor(BaseTool):

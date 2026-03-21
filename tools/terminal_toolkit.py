@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import platform
+import shutil
 
 from config.logging import get_logger
 from models.tools import ToolInput, ToolOutput
@@ -17,6 +19,44 @@ logger = get_logger(__name__)
 
 # Hard limit to prevent runaway processes.
 _DEFAULT_TIMEOUT_SECONDS = 60
+
+
+def _build_shell_command(command: str) -> tuple[list[str], str]:
+    system = platform.system().lower()
+
+    if os.name == "nt":
+        powershell = shutil.which("powershell") or "powershell"
+        ps_command = (
+            "$OutputEncoding = [System.Text.UTF8Encoding]::new(); "
+            "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new(); "
+            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); "
+            f"{command}"
+        )
+        return (
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ps_command,
+            ],
+            "powershell",
+        )
+
+    if system == "darwin":
+        zsh = shutil.which("zsh")
+        if zsh:
+            return [zsh, "-lc", command], "zsh"
+        bash = shutil.which("bash") or "/bin/bash"
+        return [bash, "-lc", command], "bash"
+
+    bash = shutil.which("bash")
+    if bash:
+        return [bash, "-lc", command], "bash"
+    sh = shutil.which("sh") or "/bin/sh"
+    return [sh, "-lc", command], "sh"
 
 
 class TerminalExecute(BaseTool):
@@ -51,11 +91,9 @@ class TerminalExecute(BaseTool):
             env = os.environ.copy()
             env.setdefault("PYTHONIOENCODING", "utf-8")
             env.setdefault("PYTHONUTF8", "1")
-            shell_command = command
-            if os.name == "nt":
-                shell_command = f"chcp 65001 >NUL && {command}"
-            process = await asyncio.create_subprocess_shell(
-                shell_command,
+            shell_argv, shell_name = _build_shell_command(command)
+            process = await asyncio.create_subprocess_exec(
+                *shell_argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
@@ -86,6 +124,7 @@ class TerminalExecute(BaseTool):
                     "stdout": stdout,
                     "stderr": stderr,
                     "exit_code": exit_code,
+                    "shell": shell_name,
                 },
             )
 
