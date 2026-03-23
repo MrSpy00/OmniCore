@@ -21,6 +21,7 @@ data/
 # Agent/session artifacts
 .agentignore
 .agents/
+OMNICORE_DOCS_TXT/
 prompt1.txt
 prompt2.txt
 prompt*.txt

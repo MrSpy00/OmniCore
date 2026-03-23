@@ -6,7 +6,7 @@ import json
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ToolStatus(StrEnum):
@@ -21,7 +21,9 @@ class ToolStatus(StrEnum):
 class ToolInput(BaseModel):
     """Standardised input envelope for any tool invocation."""
 
-    tool_name: str
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    tool_name: str = Field(min_length=1, max_length=128)
     parameters: dict[str, Any] = Field(
         default_factory=dict,
         examples=[
@@ -56,12 +58,30 @@ class ToolInput(BaseModel):
             }
         return {"value": value}
 
+    @field_validator("tool_name", mode="before")
+    @classmethod
+    def _validate_tool_name(cls, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("tool_name is required")
+        return text
+
 
 class ToolOutput(BaseModel):
     """Standardised output envelope returned by every tool."""
 
-    tool_name: str
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    tool_name: str = Field(min_length=1, max_length=128)
     status: ToolStatus
     result: str = ""  # human-readable summary
-    data: dict = Field(default_factory=dict)  # structured output for downstream steps
+    data: dict[str, Any] = Field(default_factory=dict)  # structured output for downstream steps
     error: str = ""  # populated on failure
+
+    @field_validator("tool_name", mode="before")
+    @classmethod
+    def _validate_output_tool_name(cls, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("tool_name is required")
+        return text

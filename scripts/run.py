@@ -81,38 +81,40 @@ async def _run(mode: str) -> None:
     pulse = AutonomousPulse(router, state_tracker)
     await pulse.start()
 
-    # Select gateway.
-    if mode == "telegram":
-        if not settings.telegram_bot_token:
-            logger.error("omnicore.missing_telegram_token")
-            print("ERROR: TELEGRAM_BOT_TOKEN is not set.")
+    try:
+        # Select gateway.
+        if mode == "telegram":
+            if not settings.telegram_bot_token:
+                logger.error("omnicore.missing_telegram_token")
+                print("ERROR: TELEGRAM_BOT_TOKEN is not set.")
+                sys.exit(1)
+
+            from interfaces.telegram_bot import TelegramGateway
+
+            gateway = TelegramGateway(router)
+            # Wire HITL approval callback.
+            router._guardian._callback = gateway.request_user_approval
+            logger.info("omnicore.gateway", type="telegram")
+            await gateway.run()
+
+        elif mode == "cli":
+            from interfaces.cli import CLIGateway, cli_approval_callback
+
+            router._guardian._callback = cli_approval_callback
+            gateway = CLIGateway(router)
+            logger.info("omnicore.gateway", type="cli")
+            await gateway.run()
+
+        else:
+            print(f"Unknown mode: {mode}")
             sys.exit(1)
-
-        from interfaces.telegram_bot import TelegramGateway
-
-        gateway = TelegramGateway(router)
-        # Wire HITL approval callback.
-        router._guardian._callback = gateway.request_user_approval
-        logger.info("omnicore.gateway", type="telegram")
-        await gateway.run()
-
-    elif mode == "cli":
-        from interfaces.cli import CLIGateway, cli_approval_callback
-
-        router._guardian._callback = cli_approval_callback
-        gateway = CLIGateway(router)
-        logger.info("omnicore.gateway", type="cli")
-        await gateway.run()
-
-    else:
-        print(f"Unknown mode: {mode}")
-        sys.exit(1)
-
-    # Cleanup.
-    await pulse.stop()
-    await shutdown_browser()
-    await state_tracker.close()
-    logger.info("omnicore.shutdown_complete")
+    finally:
+        # Cleanup must run even on failures/cancellation.
+        await pulse.stop()
+        await shutdown_browser()
+        await router.shutdown()
+        await state_tracker.close()
+        logger.info("omnicore.shutdown_complete")
 
 
 def main() -> None:

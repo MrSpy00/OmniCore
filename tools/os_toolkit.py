@@ -16,6 +16,26 @@ from tools.base import BaseTool, resolve_user_path
 logger = get_logger(__name__)
 
 
+def _home_root() -> Path:
+    return resolve_user_path(".")[0]
+
+
+def _is_within_root(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except Exception:
+        return False
+
+
+def _require_destructive_boundary(path: Path) -> None:
+    root = _home_root()
+    if not _is_within_root(path, root):
+        raise PermissionError(
+            f"Destructive operation is only allowed under user root: {root} (requested: {path})"
+        )
+
+
 def _resolve_sandboxed(path_str: str) -> Path:
     """Resolve a path directly on the host OS."""
     target, _ = resolve_user_path(path_str)
@@ -195,11 +215,26 @@ class OsDeleteFile(BaseTool):
         try:
             params = self._params(tool_input)
             path_value = self._first_param(params, "file_path", "path", "value")
+            dry_run = bool(self._first_param(params, "dry_run", default=True))
             if not path_value:
                 return self._failure("path is required")
             path = _resolve_sandboxed(str(path_value))
             if not path.exists():
                 return self._failure(f"Path not found: {path}")
+
+            _require_destructive_boundary(path)
+
+            if dry_run:
+                return self._success(
+                    "Dry-run completed; delete not executed",
+                    data={
+                        "dry_run": True,
+                        "path": str(path),
+                        "is_dir": path.is_dir(),
+                        "exists": path.exists(),
+                    },
+                )
+
             if path.is_dir():
                 await asyncio.to_thread(shutil.rmtree, path)
             else:
@@ -223,6 +258,7 @@ class OsSafeDelete(BaseTool):
             params = self._params(tool_input)
             path_value = self._first_param(params, "file_path", "path", "value")
             mode = str(self._first_param(params, "mode", "action", default="quarantine")).lower()
+            dry_run = bool(self._first_param(params, "dry_run", default=False))
             if not path_value:
                 return self._failure("path is required")
             if mode not in {"quarantine", "wipe"}:
@@ -231,6 +267,20 @@ class OsSafeDelete(BaseTool):
             path = _resolve_sandboxed(str(path_value))
             if not path.exists():
                 return self._failure(f"Path not found: {path}")
+
+            _require_destructive_boundary(path)
+
+            if dry_run:
+                return self._success(
+                    "Dry-run completed; safe-delete not executed",
+                    data={
+                        "dry_run": True,
+                        "mode": mode,
+                        "path": str(path),
+                        "is_dir": path.is_dir(),
+                        "size": path.stat().st_size if path.is_file() else 0,
+                    },
+                )
 
             result = await asyncio.to_thread(_safe_delete_path, path, mode)
             return self._success("Safe delete completed", data=result)

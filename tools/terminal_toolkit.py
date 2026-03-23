@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import os
-import platform
 import re
-import shutil
+from pathlib import Path
 
 from config.logging import get_logger
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool, resolve_user_path
+from tools.os_adapters import ShellAdapterFactory
 
 logger = get_logger(__name__)
 
@@ -213,60 +213,11 @@ _READONLY_COMMAND_PREFIXES = (
 
 
 def _build_shell_command(command: str) -> tuple[list[str], str]:
-    system = platform.system().lower()
-
-    if os.name == "nt":
-        powershell = shutil.which("powershell") or "powershell"
-        ps_command = (
-            "$OutputEncoding = [System.Text.UTF8Encoding]::new(); "
-            "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new(); "
-            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); "
-            f"{command}"
-        )
-        return (
-            [
-                powershell,
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                ps_command,
-            ],
-            "powershell",
-        )
-
-    if system == "darwin":
-        zsh = shutil.which("zsh")
-        if zsh:
-            return [zsh, "-lc", command], "zsh"
-        bash = shutil.which("bash") or "/bin/bash"
-        return [bash, "-lc", command], "bash"
-
-    bash = shutil.which("bash")
-    if bash:
-        return [bash, "-lc", command], "bash"
-    sh = shutil.which("sh") or "/bin/sh"
-    return [sh, "-lc", command], "sh"
+    return ShellAdapterFactory.get_adapter().build_command(command)
 
 
 def _build_shell_command_preferred(command: str, preferred_shell: str) -> tuple[list[str], str]:
-    pref = (preferred_shell or "").strip().lower()
-
-    if os.name == "nt":
-        if pref == "cmd":
-            comspec = os.environ.get("COMSPEC") or "cmd.exe"
-            return [comspec, "/d", "/s", "/c", command], "cmd"
-        if pref == "powershell":
-            return _build_shell_command(command)
-        # Windows'ta zsh/bash tercihi verilse de default güvenli yola düş.
-        return _build_shell_command(command)
-
-    if pref in {"zsh", "bash", "sh"}:
-        shell_path = shutil.which(pref)
-        if shell_path:
-            return [shell_path, "-lc", command], pref
-    return _build_shell_command(command)
+    return ShellAdapterFactory.get_adapter().build_command(command, preferred_shell)
 
 
 def _analyze_command(command: str) -> dict[str, object]:
@@ -343,6 +294,64 @@ def _select_shell(command: str, shell_preference: str) -> tuple[list[str], str]:
     return _build_shell_command(command)
 
 
+def _is_within_root(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _resolve_cwd(params: dict[str, object]) -> str:
+    cwd_param = params.get("cwd") or params.get("working_dir") or ""
+    if cwd_param:
+        cwd = resolve_user_path(str(cwd_param))[0]
+    else:
+        cwd = resolve_user_path(".")[0]
+
+    root_override = bool(params.get("root_override", False))
+    user_root = resolve_user_path(".")[0]
+    if not root_override and not _is_within_root(cwd, user_root):
+        raise PermissionError(f"cwd must stay under user root: {user_root}")
+    return str(cwd)
+
+
+def _blocked_response(analysis: dict[str, object]) -> str:
+    category = str(analysis.get("blocked_category") or "defensive_only")
+    guidance = _SAFE_GUIDANCE.get(category, _SAFE_GUIDANCE["defensive_only"])
+    return (
+        f"{guidance} Category: {category}. "
+        f"Matched marker: {analysis['matched_defensive_marker']}"
+    )
+
+
+def _truncate_output(text: str, max_output: int) -> str:
+    if len(text) <= max_output:
+        return text
+    return text[:max_output] + f"\n... (truncated to {max_output} chars)"
+
+
+async def _run_shell(
+    shell_argv: list[str],
+    cwd: str,
+    timeout: int,
+) -> tuple[str, str, int]:
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
+    process = await asyncio.create_subprocess_exec(
+        *shell_argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=cwd,
+        env=env,
+    )
+    stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+    return stdout, stderr, process.returncode or 0
+
+
 def _build_dry_run_payload(
     command: str,
     cwd: str,
@@ -417,13 +426,7 @@ class TerminalExecute(BaseTool):
 
         analysis = _analyze_command(command)
         if bool(analysis["blocked_defensive_only"]):
-            category = str(analysis.get("blocked_category") or "defensive_only")
-            guidance = _SAFE_GUIDANCE.get(category, _SAFE_GUIDANCE["defensive_only"])
-            return self._failure(
-                f"{guidance} "
-                f"Category: {category}. "
-                f"Matched marker: {analysis['matched_defensive_marker']}"
-            )
+            return self._failure(_blocked_response(analysis))
         if bool(analysis["blocked"]):
             return self._failure("Command blocked by safety policy (deny pattern matched)")
 
@@ -431,11 +434,10 @@ class TerminalExecute(BaseTool):
 
         dry_run = bool(params.get("dry_run", False))
         shell_preference = str(params.get("shell", "") or "")
-        cwd_param = self._first_param(params, "cwd", "working_dir", default="")
-        if cwd_param:
-            cwd = str(resolve_user_path(str(cwd_param))[0])
-        else:
-            cwd = str(resolve_user_path(".")[0])
+        try:
+            cwd = _resolve_cwd(params)
+        except Exception as exc:
+            return self._failure(str(exc))
 
         # Ensure working directory exists.
         os.makedirs(cwd, exist_ok=True)
@@ -451,29 +453,12 @@ class TerminalExecute(BaseTool):
         logger.info("terminal.execute", command=command, cwd=cwd, timeout=timeout)
 
         try:
-            env = os.environ.copy()
-            env.setdefault("PYTHONIOENCODING", "utf-8")
-            env.setdefault("PYTHONUTF8", "1")
-            process = await asyncio.create_subprocess_exec(
-                *shell_argv,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-            )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(), timeout=timeout
-            )
-            stdout = stdout_bytes.decode("utf-8", errors="replace")
-            stderr = stderr_bytes.decode("utf-8", errors="replace")
-            exit_code = process.returncode or 0
+            stdout, stderr, exit_code = await _run_shell(shell_argv, cwd, timeout)
 
             # Truncate very long outputs to stay within LLM context limits.
-            max_output = params.get("max_output_chars", 10_000)
-            if len(stdout) > max_output:
-                stdout = stdout[:max_output] + f"\n... (truncated to {max_output} chars)"
-            if len(stderr) > max_output:
-                stderr = stderr[:max_output] + f"\n... (truncated to {max_output} chars)"
+            max_output = int(params.get("max_output_chars", 10_000))
+            stdout = _truncate_output(stdout, max_output)
+            stderr = _truncate_output(stderr, max_output)
 
             if exit_code != 0:
                 return self._failure(

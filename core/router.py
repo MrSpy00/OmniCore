@@ -11,11 +11,13 @@ Responsibilities:
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 import json
 import os
 import re
 import threading
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -139,6 +141,35 @@ def _is_retryable_llm_error(exc: BaseException) -> bool:
     return any(marker in text for marker in markers)
 
 
+class _LocalLLMResponse:
+    """Small response envelope compatible with LLM result usage."""
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+class _SimpleCircuitBreaker:
+    """A minimal count-based circuit breaker for external LLM calls."""
+
+    def __init__(self, threshold: int = 3, cooldown_seconds: int = 30) -> None:
+        self._threshold = max(1, threshold)
+        self._cooldown_seconds = max(1, cooldown_seconds)
+        self._failures = 0
+        self._open_until = 0.0
+
+    def is_open(self) -> bool:
+        return time.monotonic() < self._open_until
+
+    def record_success(self) -> None:
+        self._failures = 0
+        self._open_until = 0.0
+
+    def record_failure(self) -> None:
+        self._failures += 1
+        if self._failures >= self._threshold:
+            self._open_until = time.monotonic() + self._cooldown_seconds
+
+
 class CognitiveRouter:
     """Central orchestrator that ties together the LLM, memory, tools, and safety layers.
 
@@ -177,6 +208,8 @@ class CognitiveRouter:
         self._runtime_provider = settings.llm_provider.strip().lower() or "gemini"
         self._settings = settings
         self._llm = self._build_llm(settings)
+        self._llm_semaphore = asyncio.Semaphore(3)
+        self._circuit_breaker = _SimpleCircuitBreaker(threshold=3, cooldown_seconds=30)
         self._planner = Planner(self._llm)
         self._guardian = Guardian(
             timeout_minutes=settings.hitl_timeout_minutes,
@@ -229,7 +262,13 @@ class CognitiveRouter:
     def _switch_provider(self, provider: str) -> None:
         self._runtime_provider = provider.strip().lower() or "gemini"
         self._destroy_current_llm()
+        self._refresh_runtime_settings()
         self._llm = self._build_llm(self._settings)
+
+    def _refresh_runtime_settings(self) -> None:
+        """Refresh settings from environment/.env for live key rotation scenarios."""
+        get_settings.cache_clear()
+        self._settings = get_settings()
 
     def _create_groq_client(self, api_key: str, model_name: str) -> Any:
         """Create a fresh ChatGroq instance for the given route."""
@@ -245,6 +284,10 @@ class CognitiveRouter:
 
     def _rotate_groq_route_and_rebuild(self) -> None:
         """Rotate to next Groq key+model route and rebuild LLM."""
+        self._refresh_runtime_settings()
+        self._key_rotator = _GroqKeyRotator(self._settings.groq_api_keys)
+        self._model_rotator = _GroqModelRotator(self._settings.groq_model_chain)
+
         if self._key_rotator is None or self._model_rotator is None:
             return
 
@@ -279,7 +322,10 @@ class CognitiveRouter:
 
     def _rotate_google_route_and_rebuild(self) -> None:
         """Rotate to next Gemini key route and rebuild LLM client."""
+        self._refresh_runtime_settings()
         if self._google_key_rotator is None:
+            self._google_key_rotator = _ApiKeyRotator(self._settings.google_api_keys)
+        else:
             self._google_key_rotator = _ApiKeyRotator(self._settings.google_api_keys)
 
         old_key = self._google_key_rotator.current
@@ -332,7 +378,37 @@ class CognitiveRouter:
         # Keep retry space finite and bounded even under oversized key/model lists.
         return min(30, max(3, groq_routes + google_routes + 2))
 
+    def _estimate_tokens(self, text: str) -> int:
+        """Cheap token estimate for provider routing decisions, O(n)."""
+        return max(1, len(text or "") // 4)
+
+    def _semantic_target_provider(self, user_text: str) -> str:
+        """Select target provider based on approximate prompt size, O(1)."""
+        estimated_tokens = self._estimate_tokens(user_text)
+        if estimated_tokens >= 1200:
+            return "gemini"
+        return self._runtime_provider
+
+    def _route_provider_if_needed(self, user_text: str) -> None:
+        target = self._semantic_target_provider(user_text)
+        if target != self._runtime_provider:
+            logger.info(
+                "router.semantic_provider_route",
+                from_provider=self._runtime_provider,
+                to_provider=target,
+                estimated_tokens=self._estimate_tokens(user_text),
+            )
+            self._switch_provider(target)
+
+    def _local_fallback_response(self) -> _LocalLLMResponse:
+        return _LocalLLMResponse(
+            "Harici model gecici olarak devre disi. Lütfen 30 saniye sonra tekrar deneyin."
+        )
+
     async def _ainvoke_with_retry(self, messages: list) -> Any:
+        if self._circuit_breaker.is_open():
+            return self._local_fallback_response()
+
         attempt = 0
         max_attempts = self._compute_retry_budget()
         last_exc: Exception | None = None
@@ -342,12 +418,16 @@ class CognitiveRouter:
             try:
                 if self._llm is None:
                     self._llm = self._build_llm(self._settings)
-                return await self._llm.ainvoke(messages)
+                async with self._llm_semaphore:
+                    response = await self._llm.ainvoke(messages)
+                self._circuit_breaker.record_success()
+                return response
             except Exception as exc:
                 if not _is_retryable_llm_error(exc):
                     raise
 
                 last_exc = exc
+                self._circuit_breaker.record_failure()
                 provider = self._runtime_provider
                 self._destroy_current_llm()
                 if provider == "groq":
@@ -397,6 +477,7 @@ class CognitiveRouter:
         """
         # 1. Store in short-term memory.
         self._short_term.add_message(conversation_id, user_message)
+        self._route_provider_if_needed(user_message.content)
 
         # 2. Retrieve relevant long-term memories.
         memories = self._long_term.recall(user_message.content, n_results=3)
@@ -513,145 +594,168 @@ class CognitiveRouter:
             logger.debug("router.classification_fallback", raw=text[:200])
             return {"needs_plan": False, "steps": []}
 
-    async def _execute_plan(
+    async def _handle_unknown_tool_step(
         self,
+        step: TaskStep,
         user_message: Message,
-        classification: dict[str, Any],
-        conversation_id: str,
-    ) -> str:
-        """Build a TaskPlan from the classification and execute step by step."""
-        plan = self._planner.build_plan(
-            user_request=user_message.content,
-            raw_steps=classification.get("steps", []),
+        results_summary: list[str],
+    ) -> bool:
+        tool = self._registry.get(step.tool_name)
+        if tool is not None:
+            return False
+
+        learning = self._create_tool_learning_plan(step, user_message)
+        step.status = StepStatus.FAILED
+        step.error = f"Unknown tool: {step.tool_name}"
+        fallback_json = json.dumps(learning, ensure_ascii=True)
+        results_summary.append(
+            f"[FAIL] {step.description}: {step.error} | fallback={fallback_json}"
         )
+        return True
 
-        # Persist the plan.
-        await self._state.save_task(
-            plan.id, plan.user_request, plan.status.value, plan.model_dump_json()
+    async def _build_tool_input(self, step: TaskStep) -> tuple[Any, ToolInput]:
+        tool = self._registry.get(step.tool_name)
+        if tool is None:
+            raise ValueError(f"Unknown tool: {step.tool_name}")
+
+        temp_input = ToolInput(tool_name=step.tool_name, parameters=step.parameters)
+        tool_input = ToolInput(
+            tool_name=step.tool_name,
+            parameters=step.parameters,
+            requires_approval=tool.requires_approval(temp_input),
         )
+        return tool, tool_input
 
-        plan.status = TaskStatus.EXECUTING
-        results_summary: list[str] = []
+    async def _handle_policy_gate(
+        self,
+        step: TaskStep,
+        user_id: str,
+        results_summary: list[str],
+    ) -> tuple[bool, Any]:
+        policy_decision = self._policy.evaluate(step)
+        if policy_decision.allowed:
+            return True, policy_decision
 
-        for step in plan.steps:
-            step.status = StepStatus.IN_PROGRESS
-            tool = self._registry.get(step.tool_name)
+        step.status = StepStatus.SKIPPED
+        if policy_decision.safe_response:
+            step.error = (
+                f"Policy blocked: {', '.join(policy_decision.reasons)} | "
+                f"guidance={policy_decision.safe_response}"
+            )
+        else:
+            step.error = f"Policy blocked: {', '.join(policy_decision.reasons)}"
 
-            if tool is None:
-                learning = self._create_tool_learning_plan(step, user_message)
-                step.status = StepStatus.FAILED
-                step.error = f"Unknown tool: {step.tool_name}"
-                fallback_json = json.dumps(learning, ensure_ascii=True)
-                results_summary.append(
-                    f"[FAIL] {step.description}: {step.error} | fallback={fallback_json}"
-                )
-                continue
+        results_summary.append(f"[SKIPPED] {step.description}: {step.error}")
+        await self._state.log_audit(
+            "policy_rejected",
+            f"{step.tool_name}: {step.error}",
+            user_id=user_id,
+        )
+        return False, policy_decision
 
-            temp_input = ToolInput(tool_name=step.tool_name, parameters=step.parameters)
-            tool_input = ToolInput(
-                tool_name=step.tool_name,
-                parameters=step.parameters,
-                requires_approval=tool.requires_approval(temp_input),
+    async def _handle_approval_gate(
+        self,
+        step: TaskStep,
+        tool,
+        tool_input: ToolInput,
+        policy_decision,
+        user_id: str,
+        results_summary: list[str],
+    ) -> bool:
+        if not (tool.requires_approval(tool_input) or policy_decision.require_confirmation):
+            return True
+
+        step.status = StepStatus.AWAITING_APPROVAL
+        action_desc = (
+            f"{step.tool_name}: {step.description} | "
+            f"risk={step.risk_level.value}"
+        )
+        if policy_decision.require_double_confirmation:
+            approval = await self._guardian.request_critical_approval(
+                action_description=action_desc,
+                user_id=user_id,
+            )
+        else:
+            approval = await self._guardian.request_approval(
+                action_description=action_desc,
+                user_id=user_id,
             )
 
-            policy_decision = self._policy.evaluate(step)
-            if not policy_decision.allowed:
-                step.status = StepStatus.SKIPPED
-                if policy_decision.safe_response:
-                    step.error = (
-                        f"Policy blocked: {', '.join(policy_decision.reasons)} | "
-                        f"guidance={policy_decision.safe_response}"
-                    )
-                else:
-                    step.error = f"Policy blocked: {', '.join(policy_decision.reasons)}"
-                results_summary.append(f"[SKIPPED] {step.description}: {step.error}")
-                await self._state.log_audit(
-                    "policy_rejected",
-                    f"{step.tool_name}: {step.error}",
-                    user_id=user_message.user_id,
-                )
-                continue
+        if approval == ApprovalResult.APPROVED:
+            return True
 
-            # Guardian check for destructive actions.
-            if tool.requires_approval(tool_input) or policy_decision.require_confirmation:
-                step.status = StepStatus.AWAITING_APPROVAL
-                if policy_decision.require_double_confirmation:
-                    approval = await self._guardian.request_critical_approval(
-                        action_description=(
-                            f"{step.tool_name}: {step.description} | risk={step.risk_level.value}"
-                        ),
-                        user_id=user_message.user_id,
-                    )
-                else:
-                    approval = await self._guardian.request_approval(
-                        action_description=(
-                            f"{step.tool_name}: {step.description} | risk={step.risk_level.value}"
-                        ),
-                        user_id=user_message.user_id,
-                    )
-                if approval != ApprovalResult.APPROVED:
-                    step.status = StepStatus.SKIPPED
-                    reason = "denied" if approval == ApprovalResult.DENIED else "timed out"
-                    step.error = f"Action {reason} by user"
-                    results_summary.append(f"[SKIPPED] {step.description}: {step.error}")
-                    await self._state.log_audit(
-                        "hitl_rejected",
-                        step.description,
-                        user_id=user_message.user_id,
-                    )
-                    continue
+        step.status = StepStatus.SKIPPED
+        reason = "denied" if approval == ApprovalResult.DENIED else "timed out"
+        step.error = f"Action {reason} by user"
+        results_summary.append(f"[SKIPPED] {step.description}: {step.error}")
+        await self._state.log_audit("hitl_rejected", step.description, user_id=user_id)
+        return False
 
-            # Execute with recovery.
-            output = await self._recovery.execute_with_retry(tool, tool_input, step)
-
-            if output.status.value == "success" and _is_generic_or_empty_success(output):
-                output = output.model_copy(
-                    update={
-                        "status": "failure",
-                        "error": (
-                            "Tool returned generic/empty success without actionable data; "
-                            "treated as failure for safety"
-                        ),
-                    }
-                )
-
-            if output.status.value != "success":
-                fallback_output = await self._attempt_hybrid_gui_fallback(
-                    step=step,
-                    primary_output=output,
-                    user_message=user_message,
-                )
-                if fallback_output is not None:
-                    output = fallback_output
-
-            if output.status.value == "success":
-                step.status = StepStatus.COMPLETED
-                step.result = output.result
-                results_summary.append(f"[OK] {step.description}: {output.result}")
-            else:
-                step.status = StepStatus.FAILED
-                step.error = output.error
-                results_summary.append(f"[FAIL] {step.description}: {output.error}")
-
-            await self._state.log_audit(
-                f"tool_{output.status.value}",
-                f"{step.tool_name}: {output.result or output.error}",
-                user_id=user_message.user_id,
+    async def _execute_step_with_fallback(
+        self,
+        step: TaskStep,
+        tool,
+        tool_input: ToolInput,
+        user_message: Message,
+    ):
+        output = await self._recovery.execute_with_retry(tool, tool_input, step)
+        if output.status.value == "success" and _is_generic_or_empty_success(output):
+            output = output.model_copy(
+                update={
+                    "status": "failure",
+                    "error": (
+                        "Tool returned generic/empty success without actionable data; "
+                        "treated as failure for safety"
+                    ),
+                }
             )
 
-        # Finalize plan.
+        if output.status.value != "success":
+            fallback_output = await self._attempt_hybrid_gui_fallback(
+                step=step,
+                primary_output=output,
+                user_message=user_message,
+            )
+            if fallback_output is not None:
+                output = fallback_output
+        return output
+
+    async def _record_step_result(
+        self,
+        step: TaskStep,
+        output,
+        user_id: str,
+        results_summary: list[str],
+    ) -> None:
+        if output.status.value == "success":
+            step.status = StepStatus.COMPLETED
+            step.result = output.result
+            results_summary.append(f"[OK] {step.description}: {output.result}")
+        else:
+            step.status = StepStatus.FAILED
+            step.error = output.error
+            results_summary.append(f"[FAIL] {step.description}: {output.error}")
+
+        await self._state.log_audit(
+            f"tool_{output.status.value}",
+            f"{step.tool_name}: {output.result or output.error}",
+            user_id=user_id,
+        )
+
+    async def _finalize_plan_state(self, plan) -> None:
         if plan.is_complete:
             plan.mark_complete()
-        else:
-            failed = [s for s in plan.steps if s.status == StepStatus.FAILED]
-            if failed:
-                plan.mark_failed("; ".join(s.error for s in failed))
+            return
 
-        await self._state.save_task(
-            plan.id, plan.user_request, plan.status.value, plan.model_dump_json()
-        )
+        failed = [s for s in plan.steps if s.status == StepStatus.FAILED]
+        if failed:
+            plan.mark_failed("; ".join(s.error for s in failed))
 
-        # Ask the LLM to summarise the results into a user-friendly reply.
+    async def _summarize_plan_results(
+        self,
+        user_message: Message,
+        results_summary: list[str],
+    ) -> str:
         summary_prompt = (
             f"Kullanıcı şunu sordu: {user_message.content}\n\n"
             f"Aşağıdaki adımları yürüttüm:\n"
@@ -675,6 +779,190 @@ class CognitiveRouter:
                 return "\n".join(fallback)
         return summary_text
 
+    async def _execute_plan(
+        self,
+        user_message: Message,
+        classification: dict[str, Any],
+        conversation_id: str,
+    ) -> str:
+        """Build a TaskPlan from the classification and execute step by step."""
+        plan = self._planner.build_plan(
+            user_request=user_message.content,
+            raw_steps=classification.get("steps", []),
+        )
+
+        # Persist the plan.
+        await self._state.save_task(
+            plan.id, plan.user_request, plan.status.value, plan.model_dump_json()
+        )
+
+        plan.status = TaskStatus.EXECUTING
+        results_summary: list[str] = []
+
+        for step in plan.steps:
+            step.status = StepStatus.IN_PROGRESS
+            if await self._handle_unknown_tool_step(step, user_message, results_summary):
+                continue
+
+            tool, tool_input = await self._build_tool_input(step)
+            policy_allowed, policy_decision = await self._handle_policy_gate(
+                step,
+                user_message.user_id,
+                results_summary,
+            )
+            if not policy_allowed:
+                continue
+
+            approved = await self._handle_approval_gate(
+                step,
+                tool,
+                tool_input,
+                policy_decision,
+                user_message.user_id,
+                results_summary,
+            )
+            if not approved:
+                continue
+
+            output = await self._execute_step_with_fallback(step, tool, tool_input, user_message)
+            await self._record_step_result(
+                step,
+                output,
+                user_message.user_id,
+                results_summary,
+            )
+
+        # Finalize plan.
+        await self._finalize_plan_state(plan)
+
+        await self._state.save_task(
+            plan.id, plan.user_request, plan.status.value, plan.model_dump_json()
+        )
+
+        return await self._summarize_plan_results(user_message, results_summary)
+
+    async def shutdown(self) -> None:
+        """Release runtime resources held by the router."""
+        self._destroy_current_llm()
+
+    def _is_fallback_candidate(self, step: TaskStep, primary_output, explicit: object) -> bool:
+        likely_cli = step.tool_name.startswith(("terminal_", "dev_", "net_", "web_"))
+        if explicit is not True and not likely_cli:
+            return False
+
+        error_text = str(getattr(primary_output, "error", "") or "").lower()
+        retryable = any(
+            marker in error_text
+            for marker in ("timeout", "timed out", "permission", "not found", "could not", "failed")
+        )
+        return explicit is True or retryable
+
+    def _build_fallback_tool_input(
+        self,
+        step: TaskStep,
+        params: dict[str, Any],
+        user_message: Message,
+        fallback_tool,
+    ) -> ToolInput:
+        source_query = str(params.get("query") or user_message.content or "")
+        source_url = str(params.get("url") or "")
+        max_steps = int(
+            params.get("fallback_steps", self._settings.hybrid_fallback_max_steps)
+            or self._settings.hybrid_fallback_max_steps
+        )
+        return ToolInput(
+            tool_name="gui_autonomous_explorer",
+            parameters={
+                "goal": (
+                    f"Primary step failed ({step.tool_name}): {step.description}. "
+                    f"Original request: {user_message.content}"
+                ),
+                "source_tool": step.tool_name,
+                "source_error": str(params.get("source_error", "") or ""),
+                "query": source_query,
+                "url": source_url,
+                "max_steps": max_steps,
+            },
+            requires_approval=fallback_tool.is_destructive,
+        )
+
+    async def _run_windows_secondary_fallback(
+        self,
+        step: TaskStep,
+        user_id: str,
+        source_query: str,
+        source_url: str,
+    ):
+        if os.name != "nt":
+            return None
+
+        hotkey_tool = self._registry.get("gui_press_hotkey")
+        type_tool = self._registry.get("gui_type_text")
+        analyze_tool = self._registry.get("gui_analyze_screen")
+        if not (hotkey_tool and type_tool and analyze_tool):
+            return None
+
+        target = source_url.strip() or (
+            "https://www.google.com/search?q="
+            f"{source_query.strip().replace(' ', '+')}"
+        )
+        sequence_tools = [hotkey_tool, type_tool, analyze_tool]
+        needs_approval = any(
+            t.requires_approval(ToolInput(tool_name=t.name, parameters={})) for t in sequence_tools
+        )
+        if needs_approval:
+            approval = await self._guardian.request_approval(
+                action_description=(
+                    "GUI fallback sequence: gui_press_hotkey + "
+                    "gui_type_text + gui_analyze_screen"
+                ),
+                user_id=user_id,
+            )
+            if approval != ApprovalResult.APPROVED:
+                return None
+
+        steps = [
+            (
+                hotkey_tool,
+                ToolInput(
+                    tool_name="gui_press_hotkey",
+                    parameters={"keys": ["win", "r"]},
+                    requires_approval=hotkey_tool.is_destructive,
+                ),
+            ),
+            (
+                type_tool,
+                ToolInput(
+                    tool_name="gui_type_text",
+                    parameters={"text": target, "interval": 0.01},
+                    requires_approval=type_tool.is_destructive,
+                ),
+            ),
+            (
+                hotkey_tool,
+                ToolInput(
+                    tool_name="gui_press_hotkey",
+                    parameters={"keys": ["enter"]},
+                    requires_approval=hotkey_tool.is_destructive,
+                ),
+            ),
+            (
+                analyze_tool,
+                ToolInput(
+                    tool_name="gui_analyze_screen",
+                    parameters={"max_chars": 5000},
+                    requires_approval=analyze_tool.is_destructive,
+                ),
+            ),
+        ]
+
+        last_output = None
+        for tool, tool_input in steps:
+            last_output = await self._recovery.execute_with_retry(tool, tool_input, step)
+            if last_output.status.value != "success":
+                return None
+        return last_output
+
     async def _attempt_hybrid_gui_fallback(
         self,
         step: TaskStep,
@@ -694,46 +982,19 @@ class CognitiveRouter:
         if explicit is False:
             return None
 
-        likely_cli = step.tool_name.startswith(("terminal_", "dev_", "net_", "web_"))
-        if explicit is not True and not likely_cli:
+        if not self._is_fallback_candidate(step, primary_output, explicit):
             return None
 
-        error_text = str(getattr(primary_output, "error", "") or "").lower()
-        retryable = any(
-            marker in error_text
-            for marker in (
-                "timeout",
-                "timed out",
-                "permission",
-                "not found",
-                "could not",
-                "failed",
-            )
+        params = dict(params)
+        params["source_error"] = str(getattr(primary_output, "error", "") or "")
+        fallback_input = self._build_fallback_tool_input(
+            step,
+            params,
+            user_message,
+            fallback_tool,
         )
-        if explicit is not True and not retryable:
-            return None
-
         source_query = str(params.get("query") or user_message.content or "")
         source_url = str(params.get("url") or "")
-        fallback_input = ToolInput(
-            tool_name="gui_autonomous_explorer",
-            parameters={
-                "goal": (
-                    f"Primary step failed ({step.tool_name}): {step.description}. "
-                    f"Original request: {user_message.content}"
-                ),
-                "source_tool": step.tool_name,
-                "source_error": str(getattr(primary_output, "error", "") or ""),
-                "query": source_query,
-                "url": source_url,
-                "max_steps": int(params.get("fallback_steps", 4) or 4),
-            },
-            requires_approval=fallback_tool.is_destructive,
-        )
-        fallback_input.parameters["max_steps"] = int(
-            params.get("fallback_steps", self._settings.hybrid_fallback_max_steps)
-            or self._settings.hybrid_fallback_max_steps
-        )
 
         try:
             if fallback_tool.requires_approval(fallback_input):
@@ -760,86 +1021,19 @@ class CognitiveRouter:
                 )
                 return fallback_output
 
-            # Secondary fallback sequence (Windows): Win+R -> type target -> Enter -> OCR
-            # This keeps behavior human-like when primary GUI explorer cannot complete.
-            if os.name == "nt":
-                hotkey_tool = self._registry.get("gui_press_hotkey")
-                type_tool = self._registry.get("gui_type_text")
-                analyze_tool = self._registry.get("gui_analyze_screen")
-
-                if hotkey_tool and type_tool and analyze_tool:
-                    target = source_url.strip()
-                    if not target:
-                        query_encoded = source_query.strip().replace(" ", "+")
-                        target = f"https://www.google.com/search?q={query_encoded}"
-
-                    sequence_tools = [hotkey_tool, type_tool, analyze_tool]
-                    if any(
-                        t.requires_approval(ToolInput(tool_name=t.name, parameters={}))
-                        for t in sequence_tools
-                    ):
-                        approval = await self._guardian.request_approval(
-                            action_description=(
-                                "GUI fallback sequence: gui_press_hotkey + "
-                                "gui_type_text + gui_analyze_screen"
-                            ),
-                            user_id=user_message.user_id,
-                        )
-                        if approval != ApprovalResult.APPROVED:
-                            return None
-
-                    step_hotkey = await self._recovery.execute_with_retry(
-                        hotkey_tool,
-                        ToolInput(
-                            tool_name="gui_press_hotkey",
-                            parameters={"keys": ["win", "r"]},
-                            requires_approval=hotkey_tool.is_destructive,
-                        ),
-                        step,
-                    )
-                    if step_hotkey.status.value != "success":
-                        return None
-
-                    step_type = await self._recovery.execute_with_retry(
-                        type_tool,
-                        ToolInput(
-                            tool_name="gui_type_text",
-                            parameters={"text": target, "interval": 0.01},
-                            requires_approval=type_tool.is_destructive,
-                        ),
-                        step,
-                    )
-                    if step_type.status.value != "success":
-                        return None
-
-                    step_enter = await self._recovery.execute_with_retry(
-                        hotkey_tool,
-                        ToolInput(
-                            tool_name="gui_press_hotkey",
-                            parameters={"keys": ["enter"]},
-                            requires_approval=hotkey_tool.is_destructive,
-                        ),
-                        step,
-                    )
-                    if step_enter.status.value != "success":
-                        return None
-
-                    step_ocr = await self._recovery.execute_with_retry(
-                        analyze_tool,
-                        ToolInput(
-                            tool_name="gui_analyze_screen",
-                            parameters={"max_chars": 5000},
-                            requires_approval=analyze_tool.is_destructive,
-                        ),
-                        step,
-                    )
-                    if step_ocr.status.value == "success":
-                        logger.info(
-                            "router.hybrid_fallback_success",
-                            source_tool=step.tool_name,
-                            fallback_tool="gui_hotkey_type_analyze",
-                        )
-                        return step_ocr
+            step_ocr = await self._run_windows_secondary_fallback(
+                step,
+                user_message.user_id,
+                source_query,
+                source_url,
+            )
+            if step_ocr is not None and step_ocr.status.value == "success":
+                logger.info(
+                    "router.hybrid_fallback_success",
+                    source_tool=step.tool_name,
+                    fallback_tool="gui_hotkey_type_analyze",
+                )
+                return step_ocr
 
             logger.warning(
                 "router.hybrid_fallback_failed",
