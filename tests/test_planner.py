@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.planner import Planner
+from models.capabilities import RiskLevel
 
 
 class TestPlannerBuildPlan:
@@ -42,3 +43,19 @@ class TestPlannerBuildPlan:
         plan = planner.build_plan("test", [{"tool": "unknown", "description": "bad step"}])
         issues = Planner.validate_plan(plan)
         assert any("unknown tool" in i for i in issues)
+
+    def test_infers_domain_and_risk(self):
+        planner = Planner(llm=None)  # type: ignore[arg-type]
+        plan = planner.build_plan(
+            "Delete file",
+            [
+                {
+                    "tool": "os_delete_file",
+                    "description": "Delete target file",
+                    "parameters": {"path": "a.txt"},
+                }
+            ],
+        )
+        step = plan.steps[0]
+        assert step.domain == "filesystem"
+        assert step.risk_level == RiskLevel.CRITICAL

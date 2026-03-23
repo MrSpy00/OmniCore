@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import platform
+import re
 import shutil
 
 from config.logging import get_logger
@@ -19,6 +20,196 @@ logger = get_logger(__name__)
 
 # Hard limit to prevent runaway processes.
 _DEFAULT_TIMEOUT_SECONDS = 60
+_MAX_TIMEOUT_SECONDS = 300
+
+_DENY_PATTERNS = (
+    r"\brm\s+-rf\s+/",
+    r"\bformat\s+c:\b",
+    r"\bdiskpart\b.*\bclean\b",
+    r"\breg\s+delete\s+hklm\\system\b",
+    r"\bbcdedit\s+/delete\b",
+)
+
+_HIGH_RISK_MARKERS = (
+    "remove-item",
+    "del ",
+    "delete",
+    "shutdown",
+    "restart-computer",
+    "taskkill",
+    "kill ",
+    "format",
+    "diskpart",
+)
+
+_ADMIN_MARKERS = (
+    "hklm",
+    "sc.exe",
+    "netsh",
+    "bcdedit",
+    "diskpart",
+)
+
+_DEFENSIVE_BLOCK_MARKERS = (
+    "createremotethread",
+    "writeprocessmemory",
+    "frida",
+    "bpftrace",
+    "rootkit",
+    "seimpersonate",
+    "memfd_create",
+    "ptrace",
+    "virtualallocex",
+    "execveat",
+    "commandlineeventconsumer create",
+    "\\root\\subscription",
+    "currentversion\\run",
+    "insmod",
+    "sysrq-trigger",
+    "printspoofer",
+    "roguewinrm",
+    "fodhelper",
+    "amsi bypass",
+    "etweventwrite",
+    "trustedinstaller",
+    "dns tunneling",
+    "ip spoofing",
+    "mimikatz",
+    "psexec -s",
+    "\\\\.\\physicaldrive0",
+    "vssadmin create shadow",
+    "ntds.dit",
+    "sam\\sam",
+    "dd if=/dev/zero of=\\\\.\\physicaldrive0",
+)
+
+_PRIVILEGE_ESCALATION_MARKERS = (
+    "seimpersonate",
+    "trustedinstaller",
+    "psexec -s",
+    "fodhelper",
+    "uac bypass",
+)
+
+_PERSISTENCE_MARKERS = (
+    "commandlineeventconsumer create",
+    "\\root\\subscription",
+    "currentversion\\run",
+    "sc create",
+    "autorun",
+    "bootkit",
+    "uefi",
+)
+
+_STEALTH_MEMORY_MARKERS = (
+    "memfd_create",
+    "execveat",
+    "virtualallocex",
+    "createremotethread",
+    "writeprocessmemory",
+    "reflection.assembly.load",
+    "add-type -typedefinition",
+    "ptrace",
+    "rwx",
+)
+
+_KERNEL_MANIPULATION_MARKERS = (
+    "ring 0",
+    "kernel space",
+    "bpftrace",
+    "ebpf",
+    "insmod",
+    "rmmod",
+    "sysrq-trigger",
+)
+
+_RAW_DISK_ACCESS_MARKERS = (
+    "\\\\.\\physicaldrive0",
+    "mft parsing",
+    "raw mft",
+    "createfile(",
+    "ntfsinfo",
+    "vssadmin create shadow",
+    "ntds.dit",
+)
+
+_NETWORK_SPOOFING_MARKERS = (
+    "sock_raw",
+    "ip spoofing",
+    "custom packet injection",
+    "ip netns add",
+    "ip netns exec",
+    "nftables",
+    "iptables",
+)
+
+_REVERSE_ENGINEERING_MARKERS = (
+    "windbg",
+    "cdb.exe",
+    "breakpoints",
+    "int 3",
+    "strace -f",
+    "ltrace",
+    "reverse engineering",
+)
+
+_SAFE_GUIDANCE = {
+    "privilege_escalation": (
+        "Privilege-escalation pattern blocked. "
+        "Use least-privilege audit, token hardening, and approved access workflows."
+    ),
+    "persistence_abuse": (
+        "Persistence pattern blocked. "
+        "Use startup/service/WMI auditing and containment-cleanup procedures."
+    ),
+    "stealth_memory_abuse": (
+        "Stealth memory-execution pattern blocked. "
+        "Use EDR telemetry, memory inspection, and incident triage playbooks."
+    ),
+    "kernel_manipulation": (
+        "Kernel-manipulation pattern blocked. "
+        "Use kernel module audit, integrity checks, and approved hardening steps."
+    ),
+    "raw_disk_access": (
+        "Raw disk-access pattern blocked. "
+        "Use forensic-safe acquisition planning with explicit authorization and chain-of-custody."
+    ),
+    "network_spoofing": (
+        "Network spoofing/injection pattern blocked. "
+        "Use firewall diagnostics, packet capture, and authorized validation workflows."
+    ),
+    "reverse_engineering_abuse": (
+        "Reverse-engineering abuse pattern blocked. "
+        "Use approved debugging and observability approaches instead."
+    ),
+    "defensive_only": (
+        "Command blocked by defensive-only policy. "
+        "I can help with detection, hardening, and secure remediation steps instead."
+    ),
+}
+
+_READONLY_COMMAND_PREFIXES = (
+    "dir",
+    "ls",
+    "cat",
+    "type",
+    "echo",
+    "findstr",
+    "select-string",
+    "grep",
+    "find",
+    "where",
+    "get-",
+    "systeminfo",
+    "hostname",
+    "whoami",
+    "ipconfig",
+    "ping",
+    "tracert",
+    "pathping",
+    "netstat",
+    "nslookup",
+)
 
 
 def _build_shell_command(command: str) -> tuple[list[str], str]:
@@ -59,6 +250,155 @@ def _build_shell_command(command: str) -> tuple[list[str], str]:
     return [sh, "-lc", command], "sh"
 
 
+def _build_shell_command_preferred(command: str, preferred_shell: str) -> tuple[list[str], str]:
+    pref = (preferred_shell or "").strip().lower()
+
+    if os.name == "nt":
+        if pref == "cmd":
+            comspec = os.environ.get("COMSPEC") or "cmd.exe"
+            return [comspec, "/d", "/s", "/c", command], "cmd"
+        if pref == "powershell":
+            return _build_shell_command(command)
+        # Windows'ta zsh/bash tercihi verilse de default güvenli yola düş.
+        return _build_shell_command(command)
+
+    if pref in {"zsh", "bash", "sh"}:
+        shell_path = shutil.which(pref)
+        if shell_path:
+            return [shell_path, "-lc", command], pref
+    return _build_shell_command(command)
+
+
+def _analyze_command(command: str) -> dict[str, object]:
+    normalized = (command or "").strip().lower()
+    deny_match = any(re.search(pattern, normalized) for pattern in _DENY_PATTERNS)
+    is_high_risk = any(marker in normalized for marker in _HIGH_RISK_MARKERS)
+    needs_admin = any(marker in normalized for marker in _ADMIN_MARKERS)
+    matched_marker = _first_matched_marker(normalized, _DEFENSIVE_BLOCK_MARKERS)
+    blocked_defensive_only = bool(matched_marker)
+    is_readonly = _is_read_only_command(normalized)
+
+    risk_level = "low"
+    if deny_match:
+        risk_level = "critical"
+    elif is_high_risk:
+        risk_level = "high"
+    return {
+        "blocked": deny_match,
+        "blocked_defensive_only": blocked_defensive_only,
+        "risk_level": risk_level,
+        "needs_admin": needs_admin,
+        "read_only": is_readonly,
+        "matched_defensive_marker": matched_marker,
+        "blocked_category": _detect_marker_category(matched_marker),
+    }
+
+
+def _first_matched_marker(normalized_command: str, markers: tuple[str, ...]) -> str:
+    for marker in markers:
+        if marker in normalized_command:
+            return marker
+    return ""
+
+
+def _detect_marker_category(marker: str) -> str:
+    if not marker:
+        return ""
+    if marker in _PRIVILEGE_ESCALATION_MARKERS:
+        return "privilege_escalation"
+    if marker in _PERSISTENCE_MARKERS:
+        return "persistence_abuse"
+    if marker in _STEALTH_MEMORY_MARKERS:
+        return "stealth_memory_abuse"
+    if marker in _KERNEL_MANIPULATION_MARKERS:
+        return "kernel_manipulation"
+    if marker in _RAW_DISK_ACCESS_MARKERS:
+        return "raw_disk_access"
+    if marker in _NETWORK_SPOOFING_MARKERS:
+        return "network_spoofing"
+    if marker in _REVERSE_ENGINEERING_MARKERS:
+        return "reverse_engineering_abuse"
+    return "defensive_only"
+
+
+def _is_read_only_command(normalized_command: str) -> bool:
+    compact = normalized_command.strip()
+    if not compact:
+        return False
+    first = re.split(r"[\s|;&]+", compact, maxsplit=1)[0]
+    return any(first == prefix or first.startswith(prefix) for prefix in _READONLY_COMMAND_PREFIXES)
+
+
+def _parse_timeout(timeout_raw: object) -> int:
+    try:
+        timeout = int(timeout_raw)
+    except (TypeError, ValueError):
+        timeout = _DEFAULT_TIMEOUT_SECONDS
+    return max(1, min(timeout, _MAX_TIMEOUT_SECONDS))
+
+
+def _select_shell(command: str, shell_preference: str) -> tuple[list[str], str]:
+    if shell_preference.strip():
+        return _build_shell_command_preferred(command, shell_preference)
+    return _build_shell_command(command)
+
+
+def _build_dry_run_payload(
+    command: str,
+    cwd: str,
+    shell_name: str,
+    timeout: int,
+    analysis: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "dry_run": True,
+        "command": command,
+        "cwd": cwd,
+        "shell": shell_name,
+        "timeout": timeout,
+        "risk_level": analysis["risk_level"],
+        "needs_admin": analysis["needs_admin"],
+        "read_only": analysis["read_only"],
+        "command_quality": _build_command_quality(
+            command=command,
+            analysis=analysis,
+            shell_name=shell_name,
+            timeout=timeout,
+            dry_run=True,
+        ),
+    }
+
+
+def _build_command_quality(
+    command: str,
+    analysis: dict[str, object],
+    shell_name: str,
+    timeout: int,
+    dry_run: bool,
+) -> dict[str, object]:
+    read_only = bool(analysis.get("read_only", False))
+    safety = "readonly" if read_only else f"{analysis['risk_level']}"
+    prerequisites: list[str] = [f"shell={shell_name}"]
+    if bool(analysis.get("needs_admin", False)):
+        prerequisites.append("admin-rights-may-be-required")
+    return {
+        "purpose": "Execute user-provided system command",
+        "safety": safety,
+        "prerequisites": prerequisites,
+        "command": command,
+        "expected_output": "exit_code=0 and no stderr for successful run",
+        "failure_modes": [
+            "permission_denied",
+            "command_not_found",
+            "timeout",
+            "non_zero_exit",
+        ],
+        "next_step": "Inspect stdout/stderr and run targeted diagnostic command",
+        "dry_run": dry_run,
+        "timeout": timeout,
+    }
+
+
 class TerminalExecute(BaseTool):
     """Execute a shell command on the host OS."""
 
@@ -75,7 +415,22 @@ class TerminalExecute(BaseTool):
         if not command.strip():
             return self._failure("No command provided")
 
-        timeout = params.get("timeout", _DEFAULT_TIMEOUT_SECONDS)
+        analysis = _analyze_command(command)
+        if bool(analysis["blocked_defensive_only"]):
+            category = str(analysis.get("blocked_category") or "defensive_only")
+            guidance = _SAFE_GUIDANCE.get(category, _SAFE_GUIDANCE["defensive_only"])
+            return self._failure(
+                f"{guidance} "
+                f"Category: {category}. "
+                f"Matched marker: {analysis['matched_defensive_marker']}"
+            )
+        if bool(analysis["blocked"]):
+            return self._failure("Command blocked by safety policy (deny pattern matched)")
+
+        timeout = _parse_timeout(params.get("timeout", _DEFAULT_TIMEOUT_SECONDS))
+
+        dry_run = bool(params.get("dry_run", False))
+        shell_preference = str(params.get("shell", "") or "")
         cwd_param = self._first_param(params, "cwd", "working_dir", default="")
         if cwd_param:
             cwd = str(resolve_user_path(str(cwd_param))[0])
@@ -85,13 +440,20 @@ class TerminalExecute(BaseTool):
         # Ensure working directory exists.
         os.makedirs(cwd, exist_ok=True)
 
+        shell_argv, shell_name = _select_shell(command, shell_preference)
+
+        if dry_run:
+            return self._success(
+                "Dry-run completed; command not executed",
+                data=_build_dry_run_payload(command, cwd, shell_name, timeout, analysis),
+            )
+
         logger.info("terminal.execute", command=command, cwd=cwd, timeout=timeout)
 
         try:
             env = os.environ.copy()
             env.setdefault("PYTHONIOENCODING", "utf-8")
             env.setdefault("PYTHONUTF8", "1")
-            shell_argv, shell_name = _build_shell_command(command)
             process = await asyncio.create_subprocess_exec(
                 *shell_argv,
                 stdout=asyncio.subprocess.PIPE,
@@ -125,6 +487,16 @@ class TerminalExecute(BaseTool):
                     "stderr": stderr,
                     "exit_code": exit_code,
                     "shell": shell_name,
+                    "risk_level": analysis["risk_level"],
+                    "needs_admin": analysis["needs_admin"],
+                    "read_only": analysis["read_only"],
+                    "command_quality": _build_command_quality(
+                        command=command,
+                        analysis=analysis,
+                        shell_name=shell_name,
+                        timeout=timeout,
+                        dry_run=False,
+                    ),
                 },
             )
 

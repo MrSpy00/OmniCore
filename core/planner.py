@@ -12,6 +12,7 @@ from typing import Any
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from config.logging import get_logger
+from models.capabilities import RiskLevel
 from models.tasks import TaskPlan, TaskStep
 
 logger = get_logger(__name__)
@@ -25,6 +26,40 @@ _DESTRUCTIVE_TOOLS = frozenset(
         "terminal_execute",
     }
 )
+
+_DOMAIN_HINTS: tuple[tuple[str, str], ...] = (
+    ("os_", "filesystem"),
+    ("file", "filesystem"),
+    ("sys_", "system"),
+    ("process", "process"),
+    ("terminal_", "devops"),
+    ("net_", "network"),
+    ("api_", "network"),
+    ("gui_", "ui"),
+    ("media_", "media"),
+    ("vision", "vision"),
+    ("web_", "browser"),
+    ("security", "security"),
+)
+
+
+def _infer_domain(tool_name: str) -> str:
+    lowered = (tool_name or "").lower()
+    for prefix, domain in _DOMAIN_HINTS:
+        if lowered.startswith(prefix) or prefix in lowered:
+            return domain
+    return "general"
+
+
+def _infer_risk_level(tool_name: str, is_destructive: bool) -> RiskLevel:
+    lowered = (tool_name or "").lower()
+    if any(marker in lowered for marker in ("delete", "shutdown", "kill", "format", "encrypt")):
+        return RiskLevel.CRITICAL
+    if is_destructive:
+        return RiskLevel.HIGH
+    if any(marker in lowered for marker in ("write", "move", "set", "restart", "deploy")):
+        return RiskLevel.MEDIUM
+    return RiskLevel.LOW
 
 
 class Planner:
@@ -59,11 +94,22 @@ class Planner:
         for raw in raw_steps:
             tool_name = raw.get("tool", "unknown")
             is_destructive = raw.get("destructive", tool_name in _DESTRUCTIVE_TOOLS)
+            risk_level = raw.get("risk_level") or _infer_risk_level(tool_name, is_destructive)
+            domain = raw.get("domain") or _infer_domain(tool_name)
             step = TaskStep(
                 tool_name=tool_name,
                 description=raw.get("description", ""),
                 parameters=raw.get("parameters", {}),
                 is_destructive=is_destructive,
+                domain=domain,
+                risk_level=risk_level,
+                requires_admin=bool(raw.get("requires_admin", False)),
+                requires_dry_run=bool(raw.get("requires_dry_run", False)),
+                requires_backup=bool(raw.get("requires_backup", False)),
+                requires_double_confirmation=bool(raw.get("requires_double_confirmation", False)),
+                dry_run_done=bool(raw.get("dry_run_done", False)),
+                backup_ready=bool(raw.get("backup_ready", False)),
+                admin_verified=bool(raw.get("admin_verified", False)),
             )
             steps.append(step)
 

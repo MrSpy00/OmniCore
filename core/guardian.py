@@ -128,3 +128,22 @@ class Guardian:
                 error=str(exc),
             )
             return ApprovalResult.DENIED
+
+    async def request_critical_approval(
+        self,
+        action_description: str,
+        user_id: str = "",
+    ) -> ApprovalResult:
+        """Require two explicit approvals for critical operations."""
+        first = await self.request_approval(
+            action_description=f"[CRITICAL-1/2] {action_description}",
+            user_id=user_id,
+        )
+        if first != ApprovalResult.APPROVED:
+            return first
+
+        second = await self.request_approval(
+            action_description=f"[CRITICAL-2/2] {action_description}",
+            user_id=user_id,
+        )
+        return second

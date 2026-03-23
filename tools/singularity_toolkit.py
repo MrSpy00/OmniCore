@@ -254,9 +254,12 @@ class SysEnvironmentSnapshot(BaseTool):
     description = "Capture current environment variables and key system paths."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        env = dict(os.environ)
-        sample = {k: env[k] for k in sorted(env)[:50]}
-        return self._success("Environment snapshot captured", data={"environment": sample})
+        try:
+            env = dict(os.environ)
+            sample = {k: env[k] for k in sorted(env)[:50]}
+            return self._success("Environment snapshot captured", data={"environment": sample})
+        except Exception as exc:
+            return self._failure(str(exc))
 
 
 class FileWatchDirectory(BaseTool):

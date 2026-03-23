@@ -44,6 +44,8 @@ class StateTracker:
         self._db = await aiosqlite.connect(self._db_path)
         await self._db.execute("PRAGMA journal_mode=WAL;")
         await self._db.execute("PRAGMA foreign_keys=ON;")
+        await self._db.execute("PRAGMA busy_timeout=5000;")
+        await self._db.execute("PRAGMA synchronous=NORMAL;")
         await self._create_tables()
         logger.info("state_tracker.initialized", db_path=self._db_path)
 
@@ -119,6 +121,106 @@ class StateTracker:
                     "status": r[2],
                     "created_at": r[3],
                     "updated_at": r[4],
+                }
+                for r in rows
+            ]
+
+    # -- todos (plan tracking) ----------------------------------------------
+
+    async def upsert_todo(
+        self,
+        todo_id: str,
+        title: str,
+        description: str = "",
+        status: str = "pending",
+    ) -> None:
+        """Insert or update a todo item for plan execution tracking."""
+        await self._execute_write(
+            """
+            INSERT INTO todos (id, title, description, status, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                description = excluded.description,
+                status = excluded.status,
+                updated_at = excluded.updated_at
+            """,
+            (todo_id, title, description, status, _now_iso()),
+        )
+
+    async def set_todo_status(self, todo_id: str, status: str) -> None:
+        """Update todo status in place."""
+        await self._execute_write(
+            "UPDATE todos SET status = ?, updated_at = ? WHERE id = ?",
+            (status, _now_iso(), todo_id),
+        )
+
+    async def add_todo_dependency(self, todo_id: str, depends_on: str) -> None:
+        """Register a dependency edge between todo items."""
+        await self._execute_write(
+            """
+            INSERT OR IGNORE INTO todo_deps (todo_id, depends_on)
+            VALUES (?, ?)
+            """,
+            (todo_id, depends_on),
+        )
+
+    async def list_todos(self, status: str | None = None, limit: int = 100) -> list[dict]:
+        """List todos optionally filtered by status."""
+        db = self._require_db()
+        if status:
+            query = (
+                "SELECT id, title, description, status, created_at, updated_at "
+                "FROM todos WHERE status = ? ORDER BY updated_at DESC LIMIT ?"
+            )
+            params: tuple = (status, limit)
+        else:
+            query = (
+                "SELECT id, title, description, status, created_at, updated_at "
+                "FROM todos ORDER BY updated_at DESC LIMIT ?"
+            )
+            params = (limit,)
+
+        async with db.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": r[0],
+                    "title": r[1],
+                    "description": r[2],
+                    "status": r[3],
+                    "created_at": r[4],
+                    "updated_at": r[5],
+                }
+                for r in rows
+            ]
+
+    async def list_ready_todos(self, limit: int = 100) -> list[dict]:
+        """List pending todos whose dependencies are all done."""
+        db = self._require_db()
+        query = """
+            SELECT t.id, t.title, t.description, t.status, t.created_at, t.updated_at
+            FROM todos t
+            WHERE t.status = 'pending'
+            AND NOT EXISTS (
+                SELECT 1
+                FROM todo_deps td
+                JOIN todos dep ON dep.id = td.depends_on
+                WHERE td.todo_id = t.id AND dep.status != 'done'
+            )
+            ORDER BY t.updated_at DESC
+            LIMIT ?
+        """
+        async with db.execute(query, (limit,)) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": r[0],
+                    "title": r[1],
+                    "description": r[2],
+                    "status": r[3],
+                    "created_at": r[4],
+                    "updated_at": r[5],
                 }
                 for r in rows
             ]
@@ -263,4 +365,24 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_audit_log_event_type ON audit_log(event_type);
 CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_enabled ON scheduled_jobs(enabled);
+
+CREATE TABLE IF NOT EXISTS todos (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS todo_deps (
+    todo_id     TEXT NOT NULL,
+    depends_on  TEXT NOT NULL,
+    PRIMARY KEY (todo_id, depends_on),
+    FOREIGN KEY (todo_id) REFERENCES todos(id) ON DELETE CASCADE,
+    FOREIGN KEY (depends_on) REFERENCES todos(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
+CREATE INDEX IF NOT EXISTS idx_todo_deps_todo_id ON todo_deps(todo_id);
 """

@@ -18,9 +18,12 @@ class SysCleanTempFiles(BaseTool):
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        freed = await asyncio.to_thread(_clean_temp_files_sync)
-        freed_mb = round(freed / (1024 * 1024), 2)
-        return self._success("Temp files cleaned", data={"freed_mb": freed_mb})
+        try:
+            freed = await asyncio.to_thread(_clean_temp_files_sync)
+            freed_mb = round(freed / (1024 * 1024), 2)
+            return self._success("Temp files cleaned", data={"freed_mb": freed_mb})
+        except Exception as exc:
+            return self._failure(str(exc))
 
 
 class SysFindLargeFiles(BaseTool):
@@ -28,12 +31,15 @@ class SysFindLargeFiles(BaseTool):
     description = "Find top 10 largest files over a size threshold."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        root = tool_input.parameters.get("root", ".")
-        min_mb = float(tool_input.parameters.get("min_mb", 100))
+        try:
+            root = tool_input.parameters.get("root", ".")
+            min_mb = float(tool_input.parameters.get("min_mb", 100))
 
-        root_path = resolve_user_path(str(root))[0]
-        top = await asyncio.to_thread(_find_large_files_sync, root_path, min_mb)
-        return self._success("Large files scanned", data={"files": top})
+            root_path = resolve_user_path(str(root))[0]
+            top = await asyncio.to_thread(_find_large_files_sync, root_path, min_mb)
+            return self._success("Large files scanned", data={"files": top})
+        except Exception as exc:
+            return self._failure(str(exc))
 
 
 class SysFlushDnsCache(BaseTool):

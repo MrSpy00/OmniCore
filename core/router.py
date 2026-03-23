@@ -28,6 +28,7 @@ from config.logging import get_logger
 from config.settings import get_settings
 from core.guardian import ApprovalResult, Guardian
 from core.planner import Planner
+from core.policy import CapabilityPolicyEngine
 from core.recovery import RecoveryEngine
 from memory.long_term import LongTermMemory
 from memory.short_term import ShortTermMemory
@@ -182,6 +183,7 @@ class CognitiveRouter:
             approval_callback=approval_callback,
         )
         self._recovery = RecoveryEngine()
+        self._policy = CapabilityPolicyEngine()
 
     def _build_llm(self, settings) -> Any:
         provider = self._runtime_provider
@@ -327,7 +329,8 @@ class CognitiveRouter:
         if self._key_rotator is not None and self._model_rotator is not None:
             groq_routes = max(1, len(self._key_rotator) * len(self._model_rotator))
         google_routes = max(1, len(self._settings.google_api_keys))
-        return max(3, groq_routes + google_routes + 2)
+        # Keep retry space finite and bounded even under oversized key/model lists.
+        return min(30, max(3, groq_routes + google_routes + 2))
 
     async def _ainvoke_with_retry(self, messages: list) -> Any:
         attempt = 0
@@ -551,13 +554,41 @@ class CognitiveRouter:
                 requires_approval=tool.requires_approval(temp_input),
             )
 
-            # Guardian check for destructive actions.
-            if tool.requires_approval(tool_input):
-                step.status = StepStatus.AWAITING_APPROVAL
-                approval = await self._guardian.request_approval(
-                    action_description=f"{step.tool_name}: {step.description}",
+            policy_decision = self._policy.evaluate(step)
+            if not policy_decision.allowed:
+                step.status = StepStatus.SKIPPED
+                if policy_decision.safe_response:
+                    step.error = (
+                        f"Policy blocked: {', '.join(policy_decision.reasons)} | "
+                        f"guidance={policy_decision.safe_response}"
+                    )
+                else:
+                    step.error = f"Policy blocked: {', '.join(policy_decision.reasons)}"
+                results_summary.append(f"[SKIPPED] {step.description}: {step.error}")
+                await self._state.log_audit(
+                    "policy_rejected",
+                    f"{step.tool_name}: {step.error}",
                     user_id=user_message.user_id,
                 )
+                continue
+
+            # Guardian check for destructive actions.
+            if tool.requires_approval(tool_input) or policy_decision.require_confirmation:
+                step.status = StepStatus.AWAITING_APPROVAL
+                if policy_decision.require_double_confirmation:
+                    approval = await self._guardian.request_critical_approval(
+                        action_description=(
+                            f"{step.tool_name}: {step.description} | risk={step.risk_level.value}"
+                        ),
+                        user_id=user_message.user_id,
+                    )
+                else:
+                    approval = await self._guardian.request_approval(
+                        action_description=(
+                            f"{step.tool_name}: {step.description} | risk={step.risk_level.value}"
+                        ),
+                        user_id=user_message.user_id,
+                    )
                 if approval != ApprovalResult.APPROVED:
                     step.status = StepStatus.SKIPPED
                     reason = "denied" if approval == ApprovalResult.DENIED else "timed out"

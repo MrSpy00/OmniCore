@@ -84,9 +84,12 @@ class MediaGenerateTtsHuman(BaseTool):
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        from tools.audio_toolkit import AudioTextToSpeech
+        try:
+            from tools.audio_toolkit import AudioTextToSpeech
 
-        return await AudioTextToSpeech().execute(tool_input)
+            return await AudioTextToSpeech().execute(tool_input)
+        except Exception as exc:
+            return self._failure(str(exc))
 
 
 class MediaExtractTextFromVideo(BaseTool):

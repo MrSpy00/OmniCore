@@ -8,6 +8,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from models.capabilities import RiskLevel
+
 
 class StepStatus(StrEnum):
     """Status of an individual step within a task plan."""
@@ -42,6 +44,15 @@ class TaskStep(BaseModel):
     result: str = ""
     error: str = ""
     is_destructive: bool = False  # triggers HITL approval gate
+    domain: str = "general"
+    risk_level: RiskLevel = RiskLevel.MEDIUM
+    requires_admin: bool = False
+    requires_dry_run: bool = False
+    requires_backup: bool = False
+    requires_double_confirmation: bool = False
+    dry_run_done: bool = False
+    backup_ready: bool = False
+    admin_verified: bool = False
     retry_count: int = 0
     max_retries: int = 2
 

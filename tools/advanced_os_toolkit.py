@@ -139,8 +139,11 @@ class OsResourceMonitor(BaseTool):
     description = "Return current CPU, RAM, and Disk usage."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        info = await asyncio.to_thread(_collect_resource_info)
-        return self._success("Resource usage collected", data=info)
+        try:
+            info = await asyncio.to_thread(_collect_resource_info)
+            return self._success("Resource usage collected", data=info)
+        except Exception as exc:
+            return self._failure(str(exc))
 
 
 class OsListRunningProcesses(BaseTool):
@@ -148,8 +151,11 @@ class OsListRunningProcesses(BaseTool):
     description = "List top 15 memory-consuming processes."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        top = await asyncio.to_thread(_top_memory_processes)
-        return self._success("Top processes collected", data={"processes": top})
+        try:
+            top = await asyncio.to_thread(_top_memory_processes)
+            return self._success("Top processes collected", data={"processes": top})
+        except Exception as exc:
+            return self._failure(str(exc))
 
 
 class OsKillProcess(BaseTool):

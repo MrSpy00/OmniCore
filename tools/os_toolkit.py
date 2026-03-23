@@ -6,6 +6,7 @@ import asyncio
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from config.logging import get_logger
@@ -209,6 +210,62 @@ class OsDeleteFile(BaseTool):
             return self._failure(str(exc))
 
 
+class OsSafeDelete(BaseTool):
+    name = "os_safe_delete"
+    description = "Safely delete by quarantine move or wipe mode on the host OS."
+    is_destructive = True
+
+    def requires_approval(self, tool_input: ToolInput) -> bool:
+        return self.is_destructive
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            params = self._params(tool_input)
+            path_value = self._first_param(params, "file_path", "path", "value")
+            mode = str(self._first_param(params, "mode", "action", default="quarantine")).lower()
+            if not path_value:
+                return self._failure("path is required")
+            if mode not in {"quarantine", "wipe"}:
+                return self._failure("mode must be quarantine or wipe")
+
+            path = _resolve_sandboxed(str(path_value))
+            if not path.exists():
+                return self._failure(f"Path not found: {path}")
+
+            result = await asyncio.to_thread(_safe_delete_path, path, mode)
+            return self._success("Safe delete completed", data=result)
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class OsSetProcessPriority(BaseTool):
+    name = "os_set_process_priority"
+    description = "Set process priority safely across Windows/macOS/Linux."
+    is_destructive = True
+
+    def requires_approval(self, tool_input: ToolInput) -> bool:
+        return self.is_destructive
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            params = self._params(tool_input)
+            pid_raw = self._first_param(params, "pid", "process_id", "id")
+            level = str(self._first_param(params, "level", "priority", default="normal")).lower()
+            if pid_raw is None:
+                return self._failure("pid is required")
+
+            try:
+                import psutil
+            except ImportError:
+                return self._failure("psutil is required for os_set_process_priority")
+
+            pid = int(pid_raw)
+            result = await asyncio.to_thread(_set_process_priority, psutil, pid, level)
+            return self._success("Process priority updated", data=result)
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
 # ---------------------------------------------------------------------------
 # System Info
 # ---------------------------------------------------------------------------
@@ -224,7 +281,7 @@ class OsSystemInfo(BaseTool):
                 "cpu_percent": psutil.cpu_percent(interval=0.5),
                 "memory_total_gb": round(psutil.virtual_memory().total / (1024**3), 2),
                 "memory_used_percent": psutil.virtual_memory().percent,
-                "disk_usage_percent": psutil.disk_usage("/").percent,
+                "disk_usage_percent": psutil.disk_usage(_disk_usage_path()).percent,
             }
             return self._success("System info collected", data=info)
         except ImportError:
@@ -242,14 +299,99 @@ class OsSystemInfo(BaseTool):
 def _list_dir_entries(path: Path) -> list[dict[str, object]]:
     entries: list[dict[str, object]] = []
     for entry in sorted(path.iterdir()):
+        try:
+            size = entry.stat().st_size if entry.is_file() else 0
+        except OSError:
+            size = 0
         entries.append(
             {
                 "name": entry.name,
                 "type": "dir" if entry.is_dir() else "file",
-                "size": entry.stat().st_size if entry.is_file() else 0,
+                "size": size,
             }
         )
     return entries
+
+
+def _disk_usage_path() -> str:
+    if os.name == "nt":
+        return os.environ.get("SystemDrive", "C:") + "\\"
+    return "/"
+
+
+def _safe_delete_path(path: Path, mode: str) -> dict[str, object]:
+    if mode == "quarantine":
+        home = Path(os.environ.get("USERPROFILE") or Path.home())
+        trash_dir = home / ".omnicore_trash"
+        trash_dir.mkdir(parents=True, exist_ok=True)
+        target = trash_dir / f"{path.name}.{int(time.time())}"
+        shutil.move(str(path), str(target))
+        return {
+            "mode": "quarantine",
+            "source": str(path),
+            "target": str(target),
+            "exists_in_trash": target.exists(),
+        }
+
+    if path.is_dir():
+        shutil.rmtree(path)
+        return {
+            "mode": "wipe",
+            "target": str(path),
+            "deleted": not path.exists(),
+        }
+
+    _wipe_file_contents(path)
+    path.unlink(missing_ok=True)
+    return {
+        "mode": "wipe",
+        "target": str(path),
+        "deleted": not path.exists(),
+    }
+
+
+def _wipe_file_contents(path: Path, chunk_size: int = 1024 * 1024) -> None:
+    size = path.stat().st_size
+    if size <= 0:
+        return
+    with path.open("r+b") as handle:
+        remaining = size
+        zero_chunk = b"\x00" * min(chunk_size, max(1, size))
+        while remaining > 0:
+            write_size = min(len(zero_chunk), remaining)
+            handle.write(zero_chunk[:write_size])
+            remaining -= write_size
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _set_process_priority(psutil_module, pid: int, level: str) -> dict[str, object]:
+    process = psutil_module.Process(pid)
+    before = process.nice()
+
+    if os.name == "nt":
+        win_map = {
+            "low": psutil_module.IDLE_PRIORITY_CLASS,
+            "normal": psutil_module.NORMAL_PRIORITY_CLASS,
+            "high": psutil_module.HIGH_PRIORITY_CLASS,
+            "realtime": psutil_module.REALTIME_PRIORITY_CLASS,
+        }
+        if level not in win_map:
+            raise ValueError("level must be low, normal, high, or realtime")
+        process.nice(win_map[level])
+    else:
+        unix_map = {"low": 10, "normal": 0, "high": -5}
+        if level not in unix_map:
+            raise ValueError("level must be low, normal, or high")
+        process.nice(unix_map[level])
+
+    after = process.nice()
+    return {
+        "pid": pid,
+        "level": level,
+        "previous": str(before),
+        "current": str(after),
+    }
 
 
 def _attempt_windows_elevation_write(path: Path, content: str) -> dict[str, object]:
