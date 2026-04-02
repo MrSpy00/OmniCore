@@ -44,6 +44,28 @@ def _resolve_sandboxed(path_str: str) -> Path:
     return target
 
 
+def _is_literal_placeholder_path(path_str: str) -> bool:
+    raw = (path_str or "").strip()
+    if not raw:
+        return False
+    lowered = raw.casefold().replace("/", "\\")
+    blocked_markers = (
+        "<username>",
+        "<kullanici>",
+        "<kullanıcı>",
+        "\\users\\kullanici",
+        "\\users\\kullanıcı",
+    )
+    return any(marker in lowered for marker in blocked_markers)
+
+
+def _placeholder_path_error() -> str:
+    return (
+        "Literal/yer tutucu mutlak yol reddedildi. "
+        "Lutfen Desktop/dosya.txt gibi goreli bir yol kullanin."
+    )
+
+
 def _resolve_write_target(path_str: str) -> Path:
     raw = (path_str or "").strip()
     target, _ = resolve_user_path(raw)
@@ -112,6 +134,8 @@ class OsWriteFile(BaseTool):
             path_value = self._first_param(params, "file_path", "path", "value")
             if not path_value:
                 return self._failure("path is required")
+            if _is_literal_placeholder_path(str(path_value)):
+                return self._failure(_placeholder_path_error())
             content = self._first_param(params, "content", "text", default="")
             path = _resolve_write_target(str(path_value))
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -220,6 +244,8 @@ class OsDeleteFile(BaseTool):
             dry_run = bool(self._first_param(params, "dry_run", default=True))
             if not path_value:
                 return self._failure("path is required")
+            if _is_literal_placeholder_path(str(path_value)):
+                return self._failure(_placeholder_path_error())
             path = _resolve_sandboxed(str(path_value))
             if not path.exists():
                 return self._failure(f"Path not found: {path}")

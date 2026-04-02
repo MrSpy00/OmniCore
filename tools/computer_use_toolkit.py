@@ -31,6 +31,37 @@ def _resolve_sandboxed(path_str: str) -> Path:
     return target
 
 
+def _is_opencv_missing(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "opencv" in text or "cv2" in text
+
+
+def _locate_center_on_screen(target: Path, confidence: float) -> tuple[Any, str]:
+    kwargs: dict[str, Any] = {}
+    if confidence > 0:
+        kwargs["confidence"] = confidence
+    point = pyautogui.locateCenterOnScreen(str(target), **kwargs)
+    return point, ("opencv_confidence" if "confidence" in kwargs else "pixel_exact")
+
+
+def _safe_locate_center_on_screen(target: Path, confidence: float) -> tuple[Any, str]:
+    try:
+        return _locate_center_on_screen(target, confidence)
+    except Exception as exc:
+        if not _is_opencv_missing(exc):
+            raise
+        try:
+            point = pyautogui.locateCenterOnScreen(str(target))
+            return point, "pixel_exact_no_cv2"
+        except Exception as fallback_exc:
+            if _is_opencv_missing(fallback_exc):
+                raise RuntimeError(
+                    "opencv-python eksik. confidence tabanli esleme kullanilamadi. "
+                    "Lutfen `pip install opencv-python` ile yukleyin."
+                ) from fallback_exc
+            raise
+
+
 class GuiClickImageOnScreen(BaseTool):
     name = "gui_click_image_on_screen"
     description = "Find an image on screen and click it."
@@ -48,16 +79,24 @@ class GuiClickImageOnScreen(BaseTool):
         try:
             target = _resolve_sandboxed(image_path)
             point = None
+            locate_method = "template"
             attempts = max(0, scroll_retries) + 1
             for attempt in range(1, attempts + 1):
-                point = await asyncio.to_thread(
-                    pyautogui.locateCenterOnScreen, str(target), confidence=confidence
+                point, locate_method = await asyncio.to_thread(
+                    _safe_locate_center_on_screen,
+                    target,
+                    confidence,
                 )
                 if point is not None:
                     await asyncio.to_thread(pyautogui.click, point.x, point.y)
                     return self._success(
                         "Image found and clicked",
-                        data={"x": point.x, "y": point.y, "method": "template", "attempt": attempt},
+                        data={
+                            "x": point.x,
+                            "y": point.y,
+                            "method": locate_method,
+                            "attempt": attempt,
+                        },
                     )
                 if attempt < attempts:
                     await asyncio.to_thread(pyautogui.scroll, scroll_clicks)
@@ -224,6 +263,27 @@ class GuiLocateAndClick(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
+        image_path_value = str(self._first_param(params, "image_path", "path", default="")).strip()
+        confidence = float(self._first_param(params, "confidence", default=0.8) or 0.8)
+
+        if image_path_value:
+            try:
+                target = _resolve_sandboxed(image_path_value)
+                point, locate_method = await asyncio.to_thread(
+                    _safe_locate_center_on_screen,
+                    target,
+                    confidence,
+                )
+                if point is None:
+                    return self._failure("Image not found on screen")
+                await asyncio.to_thread(pyautogui.click, point.x, point.y)
+                return self._success(
+                    "Image found and clicked",
+                    data={"x": point.x, "y": point.y, "method": locate_method},
+                )
+            except Exception as exc:
+                return self._failure(str(exc))
+
         element_desc = str(
             self._first_param(
                 params, "element", "description", "target", "text", "label", default=""

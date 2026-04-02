@@ -37,7 +37,7 @@ def test_error_classifiers_include_413_and_token_backpressure():
     assert _is_retryable_llm_error(err2) is True
 
 
-def test_filter_relevant_tools_caps_to_30_and_keeps_always_on():
+def test_filter_relevant_tools_caps_to_12_and_keeps_always_on():
     router = _minimal_router()
     tools = [
         {"name": f"dev_tool_{i}", "description": "developer utility", "destructive": "False"}
@@ -65,7 +65,7 @@ def test_filter_relevant_tools_caps_to_30_and_keeps_always_on():
 
     selected = router._filter_relevant_tools("kod ara grep TODO", tools)
     names = {t["name"] for t in selected}
-    assert len(selected) <= 30
+    assert len(selected) <= 12
     assert "agent_spawn_subtask" in names
     assert "terminal_execute" in names
     assert "os_read_file" in names

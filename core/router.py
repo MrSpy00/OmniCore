@@ -211,12 +211,16 @@ _QUERY_TOOL_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("resim", ("media_", "image", "vision")),
     ("video", ("media_", "video", "web_")),
     ("ses", ("media_", "audio")),
+    ("spotify", ("media_control_native", "media_control_spotify_native", "media_control")),
+    ("muzik", ("media_control_native", "media_control_spotify_native", "media_control")),
+    ("music", ("media_control_native", "media_control_spotify_native", "media_control")),
+    ("oynat", ("media_control_native", "media_control_spotify_native", "media_control")),
     ("guvenlik", ("security", "encrypt", "decrypt", "audit")),
     ("security", ("security", "encrypt", "decrypt", "audit")),
 )
 
-_MAX_RELEVANT_TOOLS = 30
-_GROQ_PREEMPTIVE_TOKEN_LIMIT = 5000
+_MAX_RELEVANT_TOOLS = 12
+_GROQ_PREEMPTIVE_TOKEN_LIMIT = 4000
 
 
 class _LocalLLMResponse:
@@ -583,6 +587,13 @@ class CognitiveRouter:
                 ):
                     score += 45
 
+            media_markers = ("spotify", "muzik", "music", "oynat")
+            if any(marker in lowered_query for marker in media_markers):
+                if name_l in {"media_control_native", "media_control_spotify_native"}:
+                    score += 500
+                if name_l.startswith("gui_"):
+                    score -= 160
+
             if score > 0:
                 scored.append((score, tool))
 
@@ -644,7 +655,16 @@ class CognitiveRouter:
             "sahte URL/domain üretme. "
             "KURAL 7: EĞER İSTENEN YETENEK İÇİN ARAÇ YOKSA, "
             "ÖNCE GERÇEK KAYNAKTAN ARAŞTIR, SONRA GEÇİCİ ÇÖZÜM ÜRET, "
-            "SONRA İŞİ TAMAMLA VE KULLANICIYA AÇIKÇA RAPORLA."
+            "SONRA İŞİ TAMAMLA VE KULLANICIYA AÇIKÇA RAPORLA. "
+            "KURAL 8: SPOTIFY/MEDYA KONTROLÜNDE HER ZAMAN "
+            "media_control_native veya media_control_spotify_native kullan. "
+            "ARKAPLAN MEDYA İŞLERİNDE ASLA gui_* araçları kullanma. "
+            "KURAL 9: ASLA C:\\Users\\Kullanıcı gibi yer tutucu/uydurma mutlak yol üretme. "
+            "Her zaman Desktop/dosya.txt gibi göreli yol kullan. "
+            "Yerel çözümlemeyi sisteme bırak. "
+            "KURAL 10: Kullanıcı kod tabanında 'scan/search/find/ara/tara' isterse "
+            "hemen agent_spawn_subtask ile delegasyon yap; "
+            "alt görevlerde dev_glob_search ve dev_grep_analyzer kullan."
         )
         return (
             f"{mandated}\n\n"

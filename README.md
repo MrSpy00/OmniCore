@@ -27,9 +27,17 @@ V33.0 introduces the Claude Assimilation layer:
 
 - Router no longer injects the full registry into every LLM prompt.
 - A semantic filter scores tools by query keywords, inferred domains, and tool name/description matches.
-- Injection is capped to a compact subset (`max 30 tools`) to keep payload safely below Groq pressure limits.
+- Injection is capped to a compact subset (`max 12 tools`) to keep payload safely below Groq pressure limits.
 - Critical always-on tools are always included: `agent_spawn_subtask`, `terminal_execute`, `os_read_file`.
 - If estimated prompt context exceeds threshold while running on Groq, router preemptively switches to Gemini before invocation.
+
+### V35.0 Cognitive Calibration & Mark-XXXV Paradigm
+
+- Native/API-first execution is now explicitly enforced in router prompt heuristics.
+- For Spotify/media playback tasks, planner/router guidance prioritizes `media_control_native` and `media_control_spotify_native` over brittle `gui_*` automation.
+- Path safety guidance now forbids placeholder hallucinations (such as `C:\\Users\\Kullanıcı`) and requires relative user-space paths (for example `Desktop/dosya.txt`) for deterministic resolution.
+- Codebase-wide scan/search/find requests are explicitly delegated through `agent_spawn_subtask` with `dev_glob_search` + `dev_grep_analyzer` workflow.
+- GUI image-click tools now degrade gracefully when OpenCV is unavailable and return clear remediation (`pip install opencv-python`) instead of hard crashes.
 
 ## V33.0 Feature Set
 
