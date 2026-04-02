@@ -22,6 +22,9 @@ except Exception:  # pragma: no cover - non-Windows runtimes
     winreg = None  # type: ignore[assignment]
 
 from models.tools import ToolInput, ToolOutput, ToolStatus
+from tools.os_adapters import runtime_adapter
+
+_RUNTIME = runtime_adapter()
 
 
 class BaseTool(ABC):
@@ -139,28 +142,15 @@ def resolve_user_path(path_str: str) -> tuple[Path, bool]:
     raw = os.path.expandvars(raw)
     if _is_windows():
         normalized_original = raw.replace("\\", "/")
-        placeholder_match = re.match(
-            r"^[a-z]:/users/<username>(?:/(.*))?$", normalized_original.lower()
+        placeholder_path = _expand_windows_user_placeholder(
+            normalized_original,
+            home=home,
+            desktop=desktop,
+            downloads=downloads,
+            documents=documents,
         )
-        if placeholder_match:
-            remainder = placeholder_match.group(1) or ""
-            # Map placeholder C:\Users\<Username> to dynamic home root.
-            if remainder:
-                remainder_norm = remainder.replace("\\", "/")
-                lower = remainder_norm.lower()
-                if lower == "desktop":
-                    return desktop.resolve(), False
-                if lower.startswith("desktop/"):
-                    return (desktop / remainder_norm[len("desktop/") :]).resolve(), False
-                if lower == "downloads":
-                    return downloads.resolve(), False
-                if lower.startswith("downloads/"):
-                    return (downloads / remainder_norm[len("downloads/") :]).resolve(), False
-                if lower in {"documents", "personal"}:
-                    return documents.resolve(), False
-                if lower.startswith("documents/"):
-                    return (documents / remainder_norm[len("documents/") :]).resolve(), False
-            return home.resolve(), False
+        if placeholder_path is not None:
+            return placeholder_path.resolve(), False
 
     raw = raw.replace("<Username>", home.name).replace("<username>", home.name)
 
@@ -173,24 +163,78 @@ def resolve_user_path(path_str: str) -> tuple[Path, bool]:
 
     normalized = raw.replace("\\", "/")
 
-    alias_map = {
-        "desktop": desktop,
-        "downloads": downloads,
-        "documents": documents,
-    }
-    for alias, base_path in alias_map.items():
-        alias_prefix = f"{alias}/"
-        if normalized.lower() == alias:
-            return base_path.resolve(), False
-        if normalized.lower().startswith(alias_prefix):
-            remainder = normalized[len(alias_prefix) :]
-            return (base_path / remainder).resolve(), False
+    alias_path = _resolve_alias_path(
+        normalized,
+        desktop=desktop,
+        downloads=downloads,
+        documents=documents,
+    )
+    if alias_path is not None:
+        return alias_path.resolve(), False
 
     return (home / raw).resolve(), False
 
 
 def _is_windows() -> bool:
-    return os.name == "nt"
+    return _RUNTIME.is_windows
+
+
+def _resolve_alias_path(
+    normalized: str,
+    *,
+    desktop: Path,
+    downloads: Path,
+    documents: Path,
+) -> Path | None:
+    alias_map = {
+        "desktop": desktop,
+        "downloads": downloads,
+        "documents": documents,
+    }
+    lower_normalized = normalized.lower()
+    for alias, base_path in alias_map.items():
+        alias_prefix = f"{alias}/"
+        if lower_normalized == alias:
+            return base_path
+        if lower_normalized.startswith(alias_prefix):
+            remainder = normalized[len(alias_prefix) :]
+            return base_path / remainder
+    return None
+
+
+def _expand_windows_user_placeholder(
+    normalized_original: str,
+    *,
+    home: Path,
+    desktop: Path,
+    downloads: Path,
+    documents: Path,
+) -> Path | None:
+    placeholder_match = re.match(
+        r"^[a-z]:/users/<username>(?:/(.*))?$", normalized_original.lower()
+    )
+    if not placeholder_match:
+        return None
+
+    remainder = placeholder_match.group(1) or ""
+    if not remainder:
+        return home
+
+    remainder_norm = remainder.replace("\\", "/")
+    lower = remainder_norm.lower()
+    if lower == "desktop":
+        return desktop
+    if lower.startswith("desktop/"):
+        return desktop / remainder_norm[len("desktop/") :]
+    if lower == "downloads":
+        return downloads
+    if lower.startswith("downloads/"):
+        return downloads / remainder_norm[len("downloads/") :]
+    if lower in {"documents", "personal"}:
+        return documents
+    if lower.startswith("documents/"):
+        return documents / remainder_norm[len("documents/") :]
+    return home
 
 
 def _host_user_home() -> Path:
@@ -259,42 +303,55 @@ def force_window_foreground(window_title: str, timeout_seconds: float = 5.0) -> 
             return native
         last_error = str(native.get("error") or native.get("stderr") or "")
 
-    # Secondary: pygetwindow activation.
+    pygetwindow_result = _try_activate_with_pygetwindow(title_hint, timeout_seconds)
+    if bool(pygetwindow_result.get("activated")):
+        return pygetwindow_result
+    if pygetwindow_result.get("error"):
+        last_error = str(pygetwindow_result.get("error"))
+
+    return _powershell_appactivate(title_hint, last_error)
+
+
+def _try_activate_with_pygetwindow(window_title: str, timeout_seconds: float) -> dict[str, Any]:
     try:
         import pygetwindow as gw  # type: ignore[import-not-found]
-
-        deadline = time.time() + max(0.1, timeout_seconds)
-        while time.time() < deadline:
-            try:
-                matches = []
-                for win in gw.getAllWindows():
-                    title = str(getattr(win, "title", "") or "")
-                    if title and title_hint.lower() in title.lower():
-                        matches.append(win)
-
-                if matches:
-                    target = matches[0]
-                    matched_title = str(getattr(target, "title", "") or "")
-                    try:
-                        if bool(getattr(target, "isMinimized", False)):
-                            target.restore()
-                    except Exception:
-                        pass
-                    target.activate()
-                    time.sleep(0.15)
-                    return {
-                        "activated": True,
-                        "method": "pygetwindow",
-                        "matched_title": matched_title,
-                    }
-            except Exception as exc:
-                last_error = str(exc)
-            time.sleep(0.2)
     except Exception as exc:
-        last_error = str(exc)
+        return {"activated": False, "method": "pygetwindow", "error": str(exc)}
 
-    # Tertiary: AppActivate fallback for title-based activation.
-    escaped = title_hint.replace("'", "''")
+    deadline = time.time() + max(0.1, timeout_seconds)
+    last_error = ""
+    while time.time() < deadline:
+        try:
+            matches = []
+            for win in gw.getAllWindows():
+                title = str(getattr(win, "title", "") or "")
+                if title and window_title.lower() in title.lower():
+                    matches.append(win)
+
+            if matches:
+                target = matches[0]
+                matched_title = str(getattr(target, "title", "") or "")
+                try:
+                    if bool(getattr(target, "isMinimized", False)):
+                        target.restore()
+                except Exception:
+                    pass
+                target.activate()
+                time.sleep(0.15)
+                return {
+                    "activated": True,
+                    "method": "pygetwindow",
+                    "matched_title": matched_title,
+                }
+        except Exception as exc:
+            last_error = str(exc)
+        time.sleep(0.2)
+
+    return {"activated": False, "method": "pygetwindow", "error": last_error}
+
+
+def _powershell_appactivate(window_title: str, last_error: str) -> dict[str, Any]:
+    escaped = window_title.replace("'", "''")
     script = (
         "$ws = New-Object -ComObject WScript.Shell; "
         f"if ($ws.AppActivate('{escaped}')) {{ 'true' }} else {{ 'false' }}"

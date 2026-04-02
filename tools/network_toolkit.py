@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import socket
 import subprocess
 
@@ -11,6 +10,9 @@ import httpx
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
+from tools.os_adapters import runtime_adapter
+
+_RUNTIME = runtime_adapter()
 
 
 class NetPing(BaseTool):
@@ -24,7 +26,7 @@ class NetPing(BaseTool):
 
         try:
             count = int(tool_input.parameters.get("count", 1))
-            ping_flag = "-n" if os.name == "nt" else "-c"
+            ping_flag = _RUNTIME.ping_count_flag()
             result = await asyncio.to_thread(
                 subprocess.run,
                 ["ping", ping_flag, str(count), host],

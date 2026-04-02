@@ -18,12 +18,15 @@ import pyperclip
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool, force_window_foreground, resolve_user_path
+from tools.os_adapters import runtime_adapter
+
+_RUNTIME = runtime_adapter()
 
 
 def _run_elevated_command(command: str, timeout: int = 120) -> dict[str, object]:
     system = platform.system().lower()
 
-    if os.name == "nt":
+    if _RUNTIME.is_windows:
         command_json = json.dumps(command)
         ps = (
             "Start-Process powershell "
@@ -289,56 +292,77 @@ class OsClipboardHistoryManager(BaseTool):
         index = self._first_param(params, "index", "entry", default=None)
 
         try:
-            if action in ("read", "current"):
-                text = await asyncio.to_thread(pyperclip.paste) or ""
-                return self._success("Current clipboard", data={"text": text})
-
-            if action in ("store", "save", "push"):
-                text = await asyncio.to_thread(pyperclip.paste) or ""
-                history = _clipboard_history_load()
-                if text and (not history or history[-1] != text):
-                    history.append(text)
-                    if len(history) > self._MAX_HISTORY:
-                        history = history[-self._MAX_HISTORY :]
-                    _clipboard_history_save(history)
-                return self._success(
-                    "Clipboard stored to history",
-                    data={"entries": len(history), "latest": text[:200], "source": "windows+disk"},
-                )
-
-            if action in ("list", "history"):
-                history = _clipboard_history_load()
-                recent = history[-10:] if history else []
-                entries = [
-                    {"index": len(history) - len(recent) + i, "preview": e[:100]}
-                    for i, e in enumerate(recent)
-                ]
-                return self._success(
-                    f"Clipboard history ({len(history)} total)",
-                    data={"entries": entries, "source": "windows+disk"},
-                )
-
-            if action in ("restore", "get", "recall"):
-                history = _clipboard_history_load()
-                if index is None:
-                    return self._failure("index is required for restore action")
-                idx = int(index)
-                if idx < 0 or idx >= len(history):
-                    return self._failure(f"Index {idx} out of range (0-{len(history) - 1})")
-                text = history[idx]
-                await asyncio.to_thread(pyperclip.copy, text)
-                return self._success(
-                    f"Restored entry {idx} to clipboard",
-                    data={"text": text[:200], "source": "windows+disk"},
-                )
-
-            if action == "clear":
-                _clipboard_history_save([])
-                return self._success("Clipboard history cleared")
-
-            return self._failure(f"Unknown action: {action}")
+            return await _handle_clipboard_history_action(self, action, index)
         except Exception as exc:
             return self._failure(str(exc))
+
+
+async def _handle_clipboard_history_action(
+    tool: OsClipboardHistoryManager,
+    action: str,
+    index,
+) -> ToolOutput:
+    if action in {"read", "current"}:
+        text = await asyncio.to_thread(pyperclip.paste) or ""
+        return tool._success("Current clipboard", data={"text": text})
+
+    if action in {"store", "save", "push"}:
+        return await _clipboard_store_action(tool)
+
+    if action in {"list", "history"}:
+        return _clipboard_list_action(tool)
+
+    if action in {"restore", "get", "recall"}:
+        return await _clipboard_restore_action(tool, index)
+
+    if action == "clear":
+        _clipboard_history_save([])
+        return tool._success("Clipboard history cleared")
+
+    return tool._failure(f"Unknown action: {action}")
+
+
+async def _clipboard_store_action(tool: OsClipboardHistoryManager) -> ToolOutput:
+    text = await asyncio.to_thread(pyperclip.paste) or ""
+    history = _clipboard_history_load()
+    if text and (not history or history[-1] != text):
+        history.append(text)
+        if len(history) > tool._MAX_HISTORY:
+            history = history[-tool._MAX_HISTORY :]
+        _clipboard_history_save(history)
+    return tool._success(
+        "Clipboard stored to history",
+        data={"entries": len(history), "latest": text[:200], "source": "windows+disk"},
+    )
+
+
+def _clipboard_list_action(tool: OsClipboardHistoryManager) -> ToolOutput:
+    history = _clipboard_history_load()
+    recent = history[-10:] if history else []
+    entries = [
+        {"index": len(history) - len(recent) + i, "preview": entry[:100]}
+        for i, entry in enumerate(recent)
+    ]
+    return tool._success(
+        f"Clipboard history ({len(history)} total)",
+        data={"entries": entries, "source": "windows+disk"},
+    )
+
+
+async def _clipboard_restore_action(tool: OsClipboardHistoryManager, index) -> ToolOutput:
+    history = _clipboard_history_load()
+    if index is None:
+        return tool._failure("index is required for restore action")
+    idx = int(index)
+    if idx < 0 or idx >= len(history):
+        return tool._failure(f"Index {idx} out of range (0-{len(history) - 1})")
+
+    text = history[idx]
+    await asyncio.to_thread(pyperclip.copy, text)
+    return tool._success(
+        f"Restored entry {idx} to clipboard",
+        data={"text": text[:200], "source": "windows+disk"},
+    )
 
 
 class WebPlayYoutubeVideoVisible(BaseTool):
@@ -503,7 +527,7 @@ class OsPhantomFileHider(BaseTool):
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
-        if os.name != "nt":
+        if not _RUNTIME.is_windows:
             return self._failure("os_phantom_file_hider is supported only on Windows")
 
         params = self._params(tool_input)
@@ -894,7 +918,28 @@ def _get_now_playing_powershell() -> dict[str, str]:
     Strategy 1: Windows Media Transport Controls (SMTC) API via PowerShell.
     Strategy 2: Fallback to scanning window titles of known media players.
     """
-    # --- Strategy 1: SMTC API ---
+    smtc = _get_now_playing_from_smtc()
+    if smtc:
+        return smtc
+
+    # --- Strategy 2: Window title scanning fallback ---
+    window_title = _get_now_playing_from_window_titles()
+    if window_title:
+        return window_title
+
+    return {}
+
+
+def _run_powershell(script: str, timeout: int = 8) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _get_now_playing_from_smtc() -> dict[str, str]:
     script = (
         "Add-Type -AssemblyName System.Runtime.WindowsRuntime; "
         "$null = [Windows.Media.Control."
@@ -910,82 +955,95 @@ def _get_now_playing_powershell() -> dict[str, str]:
         "$out | ConvertTo-Json -Compress"
     )
     try:
-        completed = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", script],
-            capture_output=True,
-            text=True,
-            timeout=8,
-        )
-        if completed.returncode == 0:
-            raw = completed.stdout.strip()
-            if raw:
-                import json
-
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict) and parsed.get("title"):
-                    return {
-                        "title": str(parsed.get("title", "")),
-                        "artist": str(parsed.get("artist", "")),
-                        "album": str(parsed.get("album", "")),
-                        "source": "smtc",
-                    }
+        completed = _run_powershell(script)
+        if completed.returncode != 0:
+            return {}
+        raw = (completed.stdout or "").strip()
+        if not raw:
+            return {}
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            return {}
+        if not parsed.get("title"):
+            return {}
+        return {
+            "title": str(parsed.get("title", "")),
+            "artist": str(parsed.get("artist", "")),
+            "album": str(parsed.get("album", "")),
+            "source": "smtc",
+        }
     except Exception:
-        pass
+        return {}
 
-    # --- Strategy 2: Window title scanning fallback ---
-    media_apps = {
-        "spotify": "Spotify",
-        "vlc": "VLC media player",
-        "musicbee": "MusicBee",
-        "foobar2000": "foobar2000",
-        "chrome": "YouTube",
-        "firefox": "YouTube",
-        "msedge": "YouTube",
-        "wmplayer": "Windows Media Player",
-        "groove": "Groove Music",
+
+def _extract_media_from_window(proc_name: str, title: str) -> dict[str, str]:
+    if " - " in title:
+        parts = title.split(" - ", 1)
+        return {
+            "title": parts[-1].strip(),
+            "artist": parts[0].strip(),
+            "album": "",
+            "source": f"window_title:{proc_name}",
+        }
+    return {
+        "title": title,
+        "artist": "",
+        "album": "",
+        "source": f"window_title:{proc_name}",
     }
+
+
+def _iter_window_records(raw: str) -> list[dict[str, str]]:
+    parsed = json.loads(raw)
+    rows = parsed if isinstance(parsed, list) else [parsed]
+    records: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        records.append(
+            {
+                "proc_name": str(row.get("ProcessName", "")).lower(),
+                "title": str(row.get("MainWindowTitle", "")),
+            }
+        )
+    return records
+
+
+def _find_media_window_record(records: list[dict[str, str]]) -> dict[str, str]:
+    media_apps = {
+        "spotify",
+        "vlc",
+        "musicbee",
+        "foobar2000",
+        "chrome",
+        "firefox",
+        "msedge",
+        "wmplayer",
+        "groove",
+    }
+    for record in records:
+        proc_name = record["proc_name"]
+        title = record["title"]
+        if not title:
+            continue
+        if any(app_key in proc_name for app_key in media_apps):
+            return _extract_media_from_window(proc_name, title)
+    return {}
+
+
+def _get_now_playing_from_window_titles() -> dict[str, str]:
     title_script = (
         "Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | "
         "Select-Object ProcessName, MainWindowTitle | ConvertTo-Json -Compress"
     )
     try:
-        completed = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", title_script],
-            capture_output=True,
-            text=True,
-            timeout=8,
-        )
-        if completed.returncode == 0:
-            raw = completed.stdout.strip()
-            if raw:
-                import json
-
-                windows = json.loads(raw)
-                if isinstance(windows, dict):
-                    windows = [windows]
-                for win in windows:
-                    proc_name = str(win.get("ProcessName", "")).lower()
-                    title = str(win.get("MainWindowTitle", ""))
-                    if not title:
-                        continue
-                    for app_key in media_apps:
-                        if app_key in proc_name:
-                            # Extract artist - title pattern common in media players
-                            if " - " in title:
-                                parts = title.split(" - ", 1)
-                                return {
-                                    "title": parts[-1].strip(),
-                                    "artist": parts[0].strip(),
-                                    "album": "",
-                                    "source": f"window_title:{proc_name}",
-                                }
-                            return {
-                                "title": title,
-                                "artist": "",
-                                "album": "",
-                                "source": f"window_title:{proc_name}",
-                            }
+        completed = _run_powershell(title_script)
+        if completed.returncode != 0:
+            return {}
+        raw = (completed.stdout or "").strip()
+        if not raw:
+            return {}
+        records = _iter_window_records(raw)
+        return _find_media_window_record(records)
     except Exception:
-        pass
-
-    return {}
+        return {}

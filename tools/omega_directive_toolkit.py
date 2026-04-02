@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import platform
 import shutil
 import socket
@@ -15,6 +14,9 @@ from pathlib import Path
 
 from models.tools import ToolInput
 from tools.base import BaseTool, force_window_foreground, resolve_user_path
+from tools.os_adapters import runtime_adapter
+
+_RUNTIME = runtime_adapter()
 
 
 def _command_exists(command: str) -> bool:
@@ -240,7 +242,7 @@ class OsCrossRootInventory(BaseTool):
 
 
 def _hardware_audit_sync() -> dict[str, object]:
-    if os.name == "nt":
+    if _RUNTIME.is_windows:
         return _hardware_audit_windows_sync()
     return {
         "platform": platform.platform(),
@@ -352,7 +354,7 @@ def _packet_sniffer_sync(
             "stderr_preview": (completed.stderr or "")[:1200],
         }
 
-    if os.name == "nt" and _command_exists("pktmon"):
+    if _RUNTIME.is_windows and _command_exists("pktmon"):
         cmd = ["pktmon", "start", "--etw", "--capture", "--pkt-size", "128"]
         first = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         time.sleep(min(duration, 15))
@@ -467,11 +469,41 @@ def _registry_tweak_sync(
     value_data,
     value_type: str,
 ) -> dict[str, object]:
-    if os.name != "nt":
+    if not _RUNTIME.is_windows:
         raise RuntimeError("Registry operations are Windows-only")
 
     import winreg  # type: ignore[import-not-found]
 
+    reg_hive = _resolve_registry_hive(hive, winreg)
+    if reg_hive is None:
+        raise RuntimeError(f"Unsupported hive: {hive}")
+
+    if not _is_safe_registry_path(key_path):
+        raise RuntimeError("Blocked by guardrail: key_path must be under user-safe prefixes")
+
+    if action == "read":
+        return _registry_read(winreg, reg_hive, key_path, value_name)
+
+    if action in {"write", "set"}:
+        reg_type = _resolve_registry_value_type(value_type, winreg)
+        if reg_type is None:
+            raise RuntimeError(f"Unsupported value_type: {value_type}")
+        return _registry_write(
+            winreg,
+            reg_hive,
+            key_path,
+            value_name,
+            value_data,
+            reg_type,
+        )
+
+    if action == "delete":
+        return _registry_delete(winreg, reg_hive, key_path, value_name)
+
+    raise RuntimeError("Unsupported action. Use read|write|delete")
+
+
+def _resolve_registry_hive(hive: str, winreg) -> int | None:
     hive_map = {
         "HKEY_CURRENT_USER": winreg.HKEY_CURRENT_USER,
         "HKCU": winreg.HKEY_CURRENT_USER,
@@ -480,65 +512,75 @@ def _registry_tweak_sync(
         "HKEY_CLASSES_ROOT": winreg.HKEY_CLASSES_ROOT,
         "HKCR": winreg.HKEY_CLASSES_ROOT,
     }
-    reg_hive = hive_map.get(hive.upper())
-    if reg_hive is None:
-        raise RuntimeError(f"Unsupported hive: {hive}")
+    return hive_map.get(hive.upper())
 
+
+def _is_safe_registry_path(key_path: str) -> bool:
     safe_prefixes = (
         r"Software\\",
         r"SOFTWARE\\",
         r"Control Panel\\",
         r"Environment",
     )
-    if not key_path.startswith(safe_prefixes):
-        raise RuntimeError("Blocked by guardrail: key_path must be under user-safe prefixes")
+    return key_path.startswith(safe_prefixes)
 
-    if action == "read":
-        with winreg.OpenKey(reg_hive, key_path, 0, winreg.KEY_READ) as key:
-            if value_name:
-                value, reg_type = winreg.QueryValueEx(key, value_name)
-                return {
-                    "action": action,
-                    "value_name": value_name,
-                    "value": value,
-                    "reg_type": reg_type,
-                }
-            values = []
-            index = 0
-            while True:
-                try:
-                    name, value, reg_type = winreg.EnumValue(key, index)
-                    values.append({"name": name, "value": value, "reg_type": reg_type})
-                    index += 1
-                except OSError:
-                    break
-            return {"action": action, "values": values}
 
-    if action in {"write", "set"}:
-        type_map = {
-            "REG_SZ": winreg.REG_SZ,
-            "REG_DWORD": winreg.REG_DWORD,
-            "REG_QWORD": winreg.REG_QWORD,
-            "REG_EXPAND_SZ": winreg.REG_EXPAND_SZ,
-        }
-        reg_type = type_map.get(value_type.upper())
-        if reg_type is None:
-            raise RuntimeError(f"Unsupported value_type: {value_type}")
-        with winreg.CreateKeyEx(reg_hive, key_path, 0, winreg.KEY_SET_VALUE) as key:
-            write_value = value_data
-            if reg_type in (winreg.REG_DWORD, winreg.REG_QWORD):
-                write_value = int(value_data)
-            else:
-                write_value = str(value_data)
-            winreg.SetValueEx(key, value_name, 0, reg_type, write_value)
-        return {"action": action, "written": True, "value_name": value_name}
+def _registry_read(winreg, reg_hive: int, key_path: str, value_name: str) -> dict[str, object]:
+    with winreg.OpenKey(reg_hive, key_path, 0, winreg.KEY_READ) as key:
+        if value_name:
+            value, reg_type = winreg.QueryValueEx(key, value_name)
+            return {
+                "action": "read",
+                "value_name": value_name,
+                "value": value,
+                "reg_type": reg_type,
+            }
+        values = []
+        index = 0
+        while True:
+            try:
+                name, value, reg_type = winreg.EnumValue(key, index)
+                values.append({"name": name, "value": value, "reg_type": reg_type})
+                index += 1
+            except OSError:
+                break
+        return {"action": "read", "values": values}
 
-    if action == "delete":
-        with winreg.OpenKey(reg_hive, key_path, 0, winreg.KEY_SET_VALUE) as key:
-            winreg.DeleteValue(key, value_name)
-        return {"action": action, "deleted": True, "value_name": value_name}
 
-    raise RuntimeError("Unsupported action. Use read|write|delete")
+def _resolve_registry_value_type(value_type: str, winreg) -> int | None:
+    type_map = {
+        "REG_SZ": winreg.REG_SZ,
+        "REG_DWORD": winreg.REG_DWORD,
+        "REG_QWORD": winreg.REG_QWORD,
+        "REG_EXPAND_SZ": winreg.REG_EXPAND_SZ,
+    }
+    return type_map.get(value_type.upper())
+
+
+def _registry_write(
+    winreg,
+    reg_hive: int,
+    key_path: str,
+    value_name: str,
+    value_data,
+    reg_type: int,
+) -> dict[str, object]:
+    with winreg.CreateKeyEx(reg_hive, key_path, 0, winreg.KEY_SET_VALUE) as key:
+        write_value = _coerce_registry_value(value_data, reg_type, winreg)
+        winreg.SetValueEx(key, value_name, 0, reg_type, write_value)
+    return {"action": "write", "written": True, "value_name": value_name}
+
+
+def _coerce_registry_value(value_data, reg_type: int, winreg):
+    if reg_type in (winreg.REG_DWORD, winreg.REG_QWORD):
+        return int(value_data)
+    return str(value_data)
+
+
+def _registry_delete(winreg, reg_hive: int, key_path: str, value_name: str) -> dict[str, object]:
+    with winreg.OpenKey(reg_hive, key_path, 0, winreg.KEY_SET_VALUE) as key:
+        winreg.DeleteValue(key, value_name)
+    return {"action": "delete", "deleted": True, "value_name": value_name}
 
 
 def _platform_probe_sync() -> dict[str, object]:
@@ -559,7 +601,7 @@ def _platform_probe_sync() -> dict[str, object]:
 
 
 def _kill_connections_sync(host: str, port: int) -> dict[str, object]:
-    if os.name == "nt":
+    if _RUNTIME.is_windows:
         base = ["powershell", "-NoProfile", "-Command"]
         kill_expr = (
             "| Select-Object -ExpandProperty OwningProcess "
@@ -661,56 +703,67 @@ def _dependency_audit_sync(cwd: Path) -> dict[str, object]:
     }
 
 
-def _cross_root_inventory_sync(roots_raw, max_entries: int) -> dict[str, object]:
+def _parse_inventory_roots(roots_raw) -> list[Path]:
     roots: list[Path] = []
-
     if isinstance(roots_raw, list):
         for item in roots_raw:
             roots.append(resolve_user_path(str(item))[0])
-    elif isinstance(roots_raw, str) and roots_raw.strip():
+        return roots
+
+    if isinstance(roots_raw, str) and roots_raw.strip():
         parts = [part.strip() for part in roots_raw.split(",") if part.strip()]
         for part in parts:
             roots.append(resolve_user_path(part)[0])
+    return roots
 
+
+def _default_inventory_roots() -> list[Path]:
+    if _RUNTIME.is_windows:
+        windows_roots: list[Path] = []
+        for drive in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            root = Path(f"{drive}:\\")
+            if root.exists():
+                windows_roots.append(root)
+        return windows_roots
+    return [Path("/"), _home_for_inventory()]
+
+
+def _inventory_single_root(root: Path, max_entries: int) -> dict[str, object]:
+    if not root.exists():
+        return {"root": str(root), "exists": False}
+
+    file_count = 0
+    dir_count = 0
+    sampled = 0
+    for path in root.rglob("*"):
+        if sampled >= max_entries:
+            break
+        sampled += 1
+        if path.is_dir():
+            dir_count += 1
+        elif path.is_file():
+            file_count += 1
+
+    disk = shutil.disk_usage(root)
+    return {
+        "root": str(root),
+        "exists": True,
+        "sampled_entries": sampled,
+        "files_in_sample": file_count,
+        "dirs_in_sample": dir_count,
+        "disk_total_gb": round(disk.total / (1024**3), 2),
+        "disk_used_gb": round(disk.used / (1024**3), 2),
+        "disk_free_gb": round(disk.free / (1024**3), 2),
+    }
+
+
+def _cross_root_inventory_sync(roots_raw, max_entries: int) -> dict[str, object]:
+    roots = _parse_inventory_roots(roots_raw)
     if not roots:
-        if os.name == "nt":
-            for drive in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-                root = Path(f"{drive}:\\")
-                if root.exists():
-                    roots.append(root)
-        else:
-            roots = [Path("/"), _home_for_inventory()]
+        roots = _default_inventory_roots()
 
     inventory: list[dict[str, object]] = []
     for root in roots:
-        if not root.exists():
-            inventory.append({"root": str(root), "exists": False})
-            continue
-
-        file_count = 0
-        dir_count = 0
-        sampled = 0
-        for path in root.rglob("*"):
-            if sampled >= max_entries:
-                break
-            sampled += 1
-            if path.is_dir():
-                dir_count += 1
-            elif path.is_file():
-                file_count += 1
-
-        disk = shutil.disk_usage(root)
-        inventory.append(
-            {
-                "root": str(root),
-                "exists": True,
-                "sampled_entries": sampled,
-                "files_in_sample": file_count,
-                "dirs_in_sample": dir_count,
-                "disk_total_gb": round(disk.total / (1024**3), 2),
-                "disk_used_gb": round(disk.used / (1024**3), 2),
-                "disk_free_gb": round(disk.free / (1024**3), 2),
-            }
-        )
+        inventory.append(_inventory_single_root(root, max_entries))
 
     return {"roots": inventory, "max_entries_per_root": max_entries}

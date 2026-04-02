@@ -68,10 +68,11 @@ class AsyncAuditVisitor(ast.NodeVisitor):
                 }
             )
 
-        # Zombie task sinyali: await edilmeyen coroutine benzeri cagri.
+        # Zombie task sinyali: coroutine benzeri cagri expression olarak kullanilip
+        # degeri yok sayiliyorsa supheli kabul et.
         if in_async and name and name.startswith(("get_", "fetch_", "run_", "execute_")):
             parent = getattr(node, "_parent", None)
-            if not isinstance(parent, (ast.Await, ast.Assign, ast.Return, ast.Expr)):
+            if isinstance(parent, ast.Expr):
                 self.issues.append(
                     {
                         "type": "possible_zombie_coroutine",
@@ -80,8 +81,7 @@ class AsyncAuditVisitor(ast.NodeVisitor):
                         "function": self.async_stack[-1],
                         "call": name,
                         "suggestion": (
-                            "Await coroutine or schedule with "
-                            "asyncio.create_task + tracking."
+                            "Await coroutine or schedule with asyncio.create_task + tracking."
                         ),
                     }
                 )

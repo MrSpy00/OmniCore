@@ -12,8 +12,10 @@ from pathlib import Path
 from config.logging import get_logger
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool, resolve_user_path
+from tools.os_adapters import runtime_adapter
 
 logger = get_logger(__name__)
+_RUNTIME = runtime_adapter()
 
 
 def _home_root() -> Path:
@@ -364,9 +366,7 @@ def _list_dir_entries(path: Path) -> list[dict[str, object]]:
 
 
 def _disk_usage_path() -> str:
-    if os.name == "nt":
-        return os.environ.get("SystemDrive", "C:") + "\\"
-    return "/"
+    return _RUNTIME.default_disk_usage_path()
 
 
 def _safe_delete_path(path: Path, mode: str) -> dict[str, object]:
@@ -419,7 +419,7 @@ def _set_process_priority(psutil_module, pid: int, level: str) -> dict[str, obje
     process = psutil_module.Process(pid)
     before = process.nice()
 
-    if os.name == "nt":
+    if _RUNTIME.is_windows:
         win_map = {
             "low": psutil_module.IDLE_PRIORITY_CLASS,
             "normal": psutil_module.NORMAL_PRIORITY_CLASS,

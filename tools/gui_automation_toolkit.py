@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
@@ -16,6 +15,9 @@ from PIL import Image  # type: ignore[import-not-found]
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool, resolve_user_path
+from tools.os_adapters import runtime_adapter
+
+_RUNTIME = runtime_adapter()
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
@@ -98,7 +100,7 @@ class GuiPressHotkey(BaseTool):
             key_list = [str(k).strip() for k in keys if str(k).strip()]
             if not key_list:
                 return self._failure("keys is required")
-            if os.name == "nt":
+            if _RUNTIME.is_windows:
                 if any(k.lower() in {"win", "windows", "meta", "super"} for k in key_list):
                     _send_hotkey_user32_windows(key_list)
                 else:
@@ -159,7 +161,7 @@ class GuiTakeScreenshot(BaseTool):
             elif str(output_path).strip().lower() in {"desktop", "downloads", "documents"}:
                 save_path = _resolve_output_target(str(output_path)) / "screenshot.png"
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            if os.name == "nt":
+            if _RUNTIME.is_windows:
                 try:
                     _capture_screen_dotnet(save_path, region if isinstance(region, dict) else None)
                 except Exception as dotnet_exc:
@@ -370,22 +372,26 @@ def _key_to_sendkeys_token(key: str) -> str:
 
 def _key_to_vk(key: str) -> int | None:
     k = key.strip().lower()
-    if k in {"win", "windows", "meta", "super"}:
-        return 0x5B
-    if k in {"ctrl", "control"}:
-        return 0x11
-    if k == "alt":
-        return 0x12
-    if k == "shift":
-        return 0x10
-    if k in {"enter", "return"}:
-        return 0x0D
-    if k in {"esc", "escape"}:
-        return 0x1B
-    if k == "tab":
-        return 0x09
-    if k == "space":
-        return 0x20
+    fixed_map = {
+        "win": 0x5B,
+        "windows": 0x5B,
+        "meta": 0x5B,
+        "super": 0x5B,
+        "ctrl": 0x11,
+        "control": 0x11,
+        "alt": 0x12,
+        "shift": 0x10,
+        "enter": 0x0D,
+        "return": 0x0D,
+        "esc": 0x1B,
+        "escape": 0x1B,
+        "tab": 0x09,
+        "space": 0x20,
+    }
+    fixed = fixed_map.get(k)
+    if fixed is not None:
+        return fixed
+
     if len(k) == 1:
         ch = k.upper()
         if "A" <= ch <= "Z" or "0" <= ch <= "9":

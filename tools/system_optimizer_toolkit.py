@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import shutil
 import subprocess
 from pathlib import Path
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool, resolve_user_path
+from tools.os_adapters import runtime_adapter
+
+_RUNTIME = runtime_adapter()
 
 
 class SysCleanTempFiles(BaseTool):
@@ -65,11 +67,7 @@ class SysFlushDnsCache(BaseTool):
 
 
 def _clean_temp_files_sync() -> int:
-    temp_paths = [os.getenv("TEMP", "")]
-    if os.name == "nt":
-        temp_paths.append(r"C:\Windows\Temp")
-    else:
-        temp_paths.append("/tmp")
+    temp_paths = _RUNTIME.temp_directories()
     freed = 0
     for temp in temp_paths:
         if not temp:

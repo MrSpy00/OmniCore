@@ -16,6 +16,9 @@ import paramiko
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool, resolve_user_path
+from tools.os_adapters import runtime_adapter
+
+_RUNTIME = runtime_adapter()
 
 
 class NetStealthPortScan(BaseTool):
@@ -292,7 +295,6 @@ def _wifi_connect(ssid: str, password: str) -> str:
     If a profile for the SSID already exists, connects directly.
     Otherwise, creates a temporary XML profile, adds it, then connects.
     """
-    import os
     import tempfile
 
     # First try direct connect (profile may already exist).
@@ -397,14 +399,12 @@ def _parse_netstat_live_connections(raw_output: str) -> list[dict[str, str]]:
 
 
 def _default_search_root() -> Path:
-    if os.name == "nt":
-        return Path("C:\\")
-    return Path("/")
+    return _RUNTIME.default_search_root()
 
 
 def _deep_search_native(filename: str, search_root: Path, limit: int) -> dict[str, object]:
     safe_limit = max(1, min(int(limit), 10_000))
-    if os.name == "nt":
+    if _RUNTIME.is_windows:
         return _deep_search_windows(filename, search_root, safe_limit)
     return _deep_search_posix(filename, search_root, safe_limit)
 
@@ -496,17 +496,8 @@ def _deep_search_posix(filename: str, search_root: Path, limit: int) -> dict[str
 
 
 def _collect_socket_snapshot() -> str:
-    if os.name == "nt":
-        completed = subprocess.run(
-            ["netstat", "-ano"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        return (completed.stdout or "") + (completed.stderr or "")
-
     completed = subprocess.run(
-        ["netstat", "-tunap"],
+        _RUNTIME.socket_snapshot_command(),
         capture_output=True,
         text=True,
         timeout=30,
