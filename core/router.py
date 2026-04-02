@@ -29,7 +29,7 @@ from pydantic import SecretStr
 from config.logging import get_logger
 from config.settings import get_settings
 from core.guardian import ApprovalMode, ApprovalResult, Guardian
-from core.planner import Planner
+from core.planner import Planner, infer_query_domains, infer_tool_domain
 from core.policy import CapabilityPolicyEngine
 from core.recovery import RecoveryEngine
 from memory.long_term import LongTermMemory
@@ -133,6 +133,14 @@ def _is_retryable_llm_error(exc: BaseException) -> bool:
     text = str(exc).lower()
     markers = (
         "429",
+        "413",
+        "payload too large",
+        "request too large",
+        "content too large",
+        "input too large",
+        "context length",
+        "token limit",
+        "rate_limit_exceeded",
         "rate limit",
         "quota exceeded",
         "resource_exhausted",
@@ -146,6 +154,14 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
     text = str(exc).lower()
     markers = (
         "429",
+        "413",
+        "payload too large",
+        "request too large",
+        "content too large",
+        "input too large",
+        "context length",
+        "token limit",
+        "rate_limit_exceeded",
         "rate limit",
         "quota",
         "resource_exhausted",
@@ -163,6 +179,44 @@ _OPERATIONAL_FACT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("powershell", "User shell preference is PowerShell"),
     ("bash", "User shell preference is Bash"),
 )
+
+_ALWAYS_ON_TOOL_NAMES: tuple[str, ...] = (
+    "agent_spawn_subtask",
+    "terminal_execute",
+    "os_read_file",
+)
+
+_QUERY_TOOL_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("dosya", ("os_", "file", "path")),
+    ("file", ("os_", "file", "path")),
+    ("klasor", ("os_", "dir", "path")),
+    ("terminal", ("terminal_", "dev_", "process", "os_run")),
+    ("bash", ("terminal_", "dev_", "process")),
+    ("powershell", ("terminal_", "dev_", "process")),
+    ("kod", ("dev_", "grep", "glob", "python", "git")),
+    ("code", ("dev_", "grep", "glob", "python", "git")),
+    ("ara", ("search", "grep", "glob", "web_", "net_")),
+    ("search", ("search", "grep", "glob", "web_", "net_")),
+    ("api", ("api_", "net_", "web_")),
+    ("network", ("net_", "api_", "dns", "socket", "ping")),
+    ("ag", ("net_", "api_", "dns", "socket", "ping")),
+    ("internet", ("net_", "api_", "web_")),
+    ("web", ("web_", "browser", "http", "api_")),
+    ("tarayici", ("web_", "gui_", "browser")),
+    ("browser", ("web_", "gui_", "browser")),
+    ("gui", ("gui_", "vision", "screen", "click", "mouse")),
+    ("ekran", ("gui_", "vision", "screen", "ocr")),
+    ("vision", ("vision", "gui_", "ocr", "screen")),
+    ("ocr", ("vision", "gui_", "screen")),
+    ("resim", ("media_", "image", "vision")),
+    ("video", ("media_", "video", "web_")),
+    ("ses", ("media_", "audio")),
+    ("guvenlik", ("security", "encrypt", "decrypt", "audit")),
+    ("security", ("security", "encrypt", "decrypt", "audit")),
+)
+
+_MAX_RELEVANT_TOOLS = 30
+_GROQ_PREEMPTIVE_TOKEN_LIMIT = 5000
 
 
 class _LocalLLMResponse:
@@ -486,6 +540,147 @@ class CognitiveRouter:
             )
             self._switch_provider(target, reason="semantic_routing")
 
+    def _filter_relevant_tools(
+        self, query: str, all_tools: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
+        """Select a compact, relevant tool subset for prompt injection."""
+        if not all_tools:
+            return []
+
+        lowered_query = (query or "").lower()
+        query_domains = infer_query_domains(lowered_query)
+        scored: list[tuple[int, dict[str, str]]] = []
+
+        for tool in all_tools:
+            name = str(tool.get("name") or "")
+            if not name:
+                continue
+            desc = str(tool.get("description") or "")
+            domain = infer_tool_domain(name)
+            name_l = name.lower()
+            desc_l = desc.lower()
+
+            score = 0
+            if name in _ALWAYS_ON_TOOL_NAMES:
+                score += 10000
+
+            if domain in query_domains:
+                score += 90
+
+            if name_l in lowered_query:
+                score += 180
+
+            tokens = {token for token in re.split(r"[^a-z0-9_]+", lowered_query) if token}
+            for token in tokens:
+                if token in name_l:
+                    score += 35
+                if token in desc_l:
+                    score += 12
+
+            for marker, hints in _QUERY_TOOL_KEYWORDS:
+                if marker in lowered_query and any(
+                    hint in name_l or hint in desc_l for hint in hints
+                ):
+                    score += 45
+
+            if score > 0:
+                scored.append((score, tool))
+
+        # Always include core tools even if no score signal was generated.
+        existing_names = {tool.get("name") for _, tool in scored}
+        for tool in all_tools:
+            name = str(tool.get("name") or "")
+            if name in _ALWAYS_ON_TOOL_NAMES and name not in existing_names:
+                scored.append((10000, tool))
+
+        if not scored:
+            # Conservative default: keep only always-on and then fill deterministically.
+            always_on = [t for t in all_tools if str(t.get("name") or "") in _ALWAYS_ON_TOOL_NAMES]
+            remainder = [t for t in all_tools if t not in always_on]
+            return [*always_on, *remainder][:_MAX_RELEVANT_TOOLS]
+
+        scored.sort(key=lambda item: (-item[0], str(item[1].get("name") or "")))
+
+        selected: list[dict[str, str]] = []
+        selected_names: set[str] = set()
+        for _, tool in scored:
+            name = str(tool.get("name") or "")
+            if not name or name in selected_names:
+                continue
+            selected.append(tool)
+            selected_names.add(name)
+            if len(selected) >= _MAX_RELEVANT_TOOLS:
+                break
+
+        return selected
+
+    def _build_system_prompt_with_tools(
+        self,
+        memory_context: str,
+        tools: list[dict[str, str]],
+    ) -> str:
+        tools_desc = "\n".join(
+            f"- {t['name']}: {t['description']} (yikici={t['destructive']})" for t in tools
+        )
+        mandated = (
+            "KRİTİK ZORUNLULUK: SEN OMNICORE ADINDA, "
+            "KULLANICININ BİLGİSAYARINA TAM (ROOT) ERİŞİMİ OLAN, "
+            "FİZİKSEL EYLEMLER YAPAN TÜRK BİR YAPAY ZEKASIN. "
+            "KURAL 1: ASLA İNGİLİZCE KONUŞMA. "
+            "KURAL 2: BİR SİTEYİ AÇ VEYA VİDEO OYNAT DENİRSE, "
+            "TARAYICIYI KULLANICININ GÖZÜ ÖNÜNDE "
+            "(FOREGROUND) AÇACAKSIN! "
+            "KURAL 3: ASLA YALAN SÖYLEME VE EKSİK BİLGİ VERME. "
+            "EĞER BİR DOSYAYI OKURSAN, İÇİNDEKİ YAZIYI "
+            "BANA KELİMESİ KELİMESİNE AKTAR. "
+            "KURAL 4: KOTA HATASI (429) VEYA PAYLOAD HATASI (413) ALIRSAN ASLA PES ETME, "
+            "DİĞER API SAĞLAYICISINA VEYA ANAHTARINA GEÇ VE İŞLEMİ TAMAMLA! "
+            "KURAL 5: BEN BİR ŞEYİ ONAYLADIYSAM (APPROVE YES), "
+            "HİÇBİR İZİN VEYA GÜVENLİK DUVARINA TAKILMADAN "
+            "O İŞLEMİ ZORLA YAPACAKSIN! "
+            "KURAL 6: HAVA DURUMUNU ASLA UYDURMA. "
+            "HAVA İSTEKLERİNDE SADECE api_weather aracı veya "
+            "wttr.in gibi gerçek kaynakları kullan, "
+            "sahte URL/domain üretme. "
+            "KURAL 7: EĞER İSTENEN YETENEK İÇİN ARAÇ YOKSA, "
+            "ÖNCE GERÇEK KAYNAKTAN ARAŞTIR, SONRA GEÇİCİ ÇÖZÜM ÜRET, "
+            "SONRA İŞİ TAMAMLA VE KULLANICIYA AÇIKÇA RAPORLA."
+        )
+        return (
+            f"{mandated}\n\n"
+            "## Kullanılabilir Araçlar\n"
+            f"{tools_desc}\n\n"
+            "## İlgili Hatıralar\n"
+            f"{memory_context or '(yok)'}\n\n"
+            "## Talimatlar\n"
+            "Kullanıcı sistem verisi veya eylem istediğinde JSON plan üret.\n"
+            "Araç çıktısındaki ham veriyi eksiksiz aktar.\n"
+            '```json\n{"needs_plan": true, "steps": [{"tool": "<arac_adi>", "description": "...", '
+            '"parameters": {...}, "destructive": true/false}]}\n```\n'
+            "Araçlar yetersizse kısa Türkçe açıklama yap."
+        )
+
+    def _estimate_context_tokens_for_routing(
+        self,
+        system_prompt: str,
+        recent: list[Message],
+    ) -> int:
+        recent_text = "\n".join(msg.content for msg in recent if msg.content)
+        return self._estimate_tokens(f"{system_prompt}\n{recent_text}")
+
+    def _maybe_preemptive_gemini_route(self, estimated_tokens: int) -> None:
+        if self._runtime_provider != "groq":
+            return
+        if estimated_tokens <= _GROQ_PREEMPTIVE_TOKEN_LIMIT:
+            return
+        switched = self._switch_provider("gemini", reason="preemptive_context_routing")
+        if switched:
+            logger.warning(
+                "router.preemptive_gemini_routing",
+                estimated_tokens=estimated_tokens,
+                threshold=_GROQ_PREEMPTIVE_TOKEN_LIMIT,
+            )
+
     def _local_fallback_response(self) -> _LocalLLMResponse:
         return _LocalLLMResponse(
             "Harici model gecici olarak devre disi. Lütfen 30 saniye sonra tekrar deneyin."
@@ -576,7 +771,7 @@ class CognitiveRouter:
                         if fallback is not None:
                             switched = self._switch_provider(
                                 fallback,
-                                reason="429_fallback_from_groq",
+                                reason="llm_backpressure_fallback_from_groq",
                             )
                             if switched:
                                 await asyncio.sleep(min(1.0, 0.1 * attempt))
@@ -588,7 +783,7 @@ class CognitiveRouter:
                         if fallback is not None:
                             switched = self._switch_provider(
                                 fallback,
-                                reason="429_fallback_from_groq",
+                                reason="llm_backpressure_fallback_from_groq",
                             )
                             if not switched:
                                 self._llm = self._build_llm_for_provider(provider, self._settings)
@@ -600,7 +795,7 @@ class CognitiveRouter:
                         if fallback is not None:
                             switched = self._switch_provider(
                                 fallback,
-                                reason="429_fallback_from_gemini",
+                                reason="llm_backpressure_fallback_from_gemini",
                             )
                             if switched:
                                 await asyncio.sleep(min(1.0, 0.1 * attempt))
@@ -612,7 +807,7 @@ class CognitiveRouter:
                         if fallback is not None:
                             switched = self._switch_provider(
                                 fallback,
-                                reason="429_fallback_from_gemini",
+                                reason="llm_backpressure_fallback_from_gemini",
                             )
                             if not switched:
                                 self._llm = self._build_llm_for_provider(provider, self._settings)
@@ -662,9 +857,17 @@ class CognitiveRouter:
         # 2. Retrieve relevant long-term memories.
         memory_context = self._build_memory_context(user_message, n_results=6)
 
-        # 3. Build the LLM prompt.
-        system_prompt = self._build_system_prompt(memory_context)
+        # 3. Semantic tool routing: inject only relevant tools to reduce token payload.
+        all_tools = self._registry.list_tools()
+        relevant_tools = self._filter_relevant_tools(user_message.content, all_tools)
+
+        # 4. Build the LLM prompt.
+        system_prompt = self._build_system_prompt_with_tools(memory_context, relevant_tools)
         recent = self._short_term.get_recent_messages(conversation_id, n=20)
+
+        estimated_context_tokens = self._estimate_context_tokens_for_routing(system_prompt, recent)
+        self._maybe_preemptive_gemini_route(estimated_context_tokens)
+
         lc_messages: list = [SystemMessage(content=system_prompt)]
         for msg in recent:
             if msg.role == MessageRole.USER:
@@ -672,7 +875,7 @@ class CognitiveRouter:
             elif msg.role == MessageRole.ASSISTANT:
                 lc_messages.append(AIMessage(content=msg.content))
 
-        # 4. Ask the LLM whether this requires a plan or a direct answer.
+        # 5. Ask the LLM whether this requires a plan or a direct answer.
         classification = await self._classify_intent(user_message.content, lc_messages)
 
         if classification["needs_plan"]:
@@ -682,7 +885,7 @@ class CognitiveRouter:
             response = await self._ainvoke_with_retry(lc_messages)
             reply = response.content
 
-        # 5. Store assistant reply in short-term memory.
+        # 6. Store assistant reply in short-term memory.
         assistant_msg = Message(
             role=MessageRole.ASSISTANT,
             content=reply,
@@ -691,7 +894,7 @@ class CognitiveRouter:
         )
         self._short_term.add_message(conversation_id, assistant_msg)
 
-        # 6. Persist to long-term memory for future recall.
+        # 7. Persist to long-term memory for future recall.
         self._long_term.store(
             f"User: {user_message.content}\nAssistant: {reply}",
             metadata={"user_id": user_message.user_id, "channel": user_message.channel},
@@ -730,47 +933,8 @@ class CognitiveRouter:
     # -- internal helpers ------------------------------------------------------
 
     def _build_system_prompt(self, memory_context: str) -> str:
-        tools_desc = "\n".join(
-            f"- {t['name']}: {t['description']} (yikici={t['destructive']})"
-            for t in self._registry.list_tools()
-        )
-        mandated = (
-            "KRİTİK ZORUNLULUK: SEN OMNICORE ADINDA, "
-            "KULLANICININ BİLGİSAYARINA TAM (ROOT) ERİŞİMİ OLAN, "
-            "FİZİKSEL EYLEMLER YAPAN TÜRK BİR YAPAY ZEKASIN. "
-            "KURAL 1: ASLA İNGİLİZCE KONUŞMA. "
-            "KURAL 2: BİR SİTEYİ AÇ VEYA VİDEO OYNAT DENİRSE, "
-            "TARAYICIYI KULLANICININ GÖZÜ ÖNÜNDE "
-            "(FOREGROUND) AÇACAKSIN! "
-            "KURAL 3: ASLA YALAN SÖYLEME VE EKSİK BİLGİ VERME. "
-            "EĞER BİR DOSYAYI OKURSAN, İÇİNDEKİ YAZIYI "
-            "BANA KELİMESİ KELİMESİNE AKTAR. "
-            "KURAL 4: KOTA HATASI (429) ALIRSAN ASLA PES ETME, "
-            "DİĞER API ANAHTARINA GEÇ VE İŞLEMİ TAMAMLA! "
-            "KURAL 5: BEN BİR ŞEYİ ONAYLADIYSAM (APPROVE YES), "
-            "HİÇBİR İZİN VEYA GÜVENLİK DUVARINA TAKILMADAN "
-            "O İŞLEMİ ZORLA YAPACAKSIN! "
-            "KURAL 6: HAVA DURUMUNU ASLA UYDURMA. "
-            "HAVA İSTEKLERİNDE SADECE api_weather aracı veya "
-            "wttr.in gibi gerçek kaynakları kullan, "
-            "sahte URL/domain üretme. "
-            "KURAL 7: EĞER İSTENEN YETENEK İÇİN ARAÇ YOKSA, "
-            "ÖNCE GERÇEK KAYNAKTAN ARAŞTIR, SONRA GEÇİCİ ÇÖZÜM ÜRET, "
-            "SONRA İŞİ TAMAMLA VE KULLANICIYA AÇIKÇA RAPORLA."
-        )
-        return (
-            f"{mandated}\n\n"
-            "## Kullanılabilir Araçlar\n"
-            f"{tools_desc}\n\n"
-            "## İlgili Hatıralar\n"
-            f"{memory_context or '(yok)'}\n\n"
-            "## Talimatlar\n"
-            "Kullanıcı sistem verisi veya eylem istediğinde JSON plan üret.\n"
-            "Araç çıktısındaki ham veriyi eksiksiz aktar.\n"
-            '```json\n{"needs_plan": true, "steps": [{"tool": "<arac_adi>", "description": "...", '
-            '"parameters": {...}, "destructive": true/false}]}\n```\n'
-            "Araçlar yetersizse kısa Türkçe açıklama yap."
-        )
+        tools = self._filter_relevant_tools("", self._registry.list_tools())
+        return self._build_system_prompt_with_tools(memory_context, tools)
 
     async def _classify_intent(self, user_text: str, lc_messages: list) -> dict[str, Any]:
         """Ask the LLM to decide: plan or direct answer."""

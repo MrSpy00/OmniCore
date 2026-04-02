@@ -23,6 +23,14 @@ V33.0 introduces the Claude Assimilation layer:
 - **Tool Registry** dynamically discovers and registers tool classes.
 - **Memory System** combines short-term context, long-term recall, and persistent state/audit logs.
 
+### Semantic Tool Routing & Context Optimization (Dynamic Tool Injection)
+
+- Router no longer injects the full registry into every LLM prompt.
+- A semantic filter scores tools by query keywords, inferred domains, and tool name/description matches.
+- Injection is capped to a compact subset (`max 30 tools`) to keep payload safely below Groq pressure limits.
+- Critical always-on tools are always included: `agent_spawn_subtask`, `terminal_execute`, `os_read_file`.
+- If estimated prompt context exceeds threshold while running on Groq, router preemptively switches to Gemini before invocation.
+
 ## V33.0 Feature Set
 
 ### 1) Omni-Agent Swarm

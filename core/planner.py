@@ -42,6 +42,36 @@ _DOMAIN_HINTS: tuple[tuple[str, str], ...] = (
     ("security", "security"),
 )
 
+_QUERY_DOMAIN_HINTS: tuple[tuple[str, str], ...] = (
+    ("dosya", "filesystem"),
+    ("file", "filesystem"),
+    ("klasor", "filesystem"),
+    ("path", "filesystem"),
+    ("terminal", "devops"),
+    ("bash", "devops"),
+    ("powershell", "devops"),
+    ("deploy", "devops"),
+    ("network", "network"),
+    ("ag", "network"),
+    ("internet", "network"),
+    ("api", "network"),
+    ("web", "browser"),
+    ("browser", "browser"),
+    ("tarayici", "browser"),
+    ("ekran", "ui"),
+    ("gui", "ui"),
+    ("click", "ui"),
+    ("vision", "vision"),
+    ("ocr", "vision"),
+    ("resim", "media"),
+    ("video", "media"),
+    ("ses", "media"),
+    ("process", "process"),
+    ("surec", "process"),
+    ("security", "security"),
+    ("guvenlik", "security"),
+)
+
 _CRITICAL_RISK_MARKERS = (
     "delete",
     "shutdown",
@@ -74,12 +104,21 @@ _DELEGATION_MARKERS = (
 )
 
 
-def _infer_domain(tool_name: str) -> str:
+def infer_tool_domain(tool_name: str) -> str:
     lowered = (tool_name or "").lower()
     for prefix, domain in _DOMAIN_HINTS:
         if lowered.startswith(prefix) or prefix in lowered:
             return domain
     return "general"
+
+
+def infer_query_domains(query: str) -> set[str]:
+    lowered = (query or "").lower()
+    matches: set[str] = set()
+    for marker, domain in _QUERY_DOMAIN_HINTS:
+        if marker in lowered:
+            matches.add(domain)
+    return matches
 
 
 def _infer_risk_level(tool_name: str, is_destructive: bool) -> RiskLevel:
@@ -126,7 +165,7 @@ class Planner:
             tool_name = raw.get("tool", "unknown")
             is_destructive = raw.get("destructive", tool_name in _DESTRUCTIVE_TOOLS)
             risk_level = raw.get("risk_level") or _infer_risk_level(tool_name, is_destructive)
-            domain = raw.get("domain") or _infer_domain(tool_name)
+            domain = raw.get("domain") or infer_tool_domain(tool_name)
             step = TaskStep(
                 tool_name=tool_name,
                 description=raw.get("description", ""),
