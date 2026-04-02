@@ -87,6 +87,32 @@ class BaseTool(ABC):
             }
         return {}
 
+    def _paged_text_data(
+        self,
+        *,
+        text: str,
+        offset: int = 0,
+        limit: int = 4000,
+        key: str = "content",
+    ) -> dict[str, Any]:
+        safe_text = text or ""
+        safe_offset = max(0, int(offset or 0))
+        safe_limit = max(1, int(limit or 1))
+
+        total = len(safe_text)
+        end = min(total, safe_offset + safe_limit)
+        sliced = safe_text[safe_offset:end]
+
+        return {
+            key: sliced,
+            "view_range": {
+                "start": safe_offset,
+                "end": end,
+                "total": total,
+                "truncated": end < total,
+            },
+        }
+
     def _first_param(self, params: dict[str, Any], *names: str, default: Any = None) -> Any:
         return fuzzy_get(params, names, default=default)
 

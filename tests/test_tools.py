@@ -6,6 +6,8 @@ import pytest
 
 from models.tools import ToolInput, ToolStatus
 from tools.api_toolkit import ApiDatetime
+from tools.developer_toolkit import AgentSpawnSubtask, DevGlobSearch, DevGrepAnalyzer
+from tools.mcp_toolkit import SysMcpBridge
 from tools.os_toolkit import OsReadFile, OsWriteFile
 from tools.registry import ToolRegistry
 
@@ -125,3 +127,68 @@ class TestApiDatetime:
         assert result.status == ToolStatus.SUCCESS
         assert "timezone" in result.data
         assert result.data["timezone"] == "Europe/Istanbul"
+
+
+class TestV33Tools:
+    @pytest.mark.asyncio
+    async def test_dev_glob_search(self, tmp_path):
+        root = tmp_path / "repo"
+        root.mkdir()
+        (root / "x.py").write_text("print('x')\n", encoding="utf-8")
+        tool = DevGlobSearch()
+        result = await tool.execute(
+            ToolInput(
+                tool_name="dev_glob_search",
+                parameters={"path": str(root), "pattern": "**/*.py"},
+            )
+        )
+        assert result.status == ToolStatus.SUCCESS
+        assert result.data["count"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_dev_grep_analyzer(self, tmp_path):
+        root = tmp_path / "repo"
+        root.mkdir()
+        (root / "x.py").write_text("# TODO\nprint('x')\n", encoding="utf-8")
+        tool = DevGrepAnalyzer()
+        result = await tool.execute(
+            ToolInput(
+                tool_name="dev_grep_analyzer",
+                parameters={"path": str(root), "pattern": "TODO", "include": "*.py"},
+            )
+        )
+        assert result.status == ToolStatus.SUCCESS
+        assert result.data["match_count"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_sys_mcp_bridge(self, tmp_path):
+        path = tmp_path / "bridge.json"
+        tool = SysMcpBridge()
+        write_result = await tool.execute(
+            ToolInput(
+                tool_name="sys_mcp_bridge",
+                parameters={"action": "write", "path": str(path), "payload": {"a": 1}},
+            )
+        )
+        assert write_result.status == ToolStatus.SUCCESS
+
+        read_result = await tool.execute(
+            ToolInput(
+                tool_name="sys_mcp_bridge",
+                parameters={"action": "read", "path": str(path)},
+            )
+        )
+        assert read_result.status == ToolStatus.SUCCESS
+        assert read_result.data["payload"]["a"] == 1
+
+    @pytest.mark.asyncio
+    async def test_agent_spawn_subtask(self):
+        tool = AgentSpawnSubtask()
+        result = await tool.execute(
+            ToolInput(
+                tool_name="agent_spawn_subtask",
+                parameters={"objective": "Find TODO and search references", "max_subtasks": 3},
+            )
+        )
+        assert result.status == ToolStatus.SUCCESS
+        assert result.data["subtask_count"] >= 1

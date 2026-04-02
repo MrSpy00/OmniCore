@@ -53,10 +53,15 @@ class Guardian:
         self._timeout = timeout_minutes * 60  # convert to seconds
         self._callback = approval_callback
         self._mode = ApprovalMode.ASK
+        self._plan_mode = False
 
     @property
     def mode(self) -> ApprovalMode:
         return self._mode
+
+    @property
+    def plan_mode(self) -> bool:
+        return self._plan_mode
 
     def set_mode(self, mode: str) -> ApprovalMode:
         normalized = (mode or "").strip().lower()
@@ -66,6 +71,11 @@ class Guardian:
             self._mode = ApprovalMode.ASK
         logger.info("guardian.mode_updated", mode=self._mode.value)
         return self._mode
+
+    def set_plan_mode(self, enabled: bool) -> bool:
+        self._plan_mode = bool(enabled)
+        logger.info("guardian.plan_mode_updated", enabled=self._plan_mode)
+        return self._plan_mode
 
     async def request_approval(
         self,

@@ -65,3 +65,9 @@ class TestGuardian:
         assert len(calls) == 2
         assert calls[0].startswith("[CRITICAL-1/2]")
         assert calls[1].startswith("[CRITICAL-2/2]")
+
+    def test_plan_mode_toggle(self):
+        guardian = Guardian(timeout_minutes=1, approval_callback=None)
+        assert guardian.plan_mode is False
+        guardian.set_plan_mode(True)
+        assert guardian.plan_mode is True

@@ -40,6 +40,16 @@ class TestShortTermMemory:
         conv = stm.get_conversation("nonexistent")
         assert conv.messages == []
 
+    def test_compressed_snapshots_created_after_eviction(self):
+        stm = ShortTermMemory(max_messages=2)
+        stm.add_message("conv1", Message(role=MessageRole.USER, content="first"))
+        stm.add_message("conv1", Message(role=MessageRole.ASSISTANT, content="second"))
+        stm.add_message("conv1", Message(role=MessageRole.USER, content="third"))
+
+        snapshots = stm.get_compressed_snapshots("conv1")
+        assert len(snapshots) == 1
+        assert "first" in snapshots[0]
+
 
 class TestStateTracker:
     @pytest.mark.asyncio

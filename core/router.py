@@ -643,6 +643,18 @@ class CognitiveRouter:
 
         This is the single entry-point that every gateway calls.
         """
+        slash_reply = await self._handle_slash_command(user_message)
+        if slash_reply is not None:
+            assistant_msg = Message(
+                role=MessageRole.ASSISTANT,
+                content=slash_reply,
+                channel=user_message.channel,
+                user_id=user_message.user_id,
+            )
+            self._short_term.add_message(conversation_id, user_message)
+            self._short_term.add_message(conversation_id, assistant_msg)
+            return slash_reply
+
         # 1. Store in short-term memory.
         self._short_term.add_message(conversation_id, user_message)
         self._route_provider_if_needed(user_message.content)
@@ -687,6 +699,33 @@ class CognitiveRouter:
         await self._persist_operational_memory(user_message, reply)
 
         return reply
+
+    async def _handle_slash_command(self, user_message: Message) -> str | None:
+        content = (user_message.content or "").strip()
+        if not content.startswith("/"):
+            return None
+
+        lowered = content.lower()
+        if lowered.startswith("/plan"):
+            enabled = not self._guardian.plan_mode
+            self._guardian.set_plan_mode(enabled)
+            state = "ON" if enabled else "OFF"
+            return f"Plan mode {state}. Destructive steps will be dry-run enforced."
+        if lowered.startswith("/doctor"):
+            provider = self._runtime_provider
+            tools_count = len(self._registry)
+            return (
+                "System diagnostics OK\n"
+                f"provider={provider}\n"
+                f"plan_mode={self._guardian.plan_mode}\n"
+                f"tools={tools_count}"
+            )
+        if lowered.startswith("/memory"):
+            items = self._long_term.recall(user_message.content, n_results=5)
+            return f"Memory preview: {len(items)} items"
+        if lowered.startswith("/commit"):
+            return "Commit helper available. Use git workflow commands in terminal."
+        return None
 
     # -- internal helpers ------------------------------------------------------
 
@@ -802,6 +841,12 @@ class CognitiveRouter:
         results_summary: list[str],
     ) -> tuple[bool, Any]:
         policy_decision = self._policy.evaluate(step)
+
+        if self._guardian.plan_mode and step.is_destructive:
+            policy_decision.require_dry_run = True
+            if not step.dry_run_done and "missing_dry_run" not in policy_decision.reasons:
+                policy_decision.allowed = False
+                policy_decision.reasons.append("missing_dry_run")
         if policy_decision.allowed:
             return True, policy_decision
 
@@ -1088,6 +1133,13 @@ class CognitiveRouter:
             if await self._handle_unknown_tool_step(step, user_message, results_summary):
                 continue
 
+            if step.delegated:
+                delegated_ok = await self._execute_delegated_step(
+                    step, user_message, results_summary
+                )
+                if delegated_ok:
+                    continue
+
             tool, tool_input = await self._build_tool_input(step)
             policy_allowed, policy_decision = await self._handle_policy_gate(
                 step,
@@ -1125,6 +1177,63 @@ class CognitiveRouter:
         )
 
         return await self._summarize_plan_results(user_message, results_summary)
+
+    async def _execute_delegated_step(
+        self,
+        step: TaskStep,
+        user_message: Message,
+        results_summary: list[str],
+    ) -> bool:
+        spawn_tool = self._registry.get("agent_spawn_subtask")
+        if spawn_tool is None:
+            return False
+
+        spawn_input = ToolInput(
+            tool_name="agent_spawn_subtask",
+            parameters={
+                "objective": step.description or user_message.content,
+                "max_subtasks": 4,
+            },
+            requires_approval=False,
+        )
+        spawn_output = await self._recovery.execute_with_retry(spawn_tool, spawn_input, step)
+        if spawn_output.status.value != "success":
+            return False
+
+        subtasks = list(spawn_output.data.get("subtasks") or [])
+        if not subtasks:
+            return False
+
+        delegated_results: list[str] = []
+        for item in subtasks:
+            tool_name = str(item.get("tool_name") or "").strip()
+            if not tool_name:
+                continue
+            tool = self._registry.get(tool_name)
+            if tool is None:
+                delegated_results.append(f"{item.get('id', 'subtask')}: unknown tool {tool_name}")
+                continue
+
+            delegated_input = ToolInput(
+                tool_name=tool_name,
+                parameters=dict(item.get("parameters") or {}),
+                requires_approval=False,
+            )
+            delegated_output = await self._recovery.execute_with_retry(tool, delegated_input, step)
+            if delegated_output.status.value == "success":
+                delegated_results.append(f"{item.get('id', 'subtask')}: ok ({tool_name})")
+            else:
+                delegated_results.append(
+                    f"{item.get('id', 'subtask')}: fail ({tool_name}) {delegated_output.error}"
+                )
+
+        if not delegated_results:
+            return False
+
+        step.status = StepStatus.COMPLETED
+        step.result = " | ".join(delegated_results)
+        results_summary.append(f"[OK] {step.description}: {step.result}")
+        return True
 
     async def shutdown(self) -> None:
         """Release runtime resources held by the router."""

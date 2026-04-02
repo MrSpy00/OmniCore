@@ -67,6 +67,17 @@ class ToolInput(BaseModel):
         return text
 
 
+class ViewRange(BaseModel):
+    """Range metadata for sliced or paged tool outputs."""
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    start: int = Field(default=0, ge=0)
+    end: int = Field(default=0, ge=0)
+    total: int = Field(default=0, ge=0)
+    truncated: bool = False
+
+
 class ToolOutput(BaseModel):
     """Standardised output envelope returned by every tool."""
 
@@ -77,6 +88,7 @@ class ToolOutput(BaseModel):
     result: str = ""  # human-readable summary
     data: dict[str, Any] = Field(default_factory=dict)  # structured output for downstream steps
     error: str = ""  # populated on failure
+    view_range: ViewRange | None = None
 
     @field_validator("tool_name", mode="before")
     @classmethod

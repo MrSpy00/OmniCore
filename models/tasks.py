@@ -55,6 +55,8 @@ class TaskStep(BaseModel):
     admin_verified: bool = False
     retry_count: int = 0
     max_retries: int = 2
+    delegated: bool = False
+    delegation_strategy: str = "none"
 
 
 class TaskPlan(BaseModel):

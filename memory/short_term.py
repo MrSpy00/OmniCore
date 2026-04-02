@@ -31,6 +31,7 @@ class ShortTermMemory:
     def __init__(self, max_messages: int = _DEFAULT_MAX_MESSAGES) -> None:
         self._max = max_messages
         self._conversations: dict[str, Conversation] = defaultdict(Conversation)
+        self._compressed_snapshots: dict[str, list[str]] = defaultdict(list)
 
     # -- public API -----------------------------------------------------------
 
@@ -40,7 +41,11 @@ class ShortTermMemory:
         conv.add(message)
         if len(conv.messages) > self._max:
             evicted = len(conv.messages) - self._max
+            evicted_msgs = conv.messages[:evicted]
             conv.messages = conv.messages[evicted:]
+            compressed = self._compress_messages(evicted_msgs)
+            if compressed:
+                self._compressed_snapshots[conversation_id].append(compressed)
             logger.debug(
                 "short_term.evicted",
                 conversation_id=conversation_id,
@@ -61,9 +66,29 @@ class ShortTermMemory:
     def clear(self, conversation_id: str) -> None:
         """Wipe a conversation buffer entirely."""
         self._conversations.pop(conversation_id, None)
+        self._compressed_snapshots.pop(conversation_id, None)
         logger.info("short_term.cleared", conversation_id=conversation_id)
 
     def clear_all(self) -> None:
         """Wipe every conversation buffer."""
         self._conversations.clear()
+        self._compressed_snapshots.clear()
         logger.info("short_term.cleared_all")
+
+    def get_compressed_snapshots(self, conversation_id: str) -> list[str]:
+        """Return compressed summaries generated from evicted messages."""
+        return list(self._compressed_snapshots.get(conversation_id, []))
+
+    @staticmethod
+    def _compress_messages(messages: list[Message]) -> str:
+        if not messages:
+            return ""
+        parts: list[str] = []
+        for msg in messages:
+            role = msg.role.value.upper()
+            text = (msg.content or "").replace("\n", " ").strip()
+            if len(text) > 140:
+                text = f"{text[:137]}..."
+            if text:
+                parts.append(f"{role}: {text}")
+        return " || ".join(parts)

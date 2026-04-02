@@ -1,169 +1,215 @@
-﻿# OmniCore: Adaptive Cognitive Orchestration Platform
+# OmniCore V33.0 - The Claude Assimilation
 
 ![Python](https://img.shields.io/badge/Python-3.12+-blue)
-![Tests](https://img.shields.io/badge/tests-84%20passing-brightgreen)
-![Architecture](https://img.shields.io/badge/architecture-circuit%20breaker%20%2B%20factory-black)
+![Quality](https://img.shields.io/badge/pytest-97%20passed-brightgreen)
+![Architecture](https://img.shields.io/badge/Architecture-Omni--Agent%20Swarm-black)
 
-OmniCore is an enterprise-oriented cognitive orchestration runtime that combines policy-aware tool execution, memory systems, and resilient multi-provider LLM routing.
+OmniCore is an enterprise cognitive orchestration platform designed for safe, auditable, and resilient AI task execution across local system tooling, developer automation, memory layers, and multi-provider LLM routing.
 
-## Philosophy
-- Safety-first, zero-trust execution boundaries.
-- Deterministic degradation under external API instability.
-- Observable and auditable tool orchestration.
-- Cross-platform shell abstraction via factory pattern.
+## Executive Summary
 
-## 10-Domain Capability Matrix
-1. Routing and planning
-2. Policy and guardian controls
-3. Stateful memory and audit logs
-4. Filesystem and OS automation
-5. Network diagnostics
-6. GUI automation
-7. Media/document processing
-8. Developer and DevOps workflows
-9. Security and encryption
-10. Scheduling and autonomous pulses
+V33.0 introduces the Claude Assimilation layer:
 
-## Risk Levels
-- `low`: read-only or informational actions
-- `high`: write/modify actions with explicit approval
-- `critical`: destructive/system-sensitive actions with stricter controls
+- **Omni-Agent Swarm**: Main Router can spawn delegated sub-agent style subtasks.
+- **Context Compression**: Short-term memory now compresses evicted turns into compact continuity snapshots.
+- **Plan Mode + Slash Commands**: `/plan` and `/doctor` are now first-class operational controls.
+- **Model Context Protocol (MCP) Bridge**: New MCP bridge tool for local read/write envelope interoperability.
 
-## Multi-Core API Federation
-- Provider-agnostic runtime routing (`groq` + `gemini`) with live preference order from settings.
-- Automatic 429/rate-limit failover: when the active provider is exhausted, router switches to the next available provider without aborting the user flow.
-- In-provider route rotation before cross-provider failover:
-  - Groq: API key and model chain rotation.
-  - Gemini: API key rotation.
-- Circuit-breaker guard plus deterministic local fallback response when retry budget is exhausted.
+## Core Architecture
 
-## Zero-Trust Guardian Engine
-- `low`: direct execution for non-destructive/read-only operations.
-- `high`: mandatory approval gate, policy-aware dry-run enforcement when required.
-- `critical`: dual confirmation path, backup requirement, and strict audit logging.
-- Policy engine blocks unsafe categories and enforces execution prerequisites (`dry_run`, `backup`, `double_confirmation`) before tool execution.
+- **Cognitive Router** orchestrates intent classification, plan execution, policy enforcement, and tool dispatch.
+- **Planner** builds structured multi-step plans and annotates delegation strategy for swarm-compatible steps.
+- **Guardian + Policy Engine** enforce risk-aware controls, approvals, and dry-run behavior.
+- **Tool Registry** dynamically discovers and registers tool classes.
+- **Memory System** combines short-term context, long-term recall, and persistent state/audit logs.
 
-## Persistent Memory Continuity
-- Conversation memory remains in short-term context for near-turn coherence.
-- Long-term memory stores semantic history and operational facts (OS/shell/path hints) to improve future planning accuracy.
-- Router injects merged recall context (user-specific + general) into system prompt before intent classification and execution.
+## V33.0 Feature Set
 
-## Architecture Flowchart
+### 1) Omni-Agent Swarm
+
+- Delegation metadata added to task steps (`delegated`, `delegation_strategy`).
+- Planner marks search-like and analysis-heavy steps for swarm delegation.
+- Router executes delegated workflows through `agent_spawn_subtask`, then runs subtools and aggregates results.
+
+### 2) Context Compression
+
+- Short-term memory evictions are no longer silent.
+- Evicted message windows are compressed into lightweight snapshots for continuity.
+- Snapshots can be queried for diagnostic and context-inspection workflows.
+
+### 3) Slash Commands
+
+- `/plan`: toggles plan mode (dry-run enforcement for destructive steps).
+- `/doctor`: returns runtime diagnostics (provider, plan mode state, tool count).
+- `/memory`: quick memory preview command.
+- `/commit`: operational helper response for workflow guidance.
+
+### 4) MCP Bridge
+
+- `sys_mcp_bridge` supports `ping`, `read`, and `write` actions.
+- Enables local JSON envelope interoperability for MCP-aligned integrations.
+
+### 5) New Developer and Delegation Tools
+
+- `dev_glob_search`: filesystem glob search with bounded results.
+- `dev_grep_analyzer`: regex content search with include filters and limits.
+- `agent_spawn_subtask`: structured subtask generation for delegated orchestration.
+
+## Mermaid: Main Router and Sub-Agent Spawning
+
 ```mermaid
 flowchart TD
-    U[User Message] --> R[Cognitive Router]
-    R --> P[Planner]
-    P --> G[Guardian + Policy Engine]
-    G --> T[Tool Registry]
-    T --> M[Memory Layer]
-    R --> C[Circuit Breaker]
-    C -->|open| L[Local Fallback Response]
-    C -->|closed| X[External LLM Providers]
+    U[User Request] --> R[Main Cognitive Router]
+    R --> C{Needs Plan?}
+    C -- No --> LLM[Direct LLM Response]
+    C -- Yes --> P[Planner]
+    P --> D{Delegated Step?}
+    D -- No --> G[Guardian + Policy Gate]
+    D -- Yes --> S[Spawn Subtasks via agent_spawn_subtask]
+    S --> A1[Sub-Agent Task 1]
+    S --> A2[Sub-Agent Task 2]
+    S --> A3[Sub-Agent Task N]
+    A1 --> T[Tool Registry]
+    A2 --> T
+    A3 --> T
+    G --> T
+    T --> M[Memory + State + Audit]
+    M --> O[Final Aggregated Response]
 ```
 
-## Router Sequence
-```mermaid
-sequenceDiagram
-    participant User
-    participant Router
-    participant CB as CircuitBreaker
-    participant LLM as External LLM
-    participant Tool as Tool Layer
+## Security and Governance
 
-    User->>Router: message
-    Router->>CB: check state
-    alt breaker open
-        CB-->>Router: open
-        Router-->>User: local fallback summary
-    else breaker closed
-        CB-->>Router: closed
-        Router->>LLM: classify/plan
-        LLM-->>Router: plan
-        Router->>Tool: execute steps
-        Tool-->>Router: outputs
-        Router-->>User: final response
-    end
+- Risk-aware execution model: `low`, `medium`, `high`, `critical`.
+- Destructive actions are policy-gated and approval-aware.
+- Plan mode can force preflight dry-run behavior for sensitive steps.
+- Comprehensive audit trail persists execution outcomes.
+
+## Quick Start
+
+```bash
+uv sync
+uv run ruff check .
+uv run pytest -q
+uv run python scripts/run.py --mode cli
 ```
 
-## Class Hierarchy
-```mermaid
-classDiagram
-    class BaseTool {
-      +execute(tool_input)
-      +requires_approval(tool_input)
-    }
-    class TerminalExecute
-    class SysHealthMonitor
-    class NetLatencyProfiler
-    class VisionSelfHealingUI
-    class BaseShellAdapter
-    class WindowsShellAdapter
-    class PosixShellAdapter
-    class ShellAdapterFactory
+## CLI Runtime Commands
 
-    BaseTool <|-- TerminalExecute
-    BaseTool <|-- SysHealthMonitor
-    BaseTool <|-- NetLatencyProfiler
-    BaseTool <|-- VisionSelfHealingUI
-    BaseShellAdapter <|-- WindowsShellAdapter
-    BaseShellAdapter <|-- PosixShellAdapter
-    ShellAdapterFactory ..> BaseShellAdapter
-```
+- `/plan`
+- `/doctor`
+- `/memory`
+- `/commit`
+- `.omnicore approve yes`
+- `.omnicore approve ask`
+
+## Testing Status
+
+- Lint: `ruff check` passing.
+- Tests: `97 passed`.
+- V33 coverage includes planner delegation, guardian plan mode, memory compression, tool discovery, MCP bridge, and slash command handling.
+
+## Repository Hygiene
+
+The repository is configured to block secrets and local runtime artifacts:
+
+- `.env` and `.env.*` ignored (except `.env.example`).
+- `.agents/` ignored.
+- `__pycache__/` ignored.
 
 ---
 
-# OmniCore: Uyarlanabilir Bilişsel Orkestrasyon Platformu
+# OmniCore V33.0 - The Claude Assimilation
 
-OmniCore; politika denetimli araç çalıştırma, bellek katmanları ve çoklu sağlayıcıya dayanıklı LLM yönlendirmesini birleştiren kurumsal bir orkestrasyon çalışma zamanıdır.
+![Python](https://img.shields.io/badge/Python-3.12+-blue)
+![Kalite](https://img.shields.io/badge/pytest-97%20passed-brightgreen)
+![Mimari](https://img.shields.io/badge/Mimari-Omni--Agent%20Swarm-black)
 
-## Felsefe
-- Sıfır güven prensibiyle güvenlik odaklı yürütme.
-- Dış API kararsızlıklarında deterministik degrade davranışı.
-- Gözlemlenebilir ve denetlenebilir araç zinciri.
-- Factory deseniyle çapraz platform kabuk adaptasyonu.
+OmniCore; yerel sistem araçları, geliştirici otomasyonu, bellek katmanları ve çoklu LLM sağlayıcı yönlendirmesini güvenli, denetlenebilir ve dayanıklı şekilde birleştiren kurumsal bir bilişsel orkestrasyon platformudur.
 
-## 10 Alanlı Yetkinlik Matrisi
-1. Yönlendirme ve planlama
-2. Politika ve guardian kontrolleri
-3. Durumsal bellek ve denetim kayıtları
-4. Dosya sistemi ve OS otomasyonu
-5. Ağ tanılama
-6. GUI otomasyonu
-7. Medya/doküman işleme
-8. Geliştirici ve DevOps akışları
-9. Güvenlik ve şifreleme
-10. Zamanlayıcı ve otonom nabız görevleri
+## Yonetsel Ozet
 
-## Risk Seviyeleri
-- `low`: salt-okunur veya bilgilendirici işlemler
-- `high`: açık onay gerektiren yazma/değiştirme işlemleri
-- `critical`: yıkıcı/sistem hassas işlemler için daha sıkı kontroller
+V33.0 ile Claude Assimilation katmanı devreye alındı:
 
-## Hızlı Başlangıç
+- **Omni-Agent Swarm**: Ana Router, delege alt-gorevleri sub-agent tarzında calistirabilir.
+- **Context Compression**: Kisa donem bellekten atilan iletiler sikistirilmis ozetlere donusturulur.
+- **Plan Mode + Slash Commands**: `/plan` ve `/doctor` operasyonel komutlari eklendi.
+- **Model Context Protocol (MCP) Bridge**: Yerel MCP uyumlu envelope okuma/yazma koprusu eklendi.
+
+## Temel Mimari
+
+- **Cognitive Router** niyet siniflandirma, plan yurutme, politika denetimi ve arac cagirimi yapar.
+- **Planner** yapilandirilmis cok adimli plan uretir ve swarm icin delege etiketleme yapar.
+- **Guardian + Policy Engine** risk temelli kontrol, onay ve dry-run zorlamalarini uygular.
+- **Tool Registry** arac siniflarini dinamik kesif ile kaydeder.
+- **Memory Sistemi** kisa donem baglam, uzun donem geri cagirim ve kalici durum/denetim kayitlarini birlestirir.
+
+## V33.0 Ozellikleri
+
+### 1) Omni-Agent Swarm
+
+- Gorev adimlarina delegasyon metadata alanlari eklendi (`delegated`, `delegation_strategy`).
+- Planner, arama/analiz agirlikli adimlari swarm delegasyona uygun isaretler.
+- Router, `agent_spawn_subtask` ile alt gorevler olusturur, alt araclari calistirir ve sonucu birlestirir.
+
+### 2) Context Compression
+
+- Kisa donem bellek tahliyeleri artik kayipsiz izlenebilir.
+- Tahliye edilen mesajlar sikistirilmis sureklilik snapshot'larina cevrilir.
+- Snapshot verisi tanilama ve baglam inceleme senaryolarinda okunabilir.
+
+### 3) Slash Komutlari
+
+- `/plan`: plan modunu acar/kapatir (yikici adimlarda dry-run zorlamasi).
+- `/doctor`: calisma zamani tanilama bilgisi verir (provider, plan mode, tool sayisi).
+- `/memory`: bellek onizleme komutu.
+- `/commit`: is akisi yonlendirme yardimci cevabi.
+
+### 4) MCP Koprusu
+
+- `sys_mcp_bridge` ile `ping`, `read`, `write` eylemleri desteklenir.
+- MCP uyumlu yerel JSON envelope entegrasyonlari icin birlikte calisabilirlik saglar.
+
+### 5) Yeni Gelistirici ve Delegasyon Araclari
+
+- `dev_glob_search`: glob tabanli dosya arama (limitli).
+- `dev_grep_analyzer`: regex tabanli icerik arama (include filtresi + limit).
+- `agent_spawn_subtask`: delege orkestrasyon icin yapilandirilmis alt gorev uretimi.
+
+## Guvenlik ve Yonetisim
+
+- Risk seviyeleri: `low`, `medium`, `high`, `critical`.
+- Yikici islemler politika ve onay katmanindan gecmeden calismaz.
+- Plan modu, hassas adimlarda dry-run preflight zorlamasi uygulayabilir.
+- Tum kritik yurutme sonuclari denetim kayitlarina yazilir.
+
+## Hizli Baslangic
+
 ```bash
 uv sync
-uv run pytest -v
 uv run ruff check .
+uv run pytest -q
+uv run python scripts/run.py --mode cli
 ```
 
-## Mimari Kararlar
-- Circuit breaker, semantic routing ve OS Adapter Factory kararları için [architecture.md](architecture.md) belgesine bakın.
+## CLI Komutlari
 
-## Multi-Core API Federation (TR)
-- Ayarlar tabanlı sağlayıcı sırası ile provider-agnostic yönlendirme (`groq` + `gemini`).
-- 429/rate-limit durumunda akış kesmeden bir sonraki uygun sağlayıcıya otomatik geçiş.
-- Sağlayıcı içi rotasyon, sağlayıcılar arası failover'dan önce devreye alınır:
-  - Groq: API anahtarı + model zinciri rotasyonu.
-  - Gemini: API anahtarı rotasyonu.
-- Retry bütçesi biterse circuit-breaker ile deterministik local fallback yanıtı.
+- `/plan`
+- `/doctor`
+- `/memory`
+- `/commit`
+- `.omnicore approve yes`
+- `.omnicore approve ask`
 
-## Zero-Trust Guardian Engine (TR)
-- `low`: yıkıcı olmayan işlemlerde doğrudan yürütme.
-- `high`: zorunlu onay kapısı, gerektiğinde dry-run zorlaması.
-- `critical`: çift onay, backup zorunluluğu ve sıkı denetim kaydı.
-- Policy motoru tehlikeli kategori çağrılarını engeller; `dry_run`, `backup`, `double_confirmation` önkoşullarını doğrulamadan çalıştırmaya izin vermez.
+## Test Durumu
 
-## Kalıcı Bellek Sürekliliği
-- Kısa dönem bellek yakın konuşma bağlamını korur.
-- Uzun dönem bellek hem semantik geçmişi hem de operasyonel gerçekleri (OS/shell/path ipuçları) saklar.
-- Router, niyet sınıflandırma ve plan yürütmeden önce kullanıcıya özel + genel recall sonuçlarını birleştirip prompt'a enjekte eder.
+- Lint: `ruff check` gecerli.
+- Test: `97 passed`.
+- V33 kapsaminda planner delegasyonu, guardian plan mode, memory compression, tool discovery, MCP bridge ve slash command akis testleri vardir.
+
+## Repo Hijyeni
+
+Depo, gizli veri ve yerel artefakt sizintilarini engelleyecek sekilde yapilandirilmistir:
+
+- `.env` ve `.env.*` engelli (yalnizca `.env.example` izinli).
+- `.agents/` engelli.
+- `__pycache__/` engelli.

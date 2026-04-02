@@ -64,6 +64,15 @@ _HIGH_RISK_MARKERS = (
     "process_",
 )
 
+_DELEGATION_MARKERS = (
+    "search",
+    "find",
+    "scan",
+    "grep",
+    "bul",
+    "ara",
+)
+
 
 def _infer_domain(tool_name: str) -> str:
     lowered = (tool_name or "").lower()
@@ -132,7 +141,10 @@ class Planner:
                 dry_run_done=bool(raw.get("dry_run_done", False)),
                 backup_ready=bool(raw.get("backup_ready", False)),
                 admin_verified=bool(raw.get("admin_verified", False)),
+                delegated=bool(raw.get("delegated", False)),
+                delegation_strategy=str(raw.get("delegation_strategy", "none") or "none"),
             )
+            self._annotate_delegation(step)
             steps.append(step)
 
         plan = TaskPlan(
@@ -162,3 +174,16 @@ class Planner:
             if not step.description:
                 issues.append(f"Step with tool '{step.tool_name}' has no description")
         return issues
+
+    @staticmethod
+    def _annotate_delegation(step: TaskStep) -> None:
+        if step.delegated:
+            return
+
+        lowered_desc = (step.description or "").lower()
+        lowered_tool = (step.tool_name or "").lower()
+        if any(marker in lowered_desc for marker in _DELEGATION_MARKERS) or any(
+            marker in lowered_tool for marker in _DELEGATION_MARKERS
+        ):
+            step.delegated = True
+            step.delegation_strategy = "swarm"

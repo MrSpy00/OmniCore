@@ -53,6 +53,20 @@ class CLIGateway:
             if user_input.lower() in ("quit", "exit", "q"):
                 print("Goodbye.")
                 break
+            if user_input.lower() in ("/plan", "/doctor", "/memory", "/commit"):
+                msg = Message(
+                    role=MessageRole.USER,
+                    content=user_input,
+                    channel="cli",
+                    user_id="cli_user",
+                )
+                try:
+                    reply = await self._router.handle_message(msg, conversation_id)
+                    print(f"\n[OmniCore] {reply}")
+                except Exception as exc:
+                    logger.error("cli.error", error=str(exc))
+                    print(f"\n[Error] {exc}")
+                continue
             if user_input.lower().startswith(".omnicore approve"):
                 await self._handle_approval_toggle(user_input)
                 continue

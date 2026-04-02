@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
+import glob as globlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,7 +16,7 @@ import aiosqlite
 from config.settings import get_settings
 from memory.state import StateTracker
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool
+from tools.base import BaseTool, resolve_user_path
 
 
 class DevExecutePythonCode(BaseTool):
@@ -157,4 +160,184 @@ class DevTodoTracker(BaseTool):
         return self._success(
             f"Listed {len(rows)} ready todos",
             data={"todos": rows},
+        )
+
+
+class DevGlobSearch(BaseTool):
+    name = "dev_glob_search"
+    description = "Find files by glob pattern with optional limit."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        pattern = str(self._first_param(params, "pattern", "glob", default="**/*")).strip()
+        root_raw = str(self._first_param(params, "path", "root", default=".")).strip()
+        limit = int(self._first_param(params, "limit", "max_results", default=200) or 200)
+        if not pattern:
+            return self._failure("pattern is required")
+
+        root, _ = resolve_user_path(root_raw)
+        if not root.exists() or not root.is_dir():
+            return self._failure(f"Path not found or not directory: {root}")
+
+        def _scan() -> list[str]:
+            recursive = "**" in pattern
+            full_pattern = str(root / pattern)
+            matches = globlib.glob(full_pattern, recursive=recursive)
+            files: list[str] = []
+            for item in matches:
+                p = Path(item)
+                if p.is_file():
+                    files.append(str(p))
+                if len(files) >= limit:
+                    break
+            return files
+
+        try:
+            files = await asyncio.to_thread(_scan)
+            return self._success(
+                f"Found {len(files)} files",
+                data={
+                    "pattern": pattern,
+                    "path": str(root),
+                    "count": len(files),
+                    "files": files,
+                },
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class DevGrepAnalyzer(BaseTool):
+    name = "dev_grep_analyzer"
+    description = "Search file contents by regex with include filter and limits."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        pattern = str(self._first_param(params, "pattern", "regex", default="")).strip()
+        root_raw = str(self._first_param(params, "path", "root", default=".")).strip()
+        include = str(self._first_param(params, "include", default="*")).strip() or "*"
+        max_files = int(self._first_param(params, "max_files", default=200) or 200)
+        max_matches = int(self._first_param(params, "max_matches", default=300) or 300)
+
+        if not pattern:
+            return self._failure("pattern is required")
+
+        try:
+            regex = re.compile(pattern)
+        except re.error as exc:
+            return self._failure(f"Invalid regex: {exc}")
+
+        root, _ = resolve_user_path(root_raw)
+        if not root.exists() or not root.is_dir():
+            return self._failure(f"Path not found or not directory: {root}")
+
+        include_patterns = [p.strip() for p in include.split(",") if p.strip()]
+        if not include_patterns:
+            include_patterns = ["*"]
+
+        def _matches_include(rel_posix: str) -> bool:
+            return any(fnmatch.fnmatch(rel_posix, pat) for pat in include_patterns)
+
+        def _scan() -> tuple[list[dict], int]:
+            matches: list[dict] = []
+            scanned_files = 0
+
+            for file_path in root.rglob("*"):
+                if not file_path.is_file():
+                    continue
+
+                rel_posix = file_path.relative_to(root).as_posix()
+                if not _matches_include(rel_posix):
+                    continue
+
+                scanned_files += 1
+                if scanned_files > max_files:
+                    break
+
+                try:
+                    content = file_path.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    continue
+
+                for lineno, line in enumerate(content.splitlines(), start=1):
+                    if regex.search(line):
+                        matches.append(
+                            {
+                                "file": str(file_path),
+                                "line": lineno,
+                                "text": line[:500],
+                            }
+                        )
+                        if len(matches) >= max_matches:
+                            return matches, scanned_files
+
+            return matches, scanned_files
+
+        try:
+            matches, scanned_files = await asyncio.to_thread(_scan)
+            return self._success(
+                f"Found {len(matches)} matches",
+                data={
+                    "pattern": pattern,
+                    "path": str(root),
+                    "include": include_patterns,
+                    "scanned_files": scanned_files,
+                    "match_count": len(matches),
+                    "matches": matches,
+                },
+            )
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class AgentSpawnSubtask(BaseTool):
+    name = "agent_spawn_subtask"
+    description = "Generate structured delegated subtasks for swarm execution."
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        objective = str(
+            self._first_param(params, "objective", "goal", "description", "query", default="")
+        ).strip()
+        max_subtasks = int(self._first_param(params, "max_subtasks", default=4) or 4)
+        max_subtasks = max(1, min(10, max_subtasks))
+
+        if not objective:
+            return self._failure("objective is required")
+
+        raw_chunks = re.split(r"[;\n]+|\s+and\s+|\s+ve\s+", objective, flags=re.IGNORECASE)
+        chunks = [c.strip(" .") for c in raw_chunks if c.strip(" .")]
+        if not chunks:
+            chunks = [objective]
+
+        subtasks: list[dict] = []
+        for idx, chunk in enumerate(chunks[:max_subtasks], start=1):
+            lowered = chunk.lower()
+            if "find" in lowered or "search" in lowered or "bul" in lowered or "ara" in lowered:
+                tool_name = "dev_glob_search"
+                parameters = {"pattern": "**/*", "limit": 100}
+            elif "grep" in lowered or "regex" in lowered or "match" in lowered:
+                tool_name = "dev_grep_analyzer"
+                parameters = {"pattern": ".*", "include": "*", "max_matches": 100}
+            else:
+                tool_name = "dev_grep_analyzer"
+                parameters = {"pattern": re.escape(chunk), "include": "*", "max_matches": 50}
+
+            subtasks.append(
+                {
+                    "id": f"subtask_{idx}",
+                    "description": chunk,
+                    "tool_name": tool_name,
+                    "parameters": parameters,
+                    "is_destructive": False,
+                }
+            )
+
+        return self._success(
+            f"Spawned {len(subtasks)} subtasks",
+            data={
+                "objective": objective,
+                "subtask_count": len(subtasks),
+                "subtasks": subtasks,
+            },
         )

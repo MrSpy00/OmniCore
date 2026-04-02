@@ -59,3 +59,19 @@ class TestPlannerBuildPlan:
         step = plan.steps[0]
         assert step.domain == "filesystem"
         assert step.risk_level == RiskLevel.CRITICAL
+
+    def test_marks_delegated_strategy_for_search_like_steps(self):
+        planner = Planner(llm=None)  # type: ignore[arg-type]
+        plan = planner.build_plan(
+            "Search code",
+            [
+                {
+                    "tool": "dev_grep_analyzer",
+                    "description": "Search TODO strings",
+                    "parameters": {"pattern": "TODO"},
+                }
+            ],
+        )
+        step = plan.steps[0]
+        assert step.delegated is True
+        assert step.delegation_strategy == "swarm"
