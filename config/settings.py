@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     # --- LLM -----------------------------------------------------------------
     llm_provider: str = "gemini"
+    llm_fallback_order: str = "groq,gemini"
     google_api_key: str = ""
     google_api_key_2: str = ""
     google_api_key_3: str = ""
@@ -96,6 +97,34 @@ class Settings(BaseSettings):
         if not keys:
             return [""]
         return keys
+
+    @property
+    def provider_preference(self) -> list[str]:
+        """Return provider preference order with the primary provider first.
+
+        Supported providers in current runtime are ``groq`` and ``gemini``.
+        """
+        primary = (self.llm_provider or "").strip().lower() or "gemini"
+        fallback_tokens = [
+            token.strip().lower() for token in self.llm_fallback_order.split(",") if token.strip()
+        ]
+        supported = ["groq", "gemini"]
+
+        ordered: list[str] = []
+        for candidate in [primary, *fallback_tokens, *supported]:
+            if candidate in supported and candidate not in ordered:
+                ordered.append(candidate)
+        return ordered
+
+    @property
+    def provider_availability(self) -> dict[str, bool]:
+        """Return whether each provider has at least one usable API key."""
+        groq_available = any(key.strip() for key in self.groq_api_keys)
+        gemini_available = any(key.strip() for key in self.google_api_keys)
+        return {
+            "groq": groq_available,
+            "gemini": gemini_available,
+        }
 
     # --- Telegram Gateway ----------------------------------------------------
     telegram_bot_token: str = ""

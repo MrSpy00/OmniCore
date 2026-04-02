@@ -42,6 +42,28 @@ _DOMAIN_HINTS: tuple[tuple[str, str], ...] = (
     ("security", "security"),
 )
 
+_CRITICAL_RISK_MARKERS = (
+    "delete",
+    "shutdown",
+    "kill",
+    "terminate",
+    "format",
+    "encrypt",
+    "registry_delete",
+    "reg_delete",
+)
+
+_HIGH_RISK_MARKERS = (
+    "write",
+    "move",
+    "set",
+    "restart",
+    "deploy",
+    "registry",
+    "reg_",
+    "process_",
+)
+
 
 def _infer_domain(tool_name: str) -> str:
     lowered = (tool_name or "").lower()
@@ -53,12 +75,12 @@ def _infer_domain(tool_name: str) -> str:
 
 def _infer_risk_level(tool_name: str, is_destructive: bool) -> RiskLevel:
     lowered = (tool_name or "").lower()
-    if any(marker in lowered for marker in ("delete", "shutdown", "kill", "format", "encrypt")):
+    if any(marker in lowered for marker in _CRITICAL_RISK_MARKERS):
         return RiskLevel.CRITICAL
+    if any(marker in lowered for marker in _HIGH_RISK_MARKERS):
+        return RiskLevel.HIGH
     if is_destructive:
         return RiskLevel.HIGH
-    if any(marker in lowered for marker in ("write", "move", "set", "restart", "deploy")):
-        return RiskLevel.MEDIUM
     return RiskLevel.LOW
 
 

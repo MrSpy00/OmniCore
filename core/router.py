@@ -28,13 +28,14 @@ from pydantic import SecretStr
 
 from config.logging import get_logger
 from config.settings import get_settings
-from core.guardian import ApprovalResult, Guardian
+from core.guardian import ApprovalMode, ApprovalResult, Guardian
 from core.planner import Planner
 from core.policy import CapabilityPolicyEngine
 from core.recovery import RecoveryEngine
 from memory.long_term import LongTermMemory
 from memory.short_term import ShortTermMemory
 from memory.state import StateTracker
+from models.capabilities import RiskLevel
 from models.messages import Message, MessageRole
 from models.tasks import StepStatus, TaskStatus, TaskStep
 from models.tools import ToolInput
@@ -141,6 +142,29 @@ def _is_retryable_llm_error(exc: BaseException) -> bool:
     return any(marker in text for marker in markers)
 
 
+def _is_rate_limit_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    markers = (
+        "429",
+        "rate limit",
+        "quota",
+        "resource_exhausted",
+        "too many requests",
+    )
+    return any(marker in text for marker in markers)
+
+
+_SUPPORTED_PROVIDERS: tuple[str, ...] = ("groq", "gemini")
+
+_OPERATIONAL_FACT_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("windows", "User OS is Windows"),
+    ("linux", "User OS is Linux"),
+    ("macos", "User OS is macOS"),
+    ("powershell", "User shell preference is PowerShell"),
+    ("bash", "User shell preference is Bash"),
+)
+
+
 class _LocalLLMResponse:
     """Small response envelope compatible with LLM result usage."""
 
@@ -205,8 +229,10 @@ class CognitiveRouter:
         self._key_rotator: _GroqKeyRotator | None = None
         self._model_rotator: _GroqModelRotator | None = None
         self._google_key_rotator: _ApiKeyRotator | None = None
-        self._runtime_provider = settings.llm_provider.strip().lower() or "gemini"
         self._settings = settings
+        self._provider_sequence = settings.provider_preference
+        self._provider_availability = settings.provider_availability
+        self._runtime_provider = self._select_initial_provider(settings)
         self._llm = self._build_llm(settings)
         self._llm_semaphore = asyncio.Semaphore(3)
         self._circuit_breaker = _SimpleCircuitBreaker(threshold=3, cooldown_seconds=30)
@@ -219,8 +245,11 @@ class CognitiveRouter:
         self._policy = CapabilityPolicyEngine()
 
     def _build_llm(self, settings) -> Any:
-        provider = self._runtime_provider
-        if provider == "groq":
+        return self._build_llm_for_provider(self._runtime_provider, settings)
+
+    def _build_llm_for_provider(self, provider: str, settings) -> Any:
+        normalized = (provider or "").strip().lower() or "gemini"
+        if normalized == "groq":
             api_keys = settings.groq_api_keys
             if not api_keys:
                 api_keys = [settings.groq_api_key or ""]
@@ -246,7 +275,7 @@ class CognitiveRouter:
                 api_key=SecretStr(active_key) if active_key else None,
                 temperature=settings.llm_temperature,
             )
-        if provider in ("", "gemini"):
+        if normalized == "gemini":
             if self._google_key_rotator is None:
                 self._google_key_rotator = _ApiKeyRotator(settings.google_api_keys)
             active_google_key = self._google_key_rotator.current
@@ -257,18 +286,75 @@ class CognitiveRouter:
                 max_output_tokens=settings.llm_max_output_tokens,
             )
 
-        raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+        raise ValueError(f"Unsupported LLM provider: {provider}")
 
-    def _switch_provider(self, provider: str) -> None:
-        self._runtime_provider = provider.strip().lower() or "gemini"
-        self._destroy_current_llm()
+    def _select_initial_provider(self, settings) -> str:
+        for provider in settings.provider_preference:
+            if self._provider_has_credentials(provider, settings):
+                return provider
+        return "gemini"
+
+    def _provider_has_credentials(self, provider: str, settings=None) -> bool:
+        cfg = settings or self._settings
+        normalized = (provider or "").strip().lower()
+        if normalized == "groq":
+            return any(key.strip() for key in cfg.groq_api_keys)
+        if normalized == "gemini":
+            return any(key.strip() for key in cfg.google_api_keys)
+        return False
+
+    def _find_alternate_provider(self, current: str) -> str | None:
+        current_normalized = (current or "").strip().lower()
+        for provider in self._provider_sequence:
+            if provider == current_normalized:
+                continue
+            if self._provider_has_credentials(provider):
+                return provider
+        return None
+
+    def _can_rotate_groq_route(self) -> bool:
+        if self._key_rotator is None or self._model_rotator is None:
+            return False
+        return (len(self._key_rotator) * len(self._model_rotator)) > 1
+
+    def _can_rotate_google_route(self) -> bool:
+        if self._google_key_rotator is None:
+            return False
+        return len(self._google_key_rotator) > 1
+
+    def _switch_provider(self, provider: str, *, reason: str = "runtime") -> bool:
+        target = provider.strip().lower() or "gemini"
+        if target not in _SUPPORTED_PROVIDERS:
+            logger.warning("router.provider_switch_rejected", provider=target, reason="unsupported")
+            return False
+
         self._refresh_runtime_settings()
-        self._llm = self._build_llm(self._settings)
+        if not self._provider_has_credentials(target):
+            logger.warning(
+                "router.provider_switch_rejected",
+                provider=target,
+                reason="credentials_unavailable",
+            )
+            return False
+
+        previous = self._runtime_provider
+        self._runtime_provider = target
+        self._destroy_current_llm()
+        self._llm = self._build_llm_for_provider(target, self._settings)
+        logger.warning(
+            "router.provider_switched",
+            from_provider=previous,
+            to_provider=target,
+            reason=reason,
+        )
+        return True
 
     def _refresh_runtime_settings(self) -> None:
         """Refresh settings from environment/.env for live key rotation scenarios."""
         get_settings.cache_clear()
         self._settings = get_settings()
+        self._provider_sequence = self._settings.provider_preference
+        self._provider_availability = self._settings.provider_availability
 
     def _create_groq_client(self, api_key: str, model_name: str) -> Any:
         """Create a fresh ChatGroq instance for the given route."""
@@ -398,12 +484,66 @@ class CognitiveRouter:
                 to_provider=target,
                 estimated_tokens=self._estimate_tokens(user_text),
             )
-            self._switch_provider(target)
+            self._switch_provider(target, reason="semantic_routing")
 
     def _local_fallback_response(self) -> _LocalLLMResponse:
         return _LocalLLMResponse(
             "Harici model gecici olarak devre disi. Lütfen 30 saniye sonra tekrar deneyin."
         )
+
+    def _collect_operational_facts(self, user_message: Message, reply: str) -> list[str]:
+        combined = f"{user_message.content}\n{reply}".lower()
+        facts: list[str] = []
+
+        for marker, fact in _OPERATIONAL_FACT_PATTERNS:
+            if marker in combined:
+                facts.append(fact)
+
+        path_matches = re.findall(r"([A-Za-z]:\\[^\s,;\"']+|/[\w\-./]+)", user_message.content)
+        for raw_path in path_matches[:3]:
+            facts.append(f"Active target path: {raw_path}")
+
+        dedup: list[str] = []
+        for fact in facts:
+            if fact not in dedup:
+                dedup.append(fact)
+        return dedup
+
+    async def _persist_operational_memory(self, user_message: Message, reply: str) -> None:
+        facts = self._collect_operational_facts(user_message, reply)
+        for fact in facts:
+            self._long_term.store(
+                fact,
+                metadata={
+                    "kind": "operational_fact",
+                    "user_id": user_message.user_id,
+                    "channel": user_message.channel,
+                },
+            )
+
+    def _build_memory_context(self, user_message: Message, n_results: int = 6) -> str:
+        query = user_message.content
+        user_specific: list[dict[str, Any]] = []
+        if user_message.user_id:
+            user_specific = self._long_term.recall(
+                query,
+                n_results=n_results,
+                where={"user_id": user_message.user_id},
+            )
+        generic = self._long_term.recall(query, n_results=n_results)
+
+        merged: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for item in [*user_specific, *generic]:
+            item_id = str(item.get("id") or "")
+            if item_id and item_id in seen_ids:
+                continue
+            if item_id:
+                seen_ids.add(item_id)
+            merged.append(item)
+
+        lines = [f"- {m['document']}" for m in merged if m.get("document")]
+        return "\n".join(lines)
 
     async def _ainvoke_with_retry(self, messages: list) -> Any:
         if self._circuit_breaker.is_open():
@@ -431,38 +571,66 @@ class CognitiveRouter:
                 provider = self._runtime_provider
                 self._destroy_current_llm()
                 if provider == "groq":
-                    exhausted_markers = (
-                        "all configured groq",
-                        "all keys",
-                        "exhausted",
-                        "quota",
-                        "resource_exhausted",
-                    )
-                    detail = str(exc).lower()
-                    single_route = (
-                        self._key_rotator is not None
-                        and self._model_rotator is not None
-                        and len(self._key_rotator) <= 1
-                        and len(self._model_rotator) <= 1
-                    )
-                    if single_route or any(marker in detail for marker in exhausted_markers):
-                        logger.warning(
-                            "router.provider_fallback",
-                            from_provider="groq",
-                            to_provider="gemini",
-                            attempt=attempt,
-                        )
-                        self._switch_provider("gemini")
-                    else:
+                    if _is_rate_limit_error(exc):
+                        fallback = self._find_alternate_provider(provider)
+                        if fallback is not None:
+                            switched = self._switch_provider(
+                                fallback,
+                                reason="429_fallback_from_groq",
+                            )
+                            if switched:
+                                await asyncio.sleep(min(1.0, 0.1 * attempt))
+                                continue
+                    if self._can_rotate_groq_route():
                         self._rotate_groq_route_and_rebuild()
-                elif provider in ("", "gemini"):
-                    self._rotate_google_route_and_rebuild()
+                    else:
+                        fallback = self._find_alternate_provider(provider)
+                        if fallback is not None:
+                            switched = self._switch_provider(
+                                fallback,
+                                reason="429_fallback_from_groq",
+                            )
+                            if not switched:
+                                self._llm = self._build_llm_for_provider(provider, self._settings)
+                        else:
+                            self._llm = self._build_llm_for_provider(provider, self._settings)
+                elif provider == "gemini":
+                    if _is_rate_limit_error(exc):
+                        fallback = self._find_alternate_provider(provider)
+                        if fallback is not None:
+                            switched = self._switch_provider(
+                                fallback,
+                                reason="429_fallback_from_gemini",
+                            )
+                            if switched:
+                                await asyncio.sleep(min(1.0, 0.1 * attempt))
+                                continue
+                    if self._can_rotate_google_route():
+                        self._rotate_google_route_and_rebuild()
+                    else:
+                        fallback = self._find_alternate_provider(provider)
+                        if fallback is not None:
+                            switched = self._switch_provider(
+                                fallback,
+                                reason="429_fallback_from_gemini",
+                            )
+                            if not switched:
+                                self._llm = self._build_llm_for_provider(provider, self._settings)
+                        else:
+                            self._llm = self._build_llm_for_provider(provider, self._settings)
                 else:
                     self._llm = self._build_llm(self._settings)
 
+                await asyncio.sleep(min(1.0, 0.1 * attempt))
+
         if last_exc is not None:
-            raise last_exc
-        raise RuntimeError("LLM invocation failed")
+            logger.error(
+                "router.llm_retry_exhausted",
+                provider=self._runtime_provider,
+                attempts=max_attempts,
+                error=str(last_exc),
+            )
+        return self._local_fallback_response()
 
     # -- public API -----------------------------------------------------------
 
@@ -480,8 +648,7 @@ class CognitiveRouter:
         self._route_provider_if_needed(user_message.content)
 
         # 2. Retrieve relevant long-term memories.
-        memories = self._long_term.recall(user_message.content, n_results=3)
-        memory_context = "\n".join(f"- {m['document']}" for m in memories if m.get("document"))
+        memory_context = self._build_memory_context(user_message, n_results=6)
 
         # 3. Build the LLM prompt.
         system_prompt = self._build_system_prompt(memory_context)
@@ -517,6 +684,7 @@ class CognitiveRouter:
             f"User: {user_message.content}\nAssistant: {reply}",
             metadata={"user_id": user_message.user_id, "channel": user_message.channel},
         )
+        await self._persist_operational_memory(user_message, reply)
 
         return reply
 
@@ -629,12 +797,33 @@ class CognitiveRouter:
     async def _handle_policy_gate(
         self,
         step: TaskStep,
+        tool,
         user_id: str,
         results_summary: list[str],
     ) -> tuple[bool, Any]:
         policy_decision = self._policy.evaluate(step)
         if policy_decision.allowed:
             return True, policy_decision
+
+        if policy_decision.require_dry_run and "missing_dry_run" in policy_decision.reasons:
+            dry_run_ok = await self._execute_required_dry_run(step, tool, user_id, results_summary)
+            if dry_run_ok:
+                policy_decision = self._policy.evaluate(step)
+                if policy_decision.allowed:
+                    return True, policy_decision
+
+        if (
+            policy_decision.require_backup
+            and "backup_required" in policy_decision.reasons
+            and RiskLevel(step.risk_level) == RiskLevel.CRITICAL
+        ):
+            override_ok = await self._attempt_critical_backup_override(
+                step, user_id, results_summary
+            )
+            if override_ok:
+                policy_decision = self._policy.evaluate(step)
+                if policy_decision.allowed:
+                    return True, policy_decision
 
         step.status = StepStatus.SKIPPED
         if policy_decision.safe_response:
@@ -650,8 +839,89 @@ class CognitiveRouter:
             "policy_rejected",
             f"{step.tool_name}: {step.error}",
             user_id=user_id,
+            metadata={
+                "risk_level": step.risk_level.value,
+                "reasons": policy_decision.reasons,
+            },
         )
         return False, policy_decision
+
+    async def _execute_required_dry_run(
+        self,
+        step: TaskStep,
+        tool,
+        user_id: str,
+        results_summary: list[str],
+    ) -> bool:
+        dry_run_params = dict(step.parameters)
+        dry_run_params["dry_run"] = True
+        dry_run_input = ToolInput(
+            tool_name=step.tool_name,
+            parameters=dry_run_params,
+            requires_approval=False,
+        )
+
+        probe_step = step.model_copy(deep=True)
+        probe_step.description = f"[DRY-RUN] {step.description}"
+        dry_run_output = await self._recovery.execute_with_retry(tool, dry_run_input, probe_step)
+
+        if dry_run_output.status.value == "success":
+            step.dry_run_done = True
+            step.requires_dry_run = True
+            await self._state.log_audit(
+                "policy_dry_run_passed",
+                f"{step.tool_name}: dry-run completed",
+                user_id=user_id,
+                metadata={"risk_level": step.risk_level.value},
+            )
+            results_summary.append(f"[DRY-RUN] {step.description}: policy preflight basarili")
+            return True
+
+        step.error = (
+            f"Mandatory dry-run failed: {dry_run_output.error or 'unknown dry-run failure'}"
+        )
+        await self._state.log_audit(
+            "policy_dry_run_failed",
+            f"{step.tool_name}: {step.error}",
+            user_id=user_id,
+            metadata={"risk_level": step.risk_level.value},
+        )
+        results_summary.append(f"[FAIL] {step.description}: {step.error}")
+        return False
+
+    async def _attempt_critical_backup_override(
+        self,
+        step: TaskStep,
+        user_id: str,
+        results_summary: list[str],
+    ) -> bool:
+        approval = await self._guardian.request_critical_approval(
+            action_description=(
+                f"CRITICAL override for {step.tool_name}: backup missing. "
+                "Approve only if explicit rollback/compensation exists."
+            ),
+            user_id=user_id,
+        )
+
+        if approval != ApprovalResult.APPROVED:
+            results_summary.append(f"[SKIPPED] {step.description}: critical backup override denied")
+            return False
+
+        step.backup_ready = True
+        await self._state.log_audit(
+            "critical_override",
+            f"{step.tool_name}: backup requirement overridden by user",
+            user_id=user_id,
+            metadata={
+                "risk_level": step.risk_level.value,
+                "override": "backup_requirement",
+                "approval_mode": self._guardian.mode.value,
+            },
+        )
+        results_summary.append(
+            f"[OVERRIDE] {step.description}: user overrode CRITICAL backup requirement"
+        )
+        return True
 
     async def _handle_approval_gate(
         self,
@@ -662,14 +932,28 @@ class CognitiveRouter:
         user_id: str,
         results_summary: list[str],
     ) -> bool:
+        if (
+            RiskLevel(step.risk_level) == RiskLevel.CRITICAL
+            and self._guardian.mode == ApprovalMode.YES
+        ):
+            await self._state.log_audit(
+                "critical_auto_override",
+                (
+                    f"{step.tool_name}: critical execution auto-approved because "
+                    "guardian mode is YES"
+                ),
+                user_id=user_id,
+                metadata={
+                    "risk_level": step.risk_level.value,
+                    "approval_mode": self._guardian.mode.value,
+                },
+            )
+
         if not (tool.requires_approval(tool_input) or policy_decision.require_confirmation):
             return True
 
         step.status = StepStatus.AWAITING_APPROVAL
-        action_desc = (
-            f"{step.tool_name}: {step.description} | "
-            f"risk={step.risk_level.value}"
-        )
+        action_desc = f"{step.tool_name}: {step.description} | risk={step.risk_level.value}"
         if policy_decision.require_double_confirmation:
             approval = await self._guardian.request_critical_approval(
                 action_description=action_desc,
@@ -807,6 +1091,7 @@ class CognitiveRouter:
             tool, tool_input = await self._build_tool_input(step)
             policy_allowed, policy_decision = await self._handle_policy_gate(
                 step,
+                tool,
                 user_message.user_id,
                 results_summary,
             )
@@ -903,8 +1188,7 @@ class CognitiveRouter:
             return None
 
         target = source_url.strip() or (
-            "https://www.google.com/search?q="
-            f"{source_query.strip().replace(' ', '+')}"
+            f"https://www.google.com/search?q={source_query.strip().replace(' ', '+')}"
         )
         sequence_tools = [hotkey_tool, type_tool, analyze_tool]
         needs_approval = any(
@@ -913,8 +1197,7 @@ class CognitiveRouter:
         if needs_approval:
             approval = await self._guardian.request_approval(
                 action_description=(
-                    "GUI fallback sequence: gui_press_hotkey + "
-                    "gui_type_text + gui_analyze_screen"
+                    "GUI fallback sequence: gui_press_hotkey + gui_type_text + gui_analyze_screen"
                 ),
                 user_id=user_id,
             )
