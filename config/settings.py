@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
 
+    # --- Local Offline LLM Fallback (Ollama / LM Studio) ----------------------
+    ollama_enabled: bool = True
+    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_model: str = "llama3.2"
+
     # --- Hybrid fallback -----------------------------------------------------
     hybrid_fallback_enabled: bool = True
     hybrid_fallback_max_steps: int = 4

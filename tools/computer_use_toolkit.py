@@ -521,3 +521,113 @@ def _stop_background_recording() -> dict[str, Any]:
     _BACKGROUND_RECORDER["task"] = None
     _BACKGROUND_RECORDER["path"] = None
     return {"ok": True, "path": str(path) if path else "", "recording": False}
+
+
+class GuiInspectWindows(BaseTool):
+    """List open active windows on the desktop."""
+
+    name = "gui_inspect_windows"
+    description = "List all open desktop application windows, titles, and handles."
+    is_destructive = False
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            windows = await asyncio.to_thread(_list_desktop_windows)
+            return self._success(
+                f"Found {len(windows)} active desktop windows.",
+                data={"windows": windows, "count": len(windows)},
+            )
+        except Exception as exc:
+            return self._failure(f"Failed to inspect windows: {exc}")
+
+
+class GuiFocusWindow(BaseTool):
+    """Focus and bring a specific window to the foreground."""
+
+    name = "gui_focus_window"
+    description = (
+        "Focus and bring a target window to foreground by title or process name. "
+        "Parameters: title (partial window title or app name)."
+    )
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        title = str(self._first_param(params, "title", "name", "app", default="") or "").strip()
+        if not title:
+            return self._failure("title parameter is required.")
+
+        try:
+            focused = await asyncio.to_thread(_focus_window_by_title, title)
+            if focused:
+                return self._success(f"Window '{title}' focused.", data={"title": title})
+            return self._failure(f"Window matching '{title}' not found.")
+        except Exception as exc:
+            return self._failure(f"Failed to focus window: {exc}")
+
+
+def _list_desktop_windows() -> list[dict[str, str]]:
+    windows: list[dict[str, str]] = []
+    try:
+        import pygetwindow as gw
+        for w in gw.getAllWindows():
+            if w.title and w.title.strip():
+                windows.append({"title": w.title.strip(), "visible": str(w.visible)})
+        if windows:
+            return windows
+    except Exception:
+        pass
+
+    # Powershell fallback
+    try:
+        ps_cmd = (
+            "Get-Process | Where-Object {$_.MainWindowTitle} | "
+            "Select-Object ProcessName, MainWindowTitle | ConvertTo-Json"
+        )
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if res.stdout.strip():
+            import json
+            data = json.loads(res.stdout)
+            if isinstance(data, dict):
+                data = [data]
+            for item in data:
+                windows.append({
+                    "title": item.get("MainWindowTitle", ""),
+                    "process": item.get("ProcessName", ""),
+                })
+    except Exception:
+        pass
+
+    return windows
+
+
+def _focus_window_by_title(title: str) -> bool:
+    try:
+        import pygetwindow as gw
+        matches = gw.getWindowsWithTitle(title)
+        if matches:
+            matches[0].activate()
+            return True
+    except Exception:
+        pass
+
+    try:
+        cmd = (
+            f"$w = Get-Process | Where-Object {{$_.MainWindowTitle -like '*{title}*'}} | "
+            f"Select-Object -First 1; "
+            f"if ($w) {{ (New-Object -ComObject WScript.Shell).AppActivate($w.Id) }}"
+        )
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", cmd],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return res.returncode == 0
+    except Exception:
+        return False

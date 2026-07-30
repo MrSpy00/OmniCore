@@ -1,27 +1,30 @@
-# OmniCore v0.37.0 — Autonomous OS-Level AI Assistant Framework
+# OmniCore v0.38.0 — The Agentic OS Evolution
 
 ![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
-![Build Status](https://img.shields.io/badge/Tests-127%20Passed-brightgreen.svg)
+![Build Status](https://img.shields.io/badge/Tests-131%20Passed-brightgreen.svg)
 ![Async Hygiene](https://img.shields.io/badge/Async%20Audit-0%20Issues-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-black.svg)
 
-**OmniCore** is a production-grade, enterprise-ready autonomous cognitive OS assistant. It bridges local system administration, kernel privilege triage, multi-drive file search, automated 2-stage persistent memory, real-time voice synthesis, Steam/Epic game engine updating, web/GUI automation, and multi-provider LLM orchestration (Gemini & Groq).
+**OmniCore** is a production-grade, enterprise-ready autonomous cognitive OS assistant framework. It bridges local system administration, self-improving skill creation, knowledge graph memory (GraphRAG), continuous background daemons, local Ollama offline fallback, kernel privilege triage, multi-drive file search, real-time voice synthesis, Steam/Epic game engine updating, web/GUI automation, and multi-provider LLM orchestration (Gemini, Groq & Ollama).
 
 ---
 
 ## 🌟 English Overview
 
-OmniCore combines **User-Facing Capabilities** (voice loop, EdgeTTS speech, PyAudio listening, Steam & Epic launcher management, 2-stage categorized memory) with **Kernel & OS Dominance Layer** (NTFS `$MFT` / Everything `es.exe` instant file search, privilege triage via `whoami /priv` & `id`, LOLBins execution safety, and 4-tier risk governance).
+OmniCore combines **User-Facing Capabilities** (voice loop, EdgeTTS speech, PyAudio listening, Steam & Epic launcher management, 2-stage categorized memory, Self-Improving Skill Curator) with **Kernel & OS Dominance Layer** (Knowledge Graph Memory, Continuous Background Event Daemons, Offline Ollama Fallback, NTFS `$MFT` / Everything `es.exe` instant file search, privilege triage via `whoami /priv` & `id`, LOLBins execution safety, and 4-tier risk governance).
 
 ### Key Features
 
-- 🧠 **Cognitive Router & Failover**: Automatic multi-provider failover (Gemini 2.5 Pro / Flash & Groq Llama 3.3 70B) with count-based circuit breaker and semantic tool pruning.
+- 🧠 **Cognitive Router & Failover**: Automatic multi-provider failover (Gemini 2.0 Flash / Pro, Groq Llama 3.3 70B & Local Ollama offline fallback) with count-based circuit breaker and semantic tool pruning.
+- ⚡ **Self-Improving Skill Curator**: Synthesize new Python tool classes dynamically at runtime (`skill_create`, `skill_list`, `skill_execute`) saved to `workspace/skills/`.
+- 🕸️ **Knowledge Graph Memory Engine**: GraphRAG entity-relation memory store (`memory/graph_memory.py`) connecting entities (`User -> owns -> OmniCore -> uses -> ChromaDB`) for multi-hop reasoning.
+- 🔄 **Continuous Background Daemon & Event Reactor**: Asynchronous directory watchers, resource limit alerts (CPU/RAM > 90%), and event reactors running in the background.
+- 📴 **Local Ollama Offline Fallback**: Zero-internet offline capability automatically routing to local Ollama / LM Studio instances (`http://localhost:11434/v1`).
 - 💾 **2-Stage Categorized Persistent Memory**: Automatic filtering and structured JSON categorization (`identity`, `preferences`, `projects`, `relationships`, `wishes`, `notes`) with dynamic system prompt injection.
 - 🎮 **Steam & Epic Game Engine Updater**: Multi-drive `libraryfolders.vdf` and `appmanifest_*.acf` parsing for Steam, Epic `Manifests/*.item` discovery, automated updates, and optional post-update auto-shutdown.
+- 🖥️ **Hybrid GUI Window Inspector**: Desktop window inspection (`gui_inspect_windows`, `gui_focus_window`) bringing target app windows to foreground for precise GUI interaction.
 - ⚡ **Non-Blocking Async Architecture**: 100% async-native execution verified with zero blocking IO calls on main event loop threads.
 - 🛡️ **4-Tier Capability Policy Governance**: Enforces `LOW`, `MEDIUM`, `HIGH`, and `CRITICAL` risk tiers with pre-action dry-run simulations, double confirmation for destructive actions, and sensitive data redaction.
-- 🎙️ **Voice Loop & Spoken Announcements**: EdgeTTS synthesis, PyAudio/SpeechRecognition mic listening, mute control (`F4` hotkey / UI toggle), and pre-execution spoken announcements.
-- 🔍 **Instant Disk Search ($MFT / Everything CLI)**: Instant multi-gigabyte file location discovery using `es.exe` MFT indexer with optimized fallback traversal.
 
 ---
 

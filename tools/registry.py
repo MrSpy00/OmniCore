@@ -109,3 +109,27 @@ def discover_tool_classes(tools_package_path: Path) -> list[type[BaseTool]]:
 
     discovered.sort(key=lambda cls: cls.name)
     return discovered
+
+
+def load_custom_skills(skills_dir: Path) -> list[type[BaseTool]]:
+    """Scan and return custom user BaseTool classes under workspace/skills."""
+    if not skills_dir.exists():
+        return []
+
+    discovered: list[type[BaseTool]] = []
+    for py_file in skills_dir.glob("*.py"):
+        if py_file.name == "__init__.py":
+            continue
+        try:
+            mod_name = f"workspace.skills.{py_file.stem}"
+            spec = importlib.util.spec_from_file_location(mod_name, py_file)
+            if spec is None or spec.loader is None:
+                continue
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            for _, obj in inspect.getmembers(mod, inspect.isclass):
+                if obj is not BaseTool and issubclass(obj, BaseTool) and getattr(obj, "name", ""):
+                    discovered.append(obj)
+        except Exception as exc:
+            logger.warning("tool_registry.custom_skill_failed", file=py_file.name, error=str(exc))
+    return discovered

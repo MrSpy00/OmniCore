@@ -170,7 +170,7 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
     return any(marker in text for marker in markers)
 
 
-_SUPPORTED_PROVIDERS: tuple[str, ...] = ("groq", "gemini")
+_SUPPORTED_PROVIDERS: tuple[str, ...] = ("groq", "gemini", "ollama")
 
 _OPERATIONAL_FACT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("windows", "User OS is Windows"),
@@ -377,6 +377,22 @@ class CognitiveRouter:
                 temperature=settings.llm_temperature,
                 max_output_tokens=settings.llm_max_output_tokens,
             )
+        if normalized == "ollama":
+            logger.info(
+                "router.ollama_active_route",
+                model=settings.ollama_model,
+                base_url=settings.ollama_base_url,
+            )
+            # Use OpenAI-compatible envelope or local fallback
+            try:
+                from langchain_community.chat_models import ChatOllama
+                return ChatOllama(
+                    model=settings.ollama_model,
+                    base_url=settings.ollama_base_url,
+                    temperature=settings.llm_temperature,
+                )
+            except Exception:
+                return _LocalLLMResponse(f"Local Ollama model fallback ({settings.ollama_model})")
 
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
