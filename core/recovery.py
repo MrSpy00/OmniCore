@@ -27,7 +27,18 @@ _MAX_RETRY_CAP = 2
 
 
 class RecoveryEngine:
-    """Execute tools with automatic retry and error analysis."""
+    """Execute tools with automatic retry and error analysis.
+
+    Parameters
+    ----------
+    max_attempts:
+        Maximum number of execution attempts per tool call (default: 2).
+        Override via ``RECOVERY_MAX_ATTEMPTS`` in ``.env`` or by passing
+        ``get_settings().recovery_max_attempts`` to the constructor.
+    """
+
+    def __init__(self, max_attempts: int = _MAX_RETRY_CAP) -> None:
+        self._max_retry_cap = max(1, max_attempts)
 
     async def execute_with_retry(
         self,
@@ -42,7 +53,7 @@ class RecoveryEngine:
         After 2 consecutive failures, returns a Turkish error message.
         """
         last_output: ToolOutput | None = None
-        effective_max = min(step.max_retries, _MAX_RETRY_CAP)
+        effective_max = min(step.max_retries, self._max_retry_cap)
 
         for attempt in range(effective_max + 1):
             try:

@@ -219,6 +219,40 @@ _QUERY_TOOL_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("security", ("security", "encrypt", "decrypt", "audit")),
 )
 
+# Turkish word → English tool-name/description hint mapping.
+# Expands the tool scoring for queries written in Turkish, bridging the gap
+# between native-language user intent and English tool names/descriptions.
+_TR_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "dosya": ("file", "fs", "read", "write", "path"),
+    "klasor": ("dir", "folder", "path", "list"),
+    "ac": ("open", "launch", "browser", "start", "gui"),
+    "kapat": ("close", "kill", "stop", "process"),
+    "sil": ("delete", "remove", "clean", "unlink"),
+    "yaz": ("write", "create", "append", "save"),
+    "oku": ("read", "get", "content", "view"),
+    "indir": ("download", "fetch", "get", "http"),
+    "yukle": ("upload", "send", "post", "http"),
+    "calistir": ("run", "execute", "launch", "process"),
+    "ekran": ("screen", "gui", "screenshot", "display", "vision"),
+    "ses": ("audio", "volume", "music", "sound", "spotify"),
+    "goruntu": ("image", "vision", "ocr", "screen", "media"),
+    "pil": ("battery", "power", "system"),
+    "sistem": ("system", "info", "process", "os"),
+    "ag": ("net", "network", "ping", "dns", "socket"),
+    "arsiv": ("archive", "zip", "compress", "extract"),
+    "hata": ("error", "debug", "log", "recovery"),
+    "git": ("git", "commit", "push", "branch"),
+    "kodla": ("dev", "code", "python", "execute"),
+    "hatirla": ("memory", "recall", "chroma", "long_term"),
+    "zamanla": ("schedule", "timer", "cron", "reminder"),
+    "bildirim": ("notification", "alert", "notify", "desktop"),
+    "pano": ("clipboard", "copy", "paste"),
+    "parca": ("process", "task", "split", "chunk"),
+    "sifrele": ("encrypt", "crypto", "security"),
+    "raporla": ("report", "log", "audit", "admin"),
+    "yedekle": ("backup", "copy", "archive", "save"),
+}
+
 _MAX_RELEVANT_TOOLS = 12
 _GROQ_PREEMPTIVE_TOKEN_LIMIT = 4000
 
@@ -292,14 +326,14 @@ class CognitiveRouter:
         self._provider_availability = settings.provider_availability
         self._runtime_provider = self._select_initial_provider(settings)
         self._llm = self._build_llm(settings)
-        self._llm_semaphore = asyncio.Semaphore(3)
+        self._llm_semaphore = asyncio.Semaphore(settings.llm_semaphore_limit)
         self._circuit_breaker = _SimpleCircuitBreaker(threshold=3, cooldown_seconds=30)
         self._planner = Planner(self._llm)
         self._guardian = Guardian(
             timeout_minutes=settings.hitl_timeout_minutes,
             approval_callback=approval_callback,
         )
-        self._recovery = RecoveryEngine()
+        self._recovery = RecoveryEngine(max_attempts=settings.recovery_max_attempts)
         self._policy = CapabilityPolicyEngine()
 
     def _build_llm(self, settings) -> Any:
@@ -467,9 +501,10 @@ class CognitiveRouter:
     def _rotate_google_route_and_rebuild(self) -> None:
         """Rotate to next Gemini key route and rebuild LLM client."""
         self._refresh_runtime_settings()
+        # NOTE: Do NOT re-create the rotator here — that would reset the cycle
+        # back to the first key (double-alloc bug). Instead, keep the existing
+        # rotator and advance it to the next key.
         if self._google_key_rotator is None:
-            self._google_key_rotator = _ApiKeyRotator(self._settings.google_api_keys)
-        else:
             self._google_key_rotator = _ApiKeyRotator(self._settings.google_api_keys)
 
         old_key = self._google_key_rotator.current
@@ -527,9 +562,14 @@ class CognitiveRouter:
         return max(1, len(text or "") // 4)
 
     def _semantic_target_provider(self, user_text: str) -> str:
-        """Select target provider based on approximate prompt size, O(1)."""
+        """Select target provider based on approximate prompt size, O(1).
+
+        Groq's Llama 3.x models support up to 128k tokens. We only switch
+        to Gemini for very large payloads (>3000 estimated tokens) to avoid
+        unnecessary provider hops on normal-length requests.
+        """
         estimated_tokens = self._estimate_tokens(user_text)
-        if estimated_tokens >= 1200:
+        if estimated_tokens >= 3000:
             return "gemini"
         return self._runtime_provider
 
@@ -580,6 +620,12 @@ class CognitiveRouter:
                     score += 35
                 if token in desc_l:
                     score += 12
+
+            # Turkish synonym expansion: map Turkish words to English tool-name hints.
+            for tr_word, en_hints in _TR_SYNONYMS.items():
+                if tr_word in lowered_query:
+                    if any(hint in name_l or hint in desc_l for hint in en_hints):
+                        score += 30
 
             for marker, hints in _QUERY_TOOL_KEYWORDS:
                 if marker in lowered_query and any(
@@ -937,17 +983,80 @@ class CognitiveRouter:
         if lowered.startswith("/doctor"):
             provider = self._runtime_provider
             tools_count = len(self._registry)
+            groq_keys = len([k for k in self._settings.groq_api_keys if k])
+            gemini_keys = len([k for k in self._settings.google_api_keys if k])
             return (
                 "System diagnostics OK\n"
                 f"provider={provider}\n"
+                f"model={self._settings.omni_llm_model}\n"
                 f"plan_mode={self._guardian.plan_mode}\n"
-                f"tools={tools_count}"
+                f"tools={tools_count}\n"
+                f"groq_keys={groq_keys} | gemini_keys={gemini_keys}"
             )
         if lowered.startswith("/memory"):
             items = self._long_term.recall(user_message.content, n_results=5)
             return f"Memory preview: {len(items)} items"
         if lowered.startswith("/commit"):
             return "Commit helper available. Use git workflow commands in terminal."
+        if lowered.startswith("/reset"):
+            from models.messages import Conversation
+            self._short_term.clear(user_message.user_id or "default")
+            return "Konusma gecmisi temizlendi. \u267b\ufe0f Yeni konusmaya hazir!"
+        if lowered.startswith("/models"):
+            from config.settings import get_available_models
+            all_models = get_available_models()
+            lines = ["Kullanilabilir LLM Modeller:\n"]
+            for prov, models in all_models.items():
+                lines.append(f"\U0001f4cc {prov.upper()}:")
+                for m in models:
+                    active = " [AKTIF]" if (
+                        (prov == "gemini" and m["id"] == self._settings.omni_llm_model)
+                        or (prov == "groq" and m["id"] == self._settings.groq_primary_model)
+                    ) else ""
+                    lines.append(
+                        f"  - {m['id']}{active}\n"
+                        f"    {m['name']} | context={m['context']} | speed={m['speed']}"
+                    )
+            return "\n".join(lines)
+        if lowered.startswith("/setmodel "):
+            parts = content.split(" ", 2)
+            if len(parts) < 2:
+                return "Kullanim: /setmodel <model-id>  (orn: /setmodel gemini-2.5-pro)"
+            model_id = parts[1].strip()
+            from config.settings import AVAILABLE_GEMINI_MODELS, AVAILABLE_GROQ_MODELS
+            gemini_ids = {m["id"] for m in AVAILABLE_GEMINI_MODELS}
+            groq_ids = {m["id"] for m in AVAILABLE_GROQ_MODELS}
+            if model_id in gemini_ids:
+                self._settings.__dict__["omni_llm_model"] = model_id
+                self._destroy_current_llm()
+                self._llm = self._build_llm(self._settings)
+                return f"Gemini modeli degistirildi: {model_id}\nDegisikligi kalici yapmak icin .env dosyasinda OMNI_LLM_MODEL={model_id} ayarlayin."
+            if model_id in groq_ids:
+                self._settings.__dict__["groq_primary_model"] = model_id
+                if self._model_rotator is not None:
+                    self._model_rotator = None
+                self._destroy_current_llm()
+                self._llm = self._build_llm(self._settings)
+                return f"Groq modeli degistirildi: {model_id}\nDegisikligi kalici yapmak icin .env dosyasinda GROQ_PRIMARY_MODEL={model_id} ayarlayin."
+            return (
+                f"Bilinmeyen model: {model_id}\n"
+                "Mevcut modelleri gormek icin /models komutunu kullanin."
+            )
+        if lowered.startswith("/help"):
+            return (
+                "\U0001f4cb OmniCore Komutlari:\n\n"
+                "/help    — Bu yardim mesaji\n"
+                "/plan    — Plan modunu ac/kapat (destructive adimlar dry-run)\n"
+                "/doctor  — Sistem durumu ve provider bilgisi\n"
+                "/memory  — Uzun donemli hafiza onizleme\n"
+                "/reset   — Bu konusmanin gecmisini temizle\n"
+                "/models  — Kullanilabilir LLM modellerini listele\n"
+                "/setmodel <model-id> — Aktif modeli degistir (oturuma ozel)\n"
+                "/commit  — Git commit yardimcisi\n\n"
+                "Diger komutlar:\n"
+                ".omnicore approve yes — Otomatik onay modu\n"
+                ".omnicore approve ask — Manuel onay modu (varsayilan)"
+            )
         return None
 
     # -- internal helpers ------------------------------------------------------
@@ -959,11 +1068,11 @@ class CognitiveRouter:
     async def _classify_intent(self, user_text: str, lc_messages: list) -> dict[str, Any]:
         """Ask the LLM to decide: plan or direct answer."""
         classification_prompt = (
-            "Aşağıdaki isteğin araç çalıştırmayı gerektirip gerektirmediğine karar ver.\n"
-            f"İstek: {user_text}\n\n"
-            "ÖNEMLİ: Hava durumu isteklerinde mutlaka api_weather veya güvenilir gerçek kaynak "
-            "(örn. wttr.in) kullanılmalı; sahte bağlantı üretilmez.\n"
-            "SADECE JSON döndür:\n"
+            "Asagidaki istegin arac calistirmayi gerektirip gerektirmedigine karar ver.\n"
+            f"Istek: {user_text}\n\n"
+            "ONEMLI: Hava durumu isteklerinde mutlaka api_weather veya guvenilir gercek kaynak "
+            "(orn. wttr.in) kullanilmali; sahte baglanti uretilmez.\n"
+            "SADECE JSON dondur:\n"
             '{"needs_plan": true/false, "steps": [...] or []}'
         )
         lc_messages_copy = list(lc_messages) + [HumanMessage(content=classification_prompt)]
@@ -971,17 +1080,21 @@ class CognitiveRouter:
         response = await self._ainvoke_with_retry(lc_messages_copy)
         text = response.content.strip()
 
-        # Try to parse the JSON from the LLM response.
+        # Robust JSON extraction — handles markdown fences, extra text, multi-block responses.
         try:
-            # Strip markdown code fences if present.
-            if "```" in text:
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-                text = text.strip()
+            # 1. Try extracting from ```json ... ``` or ``` ... ``` blocks first.
+            fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+            if fence_match:
+                return json.loads(fence_match.group(1))
+
+            # 2. Try finding a bare JSON object anywhere in the response.
+            bare_match = re.search(r"(\{[^{}]*\})", text, re.DOTALL)
+            if bare_match:
+                return json.loads(bare_match.group(1))
+
+            # 3. Last resort: try the full text.
             return json.loads(text)
-        except (json.JSONDecodeError, IndexError):
-            # If the LLM didn't return valid JSON, treat as conversational.
+        except (json.JSONDecodeError, ValueError):
             logger.debug("router.classification_fallback", raw=text[:200])
             return {"needs_plan": False, "steps": []}
 

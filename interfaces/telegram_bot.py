@@ -106,15 +106,23 @@ class TelegramGateway:
             await update.message.reply_text("Unauthorized.", parse_mode="HTML")
             return
         await update.message.reply_text(
-            "<b>OmniCore is online.</b>\n\n"
-            "Send me a message and I'll help you with:\n"
-            "- File management\n"
-            "- Web searches and scraping\n"
-            "- Shell commands (with approval)\n"
-            "- External API calls\n\n"
-            "Commands:\n"
-            "<code>/status</code> — Show system status\n"
-            "<code>/clear</code> — Clear conversation history",
+            "<b>OmniCore v36 — Aktif ✅</b>\n\n"
+            "Türkçe veya İngilizce mesaj gönderebilirsiniz.\n\n"
+            "<b>Yetenekler:</b>\n"
+            "• Dosya yönetimi ve OS işlemleri\n"
+            "• Web araması ve otomasyon\n"
+            "• Terminal komutları (onay ile)\n"
+            "• GUI otomasyonu ve ekran analizi\n"
+            "• Hafıza ve zamanlama\n\n"
+            "<b>Komutlar:</b>\n"
+            "<code>/help</code>     — Tüm komutlar\n"
+            "<code>/status</code>   — Sistem durumu\n"
+            "<code>/models</code>   — Aktif LLM modeller\n"
+            "<code>/setmodel</code> — Model değiştir\n"
+            "<code>/reset</code>    — Geçmişi temizle\n"
+            "<code>/clear</code>    — Geçmişi temizle (Telegram)\n"
+            "<code>/doctor</code>   — Teknik teşhis\n"
+            "<code>/plan</code>     — Plan modunu aç/kapat",
             parse_mode=ParseMode.HTML,
         )
 
@@ -124,20 +132,24 @@ class TelegramGateway:
             return
         provider = (self._settings.llm_provider or "gemini").strip().lower()
         if provider == "groq":
-            model = self._settings.groq_llm_model
+            model = self._settings.groq_primary_model
         else:
             provider = "gemini"
             model = self._settings.omni_llm_model
-        provider = html.escape(provider)
-        model = html.escape(model)
+        provider_esc = html.escape(provider)
+        model_esc = html.escape(model)
         approval_mode = self._router._guardian.mode.value
-        auto_approve = "ON" if approval_mode == "yes" else "OFF"
+        auto_approve = "ON ✅" if approval_mode == "yes" else "OFF 🔒"
+        tools_count = len(self._router._registry)
         await update.message.reply_text(
-            "<b>OmniCore Status</b>\n"
-            f"Provider: <code>{provider}</code>\n"
-            f"Model: <code>{model}</code>\n"
-            f"HITL Timeout: <code>{self._settings.hitl_timeout_minutes}m</code>\n"
-            f"Auto-Approve: <code>{auto_approve}</code>",
+            "<b>OmniCore Sistem Durumu</b>\n"
+            f"Provider: <code>{provider_esc}</code>\n"
+            f"Model: <code>{model_esc}</code>\n"
+            f"HITL Timeout: <code>{self._settings.hitl_timeout_minutes}dk</code>\n"
+            f"Otomatik Onay: <code>{auto_approve}</code>\n"
+            f"Kayıtlı Araç: <code>{tools_count}</code>\n\n"
+            "Modelleri değiştirmek için: <code>/setmodel &lt;model-id&gt;</code>\n"
+            "Modelleri görmek için: <code>/models</code>",
             parse_mode=ParseMode.HTML,
         )
 
@@ -234,22 +246,39 @@ class TelegramGateway:
         )
 
         assert self._app
-        try:
-            await self._app.bot.send_message(
-                chat_id=int(user_id),
-                text=(
-                    "<b>APPROVAL REQUIRED</b>\n\n"
-                    f"Action: <code>{_escape_html(action_description)}</code>\n\n"
-                    "This will time out in "
-                    f"<code>{self._settings.hitl_timeout_minutes}</code> minutes."
-                ),
-                reply_markup=keyboard,
-                parse_mode=ParseMode.HTML,
-            )
-        except Exception as exc:
-            self._pending_approvals.pop(callback_id, None)
-            logger.error("telegram.approval_send_failed", callback_id=callback_id, error=str(exc))
-            return ApprovalResult.DENIED
+        # Retry send with exponential backoff on transient network errors.
+        _MAX_SEND_RETRIES = 3
+        for _attempt in range(_MAX_SEND_RETRIES):
+            try:
+                await self._app.bot.send_message(
+                    chat_id=int(user_id),
+                    text=(
+                        "<b>⚠️ ONAY GEREKİYOR</b>\n\n"
+                        f"İşlem: <code>{_escape_html(action_description)}</code>\n\n"
+                        f"Bu istek <code>{self._settings.hitl_timeout_minutes}</code> dakika içinde zaman aşımına uğrar."
+                    ),
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML,
+                )
+                break  # success
+            except Exception as exc:
+                if _attempt == _MAX_SEND_RETRIES - 1:
+                    self._pending_approvals.pop(callback_id, None)
+                    logger.error(
+                        "telegram.approval_send_failed",
+                        callback_id=callback_id,
+                        error=str(exc),
+                        attempts=_attempt + 1,
+                    )
+                    return ApprovalResult.DENIED
+                backoff = 0.5 * (2 ** _attempt)
+                logger.warning(
+                    "telegram.approval_send_retry",
+                    attempt=_attempt + 1,
+                    backoff=backoff,
+                    error=str(exc),
+                )
+                await asyncio.sleep(backoff)
 
         logger.info("telegram.approval_requested", callback_id=callback_id, user_id=user_id)
 
@@ -322,13 +351,24 @@ class TelegramGateway:
 
 
 def _chunk_text(text: str, max_len: int) -> list[str]:
-    """Split text into chunks of at most *max_len* characters."""
+    """Split text into chunks of at most *max_len* characters.
+
+    Prefers splitting on newlines to avoid cutting mid-sentence.
+    """
     if len(text) <= max_len:
         return [text]
-    chunks = []
+    chunks: list[str] = []
     while text:
-        chunks.append(text[:max_len])
-        text = text[max_len:]
+        if len(text) <= max_len:
+            chunks.append(text)
+            break
+        # Try to find a newline near the boundary to split cleanly.
+        boundary = text.rfind("\n", 0, max_len)
+        if boundary <= max_len // 2:
+            # No good newline — fall back to hard split.
+            boundary = max_len
+        chunks.append(text[:boundary])
+        text = text[boundary:].lstrip("\n")
     return chunks
 
 

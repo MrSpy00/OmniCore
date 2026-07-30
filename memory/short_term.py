@@ -87,8 +87,8 @@ class ShortTermMemory:
         for msg in messages:
             role = msg.role.value.upper()
             text = (msg.content or "").replace("\n", " ").strip()
-            if len(text) > 140:
-                text = f"{text[:137]}..."
+            if len(text) > 280:
+                text = f"{text[:277]}..."
             if text:
                 parts.append(f"{role}: {text}")
         return " || ".join(parts)

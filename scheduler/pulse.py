@@ -23,6 +23,26 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _build_scheduler() -> AsyncIOScheduler:
+    """Build an AsyncIOScheduler with SQLite persistence if SQLAlchemy is available."""
+    settings = get_settings()
+    try:
+        from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore  # type: ignore[import]
+
+        db_path = settings.scheduler_db_path
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        url = f"sqlite:///{db_path.resolve()}"
+        jobstores = {"default": SQLAlchemyJobStore(url=url)}
+        scheduler = AsyncIOScheduler(jobstores=jobstores)
+        logger.info("pulse.jobstore", backend="sqlite", path=str(db_path))
+        return scheduler
+    except ImportError:
+        logger.warning(
+            "pulse.jobstore_fallback",
+            reason="SQLAlchemy not installed; using in-memory job store",
+        )
+        return AsyncIOScheduler()
+
 class AutonomousPulse:
     """Background scheduler that executes proactive tasks.
 
@@ -41,7 +61,7 @@ class AutonomousPulse:
     ) -> None:
         self._router = router
         self._state = state_tracker
-        self._scheduler = AsyncIOScheduler()
+        self._scheduler = _build_scheduler()
 
     async def start(self) -> None:
         """Load jobs from the database and start the scheduler."""
@@ -112,3 +132,15 @@ class AutonomousPulse:
                 "scheduled_task_failed",
                 f"Prompt: {prompt[:100]} | Error: {exc}",
             )
+
+    def list_jobs(self) -> list[dict]:
+        """Return a summary of all currently scheduled jobs."""
+        jobs = []
+        for job in self._scheduler.get_jobs():
+            next_run = job.next_run_time
+            jobs.append({
+                "id": job.id,
+                "name": job.name,
+                "next_run": str(next_run) if next_run else "paused",
+            })
+        return jobs

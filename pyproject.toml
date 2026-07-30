@@ -1,6 +1,6 @@
 [project]
 name = "omnicore"
-version = "0.1.0"
+version = "0.36.0"
 description = "Autonomous OS-level AI assistant with web automation, file management, and Telegram gateway"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -34,10 +34,11 @@ dependencies = [
     # Media
     "yt-dlp>=2024.7.0",
     "youtube-transcript-api>=0.6.2",
-    # Scheduler
+    # Scheduler — APScheduler with SQLAlchemy for persistent job store
     "apscheduler>=3.10.0",
+    "sqlalchemy>=2.0.0",
     # Documents
-    "PyPDF2>=3.0.0",
+    "pypdf>=4.0.0",
     "python-docx>=1.1.0",
     "pandas>=2.2.0",
     "openpyxl>=3.1.0",
@@ -47,8 +48,6 @@ dependencies = [
     # Security
     "cryptography>=42.0.0",
     "paramiko>=3.5.0",
-    "black>=24.10.0",
-    "flake8>=7.1.0",
     "feedparser>=6.0.11",
     "pygetwindow>=0.0.9",
     "win10toast>=0.9",
@@ -74,6 +73,9 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.7.0",
+    # Code formatting & linting (dev-only — not needed at runtime)
+    "black>=24.10.0",
+    "flake8>=7.1.0",
 ]
 
 [tool.ruff]
