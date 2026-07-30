@@ -104,6 +104,55 @@ class LongTermMemory:
         logger.debug("long_term.recall", query=query[:80], n_results=len(items))
         return items
 
+    def get_all_memories_categorized(self) -> dict[str, list[str]]:
+        """Return all memories grouped by category (identity, preferences, projects, etc.)."""
+        if self._collection.count() == 0:
+            return {}
+
+        results = self._collection.get(include=["documents", "metadatas"])
+        documents: list[str] = results.get("documents") or []
+        metadatas: list[dict] = results.get("metadatas") or []
+
+        categories: dict[str, list[str]] = {
+            "identity": [],
+            "preferences": [],
+            "projects": [],
+            "relationships": [],
+            "wishes": [],
+            "notes": [],
+        }
+
+        for doc, meta in zip(documents, metadatas):
+            cat = (meta.get("category") or "notes").lower()
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append(doc)
+
+        return {k: v for k, v in categories.items() if v}
+
+    def format_memory_for_prompt(self) -> str:
+        """Format stored memories as a clean block for system prompt injection."""
+        cat_memories = self.get_all_memories_categorized()
+        if not cat_memories:
+            return ""
+
+        lines = ["--- KALICI HAFIZA / PERSISTENT MEMORY ---"]
+        cat_titles = {
+            "identity": "👤 Kimlik & Kişisel Bilgiler / Identity",
+            "preferences": "⭐ Tercihler & Zevkler / Preferences",
+            "projects": "🚀 Projeler & Çalışmalar / Projects",
+            "relationships": "👥 İlişkiler / Relationships",
+            "wishes": "🎯 İstekler & Hedefler / Wishes & Goals",
+            "notes": "📝 Genel Notlar / General Notes",
+        }
+        for cat, items in cat_memories.items():
+            title = cat_titles.get(cat, f"📌 {cat.capitalize()}")
+            lines.append(f"{title}:")
+            for item in items:
+                lines.append(f"  - {item}")
+        lines.append("------------------------------------------")
+        return "\n".join(lines)
+
     # -- admin ----------------------------------------------------------------
 
     def count(self) -> int:

@@ -108,6 +108,54 @@ class SysKillTaskForcefully(BaseTool):
             return self._failure(str(exc))
 
 
+class SysPrivilegeTriage(BaseTool):
+    name = "sys_privilege_triage"
+    description = (
+        "Inspect current OS process tokens, privileges (SeImpersonate, SeDebug, etc.), "
+        "group memberships, and elevation status."
+    )
+    is_destructive = False
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        try:
+            data = await asyncio.to_thread(_inspect_privileges)
+            return self._success("Privilege triage completed", data=data)
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+def _inspect_privileges() -> dict[str, object]:
+    try:
+        priv_out = subprocess.run(
+            ["whoami", "/priv"], capture_output=True, text=True, timeout=10
+        ).stdout
+        group_out = subprocess.run(
+            ["whoami", "/groups"], capture_output=True, text=True, timeout=10
+        ).stdout
+        high_privs = [
+            priv for priv in [
+                "SeImpersonatePrivilege",
+                "SeDebugPrivilege",
+                "SeBackupPrivilege",
+                "SeRestorePrivilege",
+                "SeTakeOwnershipPrivilege",
+                "SeLoadDriverPrivilege",
+            ] if priv.lower() in priv_out.lower()
+        ]
+        is_admin = "Administrators" in group_out or "High Integrity" in group_out
+        return {
+            "is_admin": is_admin,
+            "high_privileges": high_privs,
+            "privileges_raw": priv_out.strip(),
+            "groups_raw": group_out.strip(),
+        }
+    except Exception:
+        id_out = subprocess.run(
+            ["id"], capture_output=True, text=True, timeout=10
+        ).stdout
+        return {"raw_id": id_out.strip()}
+
+
 def _service_command(service: str, action: str) -> str:
     if action == "restart":
         subprocess.run(["sc", "stop", service], capture_output=True, text=True, timeout=15)

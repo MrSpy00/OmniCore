@@ -499,3 +499,70 @@ def _attempt_windows_elevation_write(path: Path, content: str) -> dict[str, obje
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+class OsFastDiskSearch(BaseTool):
+    """Fast disk-wide file search using Everything CLI (es.exe) or optimized fallback."""
+
+    name = "os_fast_disk_search"
+    description = (
+        "Perform instant multi-gigabyte disk-wide file location search using MFT indexer "
+        "(es.exe) or optimized filesystem traversal. "
+        "Parameters: query (filename pattern to search), max_results (default 50)."
+    )
+    is_destructive = False
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        query = str(self._first_param(params, "query", "pattern", "name", default="") or "")
+        max_results = int(self._first_param(params, "max_results", "limit", default=50) or 50)
+        if not query:
+            return self._failure("query is required")
+
+        try:
+            results = await asyncio.to_thread(_fast_search_disk, query, max_results)
+            return self._success(
+                f"Found {len(results)} files matching '{query}'",
+                data={"query": query, "results": results, "count": len(results)},
+            )
+        except Exception as exc:
+            return self._failure(f"Disk search failed: {exc}")
+
+
+def _fast_search_disk(query: str, max_results: int = 50) -> list[str]:
+    # Check for Everything CLI es.exe
+    es_cmd = shutil.which("es.exe") or shutil.which("es")
+    if not es_cmd:
+        candidates = [
+            Path("C:/Program Files/Everything/es.exe"),
+            Path("C:/Program Files (x86)/Everything/es.exe"),
+        ]
+        for c in candidates:
+            if c.exists():
+                es_cmd = str(c)
+                break
+
+    if es_cmd:
+        try:
+            res = subprocess.run(
+                [es_cmd, "-n", str(max_results), query],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+        except Exception:
+            pass
+
+    # Optimized fallback search under user root
+    user_root = _home_root()
+    found: list[str] = []
+    lowered_q = query.lower()
+    for root, _, files in os.walk(user_root):
+        for f in files:
+            if lowered_q in f.lower():
+                found.append(str(Path(root) / f))
+                if len(found) >= max_results:
+                    return found
+    return found

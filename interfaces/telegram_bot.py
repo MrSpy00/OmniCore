@@ -247,22 +247,23 @@ class TelegramGateway:
 
         assert self._app
         # Retry send with exponential backoff on transient network errors.
-        _MAX_SEND_RETRIES = 3
-        for _attempt in range(_MAX_SEND_RETRIES):
+        max_send_retries = 3
+        for _attempt in range(max_send_retries):
             try:
                 await self._app.bot.send_message(
                     chat_id=int(user_id),
                     text=(
                         "<b>⚠️ ONAY GEREKİYOR</b>\n\n"
                         f"İşlem: <code>{_escape_html(action_description)}</code>\n\n"
-                        f"Bu istek <code>{self._settings.hitl_timeout_minutes}</code> dakika içinde zaman aşımına uğrar."
+                        f"Bu istek <code>{self._settings.hitl_timeout_minutes}</code> "
+                        "dakika içinde zaman aşımına uğrar."
                     ),
                     reply_markup=keyboard,
                     parse_mode=ParseMode.HTML,
                 )
                 break  # success
             except Exception as exc:
-                if _attempt == _MAX_SEND_RETRIES - 1:
+                if _attempt == max_send_retries - 1:
                     self._pending_approvals.pop(callback_id, None)
                     logger.error(
                         "telegram.approval_send_failed",

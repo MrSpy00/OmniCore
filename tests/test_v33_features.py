@@ -128,6 +128,8 @@ async def test_router_handles_slash_commands():
     router._long_term = _DummyLongTerm()
     router._short_term = ShortTermMemory(max_messages=5)
     router._recovery = _DummyRecovery()
+    from config.settings import get_settings
+    router._settings = get_settings()
 
     plan_msg = Message(role=MessageRole.USER, content="/plan", user_id="u1")
     plan_reply = await router._handle_slash_command(plan_msg)

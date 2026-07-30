@@ -214,6 +214,43 @@ class Planner:
                 issues.append(f"Step with tool '{step.tool_name}' has no description")
         return issues
 
+    def replan_failed_step(
+        self,
+        plan: TaskPlan,
+        failed_step_index: int,
+        failure_reason: str,
+    ) -> TaskPlan:
+        """Self-healing replanner: adapt remaining steps if a step fails."""
+        if failed_step_index < 0 or failed_step_index >= len(plan.steps):
+            return plan
+
+        failed_step = plan.steps[failed_step_index]
+        logger.warning(
+            "planner.replan_triggered",
+            plan_id=plan.id,
+            failed_step=failed_step.description,
+            reason=failure_reason[:100],
+        )
+
+        # Build recovery step
+        recovery_step = TaskStep(
+            tool_name="dev_grep_analyzer",
+            description=f"Self-healing diagnostic for failed step: {failed_step.description}",
+            parameters={"query": failure_reason[:50]},
+            domain="devops",
+            risk_level=RiskLevel.LOW,
+        )
+
+        new_steps = (
+            list(plan.steps[:failed_step_index])
+            + [recovery_step]
+            + list(plan.steps[failed_step_index:])
+        )
+        return TaskPlan(
+            user_request=plan.user_request,
+            steps=new_steps,
+        )
+
     @staticmethod
     def _annotate_delegation(step: TaskStep) -> None:
         if step.delegated:

@@ -87,9 +87,13 @@ desktop.ini
 .mypy_cache/
 node_modules/
 *.log
+*.log.*
 
 # --- SQLite databases (runtime state only; not for version control) ---
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 !tests/fixtures/*.db
 
 # --- ChromaDB backup snapshots ---

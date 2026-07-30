@@ -804,6 +804,10 @@ class CognitiveRouter:
             merged.append(item)
 
         lines = [f"- {m['document']}" for m in merged if m.get("document")]
+        if hasattr(self._long_term, "format_memory_for_prompt"):
+            cat_formatted = self._long_term.format_memory_for_prompt()
+            if cat_formatted:
+                lines.append("\n" + cat_formatted)
         return "\n".join(lines)
 
     async def _ainvoke_with_retry(self, messages: list) -> Any:
@@ -981,15 +985,22 @@ class CognitiveRouter:
             state = "ON" if enabled else "OFF"
             return f"Plan mode {state}. Destructive steps will be dry-run enforced."
         if lowered.startswith("/doctor"):
-            provider = self._runtime_provider
-            tools_count = len(self._registry)
-            groq_keys = len([k for k in self._settings.groq_api_keys if k])
-            gemini_keys = len([k for k in self._settings.google_api_keys if k])
+            provider = getattr(self, "_runtime_provider", "unknown")
+            tools_count = len(self._registry) if hasattr(self, "_registry") else 0
+            settings = getattr(self, "_settings", None) or get_settings()
+            groq_keys = len([k for k in getattr(settings, "groq_api_keys", []) if k])
+            gemini_keys = len([k for k in getattr(settings, "google_api_keys", []) if k])
+            model_name = getattr(settings, "omni_llm_model", "unknown")
+            is_plan = (
+                getattr(self._guardian, "plan_mode", False)
+                if hasattr(self, "_guardian")
+                else False
+            )
             return (
                 "System diagnostics OK\n"
                 f"provider={provider}\n"
-                f"model={self._settings.omni_llm_model}\n"
-                f"plan_mode={self._guardian.plan_mode}\n"
+                f"model={model_name}\n"
+                f"plan_mode={is_plan}\n"
                 f"tools={tools_count}\n"
                 f"groq_keys={groq_keys} | gemini_keys={gemini_keys}"
             )
@@ -999,7 +1010,6 @@ class CognitiveRouter:
         if lowered.startswith("/commit"):
             return "Commit helper available. Use git workflow commands in terminal."
         if lowered.startswith("/reset"):
-            from models.messages import Conversation
             self._short_term.clear(user_message.user_id or "default")
             return "Konusma gecmisi temizlendi. \u267b\ufe0f Yeni konusmaya hazir!"
         if lowered.startswith("/models"):
@@ -1030,14 +1040,22 @@ class CognitiveRouter:
                 self._settings.__dict__["omni_llm_model"] = model_id
                 self._destroy_current_llm()
                 self._llm = self._build_llm(self._settings)
-                return f"Gemini modeli degistirildi: {model_id}\nDegisikligi kalici yapmak icin .env dosyasinda OMNI_LLM_MODEL={model_id} ayarlayin."
+                return (
+                    f"Gemini modeli degistirildi: {model_id}\n"
+                    f"Degisikligi kalici yapmak icin .env dosyasinda "
+                    f"OMNI_LLM_MODEL={model_id} ayarlayin."
+                )
             if model_id in groq_ids:
                 self._settings.__dict__["groq_primary_model"] = model_id
                 if self._model_rotator is not None:
                     self._model_rotator = None
                 self._destroy_current_llm()
                 self._llm = self._build_llm(self._settings)
-                return f"Groq modeli degistirildi: {model_id}\nDegisikligi kalici yapmak icin .env dosyasinda GROQ_PRIMARY_MODEL={model_id} ayarlayin."
+                return (
+                    f"Groq modeli degistirildi: {model_id}\n"
+                    f"Degisikligi kalici yapmak icin .env dosyasinda "
+                    f"GROQ_PRIMARY_MODEL={model_id} ayarlayin."
+                )
             return (
                 f"Bilinmeyen model: {model_id}\n"
                 "Mevcut modelleri gormek icin /models komutunu kullanin."

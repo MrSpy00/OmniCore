@@ -84,7 +84,6 @@ class ReminderSet(BaseTool):
 
         # PowerShell script: create a Task Scheduler job that shows a balloon notification
         escaped_message = message.replace('"', '`"').replace("'", "`'")
-        escaped_task = task_name.replace('"', '`"')
 
         ps_action = (
             f"Add-Type -AssemblyName System.Windows.Forms; "
@@ -107,14 +106,12 @@ class ReminderSet(BaseTool):
         ]
 
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                ),
+            result = await asyncio.to_thread(
+                subprocess.run,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
         except Exception as exc:
             return self._failure(f"schtasks komutu başarısız: {exc}")
@@ -150,11 +147,12 @@ class ReminderList(BaseTool):
 
         cmd = ["schtasks", "/Query", "/FO", "CSV", "/NH"]
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=15
-                ),
+            result = await asyncio.to_thread(
+                subprocess.run,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
         except Exception as exc:
             return self._failure(f"schtasks sorgu hatası: {exc}")
@@ -198,11 +196,12 @@ class ReminderDelete(BaseTool):
 
         cmd = ["schtasks", "/Delete", "/TN", task_name, "/F"]
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=15
-                ),
+            result = await asyncio.to_thread(
+                subprocess.run,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
         except Exception as exc:
             return self._failure(f"schtasks silme hatası: {exc}")

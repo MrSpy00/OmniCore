@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import json
 import re
-import types
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -203,8 +201,8 @@ def test_google_rotator_not_recreated():
 async def test_recovery_engine_respects_max_attempts():
     """RecoveryEngine with max_attempts=1 should not retry more than once."""
     from core.recovery import RecoveryEngine
+    from models.tasks import TaskStep
     from models.tools import ToolInput, ToolOutput, ToolStatus
-    from models.tasks import TaskStep, StepStatus
 
     engine = RecoveryEngine(max_attempts=1)
 
@@ -228,7 +226,8 @@ async def test_recovery_engine_respects_max_attempts():
 
     await engine.execute_with_retry(tool, tool_input, step)
 
-    # max_attempts=1 means 1 attempt + 1 retry = 2 total calls max (loop_breaker fires after 2nd fail)
+    # max_attempts=1 means 1 attempt + 1 retry = 2 total calls max
+    # (loop_breaker fires after 2nd fail)
     assert call_count <= 2
 
 
@@ -260,9 +259,9 @@ def test_short_term_clear_removes_messages():
 
 def test_tool_registry_raises_on_duplicate():
     """Registering the same tool name twice should raise ValueError."""
-    from tools.registry import ToolRegistry
-    from tools.base import BaseTool
     from models.tools import ToolInput, ToolOutput
+    from tools.base import BaseTool
+    from tools.registry import ToolRegistry
 
     class DummyTool(BaseTool):
         name = "dummy_dup_test"
@@ -306,6 +305,7 @@ def test_semantic_routing_threshold():
     # but _semantic_target_provider uses 3000 internally.
     # Verify by checking the source.
     import inspect
+
     from core import router as router_module
 
     source = inspect.getsource(router_module.CognitiveRouter._semantic_target_provider)

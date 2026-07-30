@@ -1,7 +1,7 @@
 """Game Updater Toolkit — Steam & Epic Games Launcher integration.
 
-Allows OmniCore to manage game updates via the SteamCMD CLI and the
-Epic Games Launcher.  Inspired by the Mark-XXXV ``game_updater`` function.
+Allows OmniCore to manage game updates via Steam and Epic Games Launcher.
+Inspired by the Mark-XXXV ``game_updater`` function.
 
 Safe Defaults:
   - Never performs destructive uninstalls without explicit parameters.
@@ -12,6 +12,7 @@ Safe Defaults:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -29,11 +30,12 @@ _STEAM_PATHS = [
     Path(os.path.expandvars("%ProgramFiles(x86)%/Steam")),
 ]
 
-# Common Epic Games launcher executable paths
+# Common Epic Games launcher executable & manifest paths
 _EPIC_PATHS = [
     Path("C:/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe"),
     Path("C:/Program Files/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe"),
 ]
+_EPIC_MANIFEST_DIR = Path("C:/ProgramData/Epic/EpicGamesLauncher/Data/Manifests")
 
 
 def _find_steam_path() -> Path | None:
@@ -50,18 +52,39 @@ def _find_steamcmd() -> Path | None:
         candidate = steam_root / "steamcmd.exe"
         if candidate.exists():
             return candidate
-    # Check standalone SteamCMD
     standalone = Path("C:/SteamCMD/steamcmd.exe")
     if standalone.exists():
         return standalone
     return None
 
 
+def _find_steam_library_folders(steam_root: Path) -> list[Path]:
+    """Discover all Steam library folders via libraryfolders.vdf."""
+    libraries = [steam_root / "steamapps"]
+    vdf_path = steam_root / "steamapps" / "libraryfolders.vdf"
+    if not vdf_path.exists():
+        return libraries
+
+    try:
+        content = vdf_path.read_text(encoding="utf-8", errors="ignore")
+        for line in content.splitlines():
+            line = line.strip()
+            if '"path"' in line.lower():
+                parts = line.split('"')
+                if len(parts) >= 4:
+                    folder = Path(parts[3]) / "steamapps"
+                    if folder.exists() and folder not in libraries:
+                        libraries.append(folder)
+    except Exception:
+        pass
+    return libraries
+
+
 class GameUpdater(BaseTool):
     """Manage Steam and Epic Games updates.
 
     Actions:
-    - ``list``            — List installed Steam games (from Steam library)
+    - ``list``            — List installed Steam & Epic Games
     - ``update``          — Force update a Steam game by AppID or name
     - ``install``         — Install a Steam game by AppID
     - ``steam_status``    — Check if Steam is running
@@ -71,8 +94,8 @@ class GameUpdater(BaseTool):
 
     name = "game_updater"
     description = (
-        "Manage Steam and Epic Games: list installed games, trigger updates, "
-        "install games by AppID, check download status, or launch Epic Games. "
+        "Manage Steam and Epic Games: list installed games across drives, trigger updates, "
+        "install games by AppID, check download status, or launch Epic Games Launcher. "
         "Parameters: action (list|update|install|steam_status|epic_launch|download_status), "
         "app_id (Steam AppID for update/install), game_name (partial name for update)."
     )
@@ -92,7 +115,7 @@ class GameUpdater(BaseTool):
         if action == "steam_status":
             return await self._steam_status()
         if action == "list":
-            return await self._list_steam_games()
+            return await self._list_games()
         if action == "epic_launch":
             return await self._launch_epic()
         if action == "download_status":
@@ -112,16 +135,16 @@ class GameUpdater(BaseTool):
         )
 
     async def _steam_status(self) -> ToolOutput:
-        """Check if Steam process is running."""
+        """Check if Steam process is running without blocking async thread."""
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    ["tasklist", "/FI", "IMAGENAME eq steam.exe", "/NH"],
-                    capture_output=True, text=True, timeout=10,
-                ),
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["tasklist", "/FI", "IMAGENAME eq steam.exe", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
-            running = "steam.exe" in result.stdout.lower()
+            running = "steam.exe" in (result.stdout or "").lower()
             steam_path = _find_steam_path()
             return self._success(
                 f"Steam {'çalışıyor ✅' if running else 'çalışmıyor ❌'}",
@@ -134,61 +157,104 @@ class GameUpdater(BaseTool):
         except Exception as exc:
             return self._failure(f"Steam durumu kontrol hatası: {exc}")
 
-    async def _list_steam_games(self) -> ToolOutput:
-        """List Steam libraries and installed game folders."""
+    async def _list_games(self) -> ToolOutput:
+        """List Steam libraries and installed Epic Games."""
+        steam_games = await asyncio.to_thread(self._scan_steam_games)
+        epic_games = await asyncio.to_thread(self._scan_epic_games)
+
+        all_games = steam_games + epic_games
+        all_games.sort(key=lambda g: g["name"].lower())
+
+        summary_lines = [
+            f"• [{g['platform'].upper()}] {g['name']} (ID: {g.get('app_id', '?')})"
+            for g in all_games[:40]
+        ]
+        summary = (
+            f"Toplam {len(all_games)} oyun bulundu "
+            f"(Steam: {len(steam_games)}, Epic: {len(epic_games)}):\n" + "\n".join(summary_lines)
+        )
+        if len(all_games) > 40:
+            summary += f"\n... ve {len(all_games) - 40} oyun daha."
+
+        return self._success(
+            summary,
+            data={
+                "games": all_games,
+                "steam_count": len(steam_games),
+                "epic_count": len(epic_games),
+                "total": len(all_games),
+            },
+        )
+
+    def _scan_steam_games(self) -> list[dict]:
         steam_path = _find_steam_path()
         if not steam_path:
-            return self._failure(
-                "Steam kurulum dizini bulunamadı. "
-                "Lütfen Steam'in yüklü olduğundan emin olun."
-            )
+            return []
 
-        steamapps = steam_path / "steamapps"
-        if not steamapps.exists():
-            return self._failure(f"steamapps dizini bulunamadı: {steamapps}")
-
-        acf_files = list(steamapps.glob("appmanifest_*.acf"))
+        libraries = _find_steam_library_folders(steam_path)
         games: list[dict] = []
-        for acf in acf_files:
+        seen_appids: set[str] = set()
+
+        for lib in libraries:
+            if not lib.exists():
+                continue
+            for acf in lib.glob("appmanifest_*.acf"):
+                try:
+                    content = acf.read_text(encoding="utf-8", errors="ignore")
+                    name_match = None
+                    appid_match = None
+                    for line in content.splitlines():
+                        line = line.strip()
+                        if '"name"' in line.lower():
+                            parts = line.split('"')
+                            if len(parts) >= 4:
+                                name_match = parts[3]
+                        if '"appid"' in line.lower():
+                            parts = line.split('"')
+                            if len(parts) >= 4:
+                                appid_match = parts[3]
+                    if name_match and appid_match and appid_match not in seen_appids:
+                        seen_appids.add(appid_match)
+                        games.append({
+                            "platform": "steam",
+                            "name": name_match,
+                            "app_id": appid_match,
+                            "manifest": acf.name,
+                        })
+                except Exception:
+                    continue
+        return games
+
+    def _scan_epic_games(self) -> list[dict]:
+        games: list[dict] = []
+        if not _EPIC_MANIFEST_DIR.exists():
+            return games
+
+        for item_file in _EPIC_MANIFEST_DIR.glob("*.item"):
             try:
-                content = acf.read_text(encoding="utf-8", errors="ignore")
-                name_match = None
-                appid_match = None
-                for line in content.splitlines():
-                    line = line.strip()
-                    if '"name"' in line.lower():
-                        parts = line.split('"')
-                        if len(parts) >= 4:
-                            name_match = parts[3]
-                    if '"appid"' in line.lower():
-                        parts = line.split('"')
-                        if len(parts) >= 4:
-                            appid_match = parts[3]
-                if name_match:
-                    games.append({"name": name_match, "app_id": appid_match or "?"})
+                data = json.loads(item_file.read_text(encoding="utf-8", errors="ignore"))
+                display_name = data.get("DisplayName")
+                app_name = data.get("AppName")
+                if display_name:
+                    games.append({
+                        "platform": "epic",
+                        "name": display_name,
+                        "app_id": app_name or item_file.stem,
+                        "install_location": data.get("InstallLocation", ""),
+                    })
             except Exception:
                 continue
-
-        games.sort(key=lambda g: g["name"].lower())
-        summary_lines = [f"• {g['name']} (AppID: {g['app_id']})" for g in games[:30]]
-        summary = f"{len(games)} oyun bulundu:\n" + "\n".join(summary_lines)
-        if len(games) > 30:
-            summary += f"\n... ve {len(games) - 30} oyun daha."
-        return self._success(summary, data={"games": games, "count": len(games)})
+        return games
 
     async def _update_game(self, app_id: str, game_name: str) -> ToolOutput:
         """Trigger Steam to update a game via Steam protocol URL."""
-        steamcmd = _find_steamcmd()
-        steam_path = _find_steam_path()
-
         if not app_id and game_name:
-            # Try to find AppID from installed games
-            list_result = await self._list_steam_games()
+            list_result = await self._list_games()
             if list_result.status.value == "success":
                 games = list_result.data.get("games", [])
                 matches = [
                     g for g in games
-                    if game_name.lower() in g["name"].lower()
+                    if game_name.lower() in g["name"].lower() and g.get("platform") == "steam"
                 ]
                 if matches:
                     app_id = matches[0]["app_id"]
@@ -196,19 +262,16 @@ class GameUpdater(BaseTool):
 
         if not app_id:
             return self._failure(
-                f"'{game_name}' için AppID bulunamadı. "
+                f"'{game_name}' için Steam AppID bulunamadı. "
                 "Lütfen 'app_id' parametresini manuel olarak girin."
             )
 
-        # Launch Steam with update URL (works even if SteamCMD not available)
         update_url = f"steam://run/{app_id}"
         try:
-            await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: subprocess.Popen(
-                    ["cmd", "/c", "start", "", update_url],
-                    shell=True,
-                ),
+            await asyncio.to_thread(
+                subprocess.Popen,
+                ["cmd", "/c", "start", "", update_url],
+                shell=True,
             )
             return self._success(
                 f"Steam güncelleme başlatıldı: AppID={app_id}" +
@@ -222,12 +285,10 @@ class GameUpdater(BaseTool):
         """Install a Steam game by AppID via Steam store URL."""
         install_url = f"steam://install/{app_id}"
         try:
-            await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: subprocess.Popen(
-                    ["cmd", "/c", "start", "", install_url],
-                    shell=True,
-                ),
+            await asyncio.to_thread(
+                subprocess.Popen,
+                ["cmd", "/c", "start", "", install_url],
+                shell=True,
             )
             return self._success(
                 f"Steam kurulum başlatıldı: AppID={app_id}. "
@@ -240,16 +301,16 @@ class GameUpdater(BaseTool):
     async def _download_status(self) -> ToolOutput:
         """Check active Steam download status via powershell process list."""
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    [
-                        "powershell", "-NoProfile", "-Command",
-                        "Get-Process | Where-Object {$_.Name -like '*steam*'} "
-                        "| Select-Object Name,CPU,WorkingSet | ConvertTo-Json"
-                    ],
-                    capture_output=True, text=True, timeout=15,
-                ),
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [
+                    "powershell", "-NoProfile", "-Command",
+                    "Get-Process | Where-Object {$_.Name -like '*steam*'} "
+                    "| Select-Object Name,CPU,WorkingSet | ConvertTo-Json"
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             info = (result.stdout or "").strip() or "Steam süreci bilgisi alınamadı."
             return self._success(
@@ -260,11 +321,11 @@ class GameUpdater(BaseTool):
             return self._failure(f"Süreç bilgisi alınamadı: {exc}")
 
     async def _launch_epic(self) -> ToolOutput:
-        """Launch Epic Games Launcher."""
+        """Launch Epic Games Launcher without blocking event loop thread."""
         for epic_path in _EPIC_PATHS:
             if epic_path.exists():
                 try:
-                    subprocess.Popen([str(epic_path)])
+                    await asyncio.to_thread(subprocess.Popen, [str(epic_path)])
                     return self._success(
                         "Epic Games Launcher başlatıldı.",
                         data={"path": str(epic_path)},
@@ -272,9 +333,13 @@ class GameUpdater(BaseTool):
                 except Exception as exc:
                     return self._failure(f"Epic başlatma hatası: {exc}")
 
-        # Try via Windows protocol
+        # Fallback to protocol URL
         try:
-            subprocess.Popen(["cmd", "/c", "start", "", "com.epicgames.launcher://"], shell=True)
+            await asyncio.to_thread(
+                subprocess.Popen,
+                ["cmd", "/c", "start", "", "com.epicgames.launcher://"],
+                shell=True,
+            )
             return self._success(
                 "Epic Games Launcher protokol URL ile başlatıldı.",
                 data={"method": "protocol_url"},

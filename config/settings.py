@@ -15,24 +15,39 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Only models that are currently live and widely accessible are listed.
 # ---------------------------------------------------------------------------
 AVAILABLE_GROQ_MODELS: list[dict[str, str]] = [
-    {"id": "llama-3.1-8b-instant",    "name": "Llama 3.1 8B Instant",    "context": "128k", "speed": "fastest"},
-    {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B Versatile", "context": "128k", "speed": "fast"},
-    {"id": "llama-3.1-70b-versatile", "name": "Llama 3.1 70B Versatile", "context": "128k", "speed": "fast"},
-    {"id": "mixtral-8x7b-32768",      "name": "Mixtral 8x7B",            "context": "32k",  "speed": "fast"},
-    {"id": "gemma2-9b-it",            "name": "Gemma 2 9B IT",           "context": "8k",   "speed": "fast"},
-    {"id": "llama3-70b-8192",         "name": "Llama 3 70B",             "context": "8k",   "speed": "medium"},
-    {"id": "llama3-8b-8192",          "name": "Llama 3 8B",              "context": "8k",   "speed": "fastest"},
+    {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B", "context": "128k", "speed": "fastest"},
+    {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "context": "128k", "speed": "fast"},
+    {"id": "llama-3.1-70b-versatile", "name": "Llama 3.1 70B", "context": "128k", "speed": "fast"},
+    {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B", "context": "32k", "speed": "fast"},
+    {"id": "gemma2-9b-it", "name": "Gemma 2 9B IT", "context": "8k", "speed": "fast"},
+    {"id": "llama3-70b-8192", "name": "Llama 3 70B", "context": "8k", "speed": "medium"},
+    {"id": "llama3-8b-8192", "name": "Llama 3 8B", "context": "8k", "speed": "fastest"},
 ]
 
 AVAILABLE_GEMINI_MODELS: list[dict[str, str]] = [
-    {"id": "gemini-2.0-flash",         "name": "Gemini 2.0 Flash",         "context": "1M",   "speed": "fastest"},
-    {"id": "gemini-2.0-flash-lite",    "name": "Gemini 2.0 Flash Lite",    "context": "1M",   "speed": "fastest"},
-    {"id": "gemini-2.5-flash",         "name": "Gemini 2.5 Flash",         "context": "1M",   "speed": "fast"},
-    {"id": "gemini-2.5-flash-preview-05-20", "name": "Gemini 2.5 Flash Preview", "context": "1M", "speed": "fast"},
-    {"id": "gemini-2.5-pro",           "name": "Gemini 2.5 Pro",           "context": "1M",   "speed": "medium"},
-    {"id": "gemini-2.5-pro-preview-06-05", "name": "Gemini 2.5 Pro Preview", "context": "1M", "speed": "medium"},
-    {"id": "gemini-1.5-pro",           "name": "Gemini 1.5 Pro (Legacy)",  "context": "2M",   "speed": "medium"},
-    {"id": "gemini-1.5-flash",         "name": "Gemini 1.5 Flash (Legacy)", "context": "1M",  "speed": "fast"},
+    {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "context": "1M", "speed": "fastest"},
+    {
+        "id": "gemini-2.0-flash-lite",
+        "name": "Gemini 2.0 Flash Lite",
+        "context": "1M",
+        "speed": "fastest",
+    },
+    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "context": "1M", "speed": "fast"},
+    {
+        "id": "gemini-2.5-flash-preview-05-20",
+        "name": "Gemini 2.5 Flash Prev",
+        "context": "1M",
+        "speed": "fast",
+    },
+    {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "context": "1M", "speed": "medium"},
+    {
+        "id": "gemini-2.5-pro-preview-06-05",
+        "name": "Gemini 2.5 Pro Prev",
+        "context": "1M",
+        "speed": "medium",
+    },
+    {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro Legacy", "context": "2M", "speed": "medium"},
+    {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash Legacy", "context": "1M", "speed": "fast"},
 ]
 
 AVAILABLE_PROVIDERS: dict[str, list[dict[str, str]]] = {
