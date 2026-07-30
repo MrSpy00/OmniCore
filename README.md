@@ -1,20 +1,25 @@
-# OmniCore v0.39.0 — Multi-Agent Federation, Duplex Voice & Cyberpunk HUD
+# OmniCore v0.40.0 — The Sovereign Enterprise AI OS
 
 ![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
-![Build Status](https://img.shields.io/badge/Tests-136%20Passed-brightgreen.svg)
+![Build Status](https://img.shields.io/badge/Tests-141%20Passed-brightgreen.svg)
 ![Async Hygiene](https://img.shields.io/badge/Async%20Audit-0%20Issues-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-black.svg)
 
-**OmniCore** is a production-grade, enterprise-ready autonomous cognitive OS assistant framework. It bridges local system administration, multi-agent subagent swarms, cyberpunk terminal HUD telemetry, real-time duplex voice streaming, security audit toolkits, self-improving skill creation, knowledge graph memory (GraphRAG), continuous background daemons, local Ollama offline fallback, kernel privilege triage, multi-drive file search, Steam/Epic game engine updating, web/GUI automation, and multi-provider LLM orchestration (Gemini, Groq & Ollama).
+**OmniCore** is a production-grade, enterprise-ready autonomous cognitive OS assistant framework. It bridges local system administration, Model Context Protocol (MCP) server integration, self-healing code refactoring, universal database exploration, headless browser automation, hardware telemetry inspection, multi-agent subagent swarms, cyberpunk terminal HUD telemetry, real-time duplex voice streaming, security audit toolkits, self-improving skill creation, knowledge graph memory (GraphRAG), continuous background daemons, local Ollama offline fallback, kernel privilege triage, multi-drive file search, Steam/Epic game engine updating, web/GUI automation, and multi-provider LLM orchestration (Gemini, Groq & Ollama).
 
 ---
 
 ## 🌟 English Overview
 
-OmniCore combines **User-Facing Capabilities** (voice loop, EdgeTTS speech, PyAudio listening, Steam & Epic launcher management, 2-stage categorized memory, Self-Improving Skill Curator, Cyberpunk Terminal Telemetry HUD) with **Kernel & OS Dominance Layer** (Multi-Agent Swarm Protocol, Security Audit & Red Team Toolkit, Knowledge Graph Memory, Continuous Background Event Daemons, Offline Ollama Fallback, NTFS `$MFT` / Everything `es.exe` instant file search, privilege triage via `whoami /priv` & `id`, LOLBins execution safety, and 4-tier risk governance).
+OmniCore combines **User-Facing Capabilities** (voice loop, EdgeTTS speech, PyAudio listening, Steam & Epic launcher management, 2-stage categorized memory, Self-Improving Skill Curator, Cyberpunk Terminal Telemetry HUD) with **Kernel & OS Dominance Layer** (Enterprise MCP Server Gateway, Self-Healing Code Refactorer, Universal Database Explorer, Headless Browser Automation, Hardware & Thermal Telemetry, Multi-Agent Swarm Protocol, Security Audit & Red Team Toolkit, Knowledge Graph Memory, Continuous Background Event Daemons, Offline Ollama Fallback, NTFS `$MFT` / Everything `es.exe` instant file search, privilege triage via `whoami /priv` & `id`, LOLBins execution safety, and 4-tier risk governance).
 
 ### Key Features
 
+- 🔌 **Enterprise MCP Gateway**: Expose OmniCore's 45+ toolkits to external tools and IDEs (Claude Desktop, Zed, Cursor, VS Code) via JSON-RPC 2.0 (`interfaces/mcp_gateway.py`).
+- 🛠️ **Self-Healing Code Refactorer**: AST Python code complexity analysis (`refactor_analyze_file`) and automated unified diff patch generation (`refactor_generate_patch`).
+- 🗄️ **Universal Database Explorer**: Introspect SQLite database schemas, columns, and data types (`db_inspect_schema`) and execute safe SQL queries (`db_query_execute`).
+- 🌐 **Headless Browser Automation**: Fetch web page content with clean text extraction (`browser_fetch_page`) and take screen captures (`browser_take_screenshot`).
+- 💻 **Hardware Telemetry Inspector**: Real-time CPU, GPU VRAM utilization, battery status, thermal sensors, and disk I/O metrics inspection (`hardware_inspect_telemetry`).
 - 🐝 **Multi-Agent Subagent Swarm Protocol**: Spawn specialized, parallel background subagents (`swarm_spawn_agent`, `swarm_list_agents`, `swarm_collect_results`) that execute tasks concurrently and aggregate findings.
 - 🎛️ **Cyberpunk Terminal Telemetry HUD**: Interactive CLI telemetry dashboard (`interfaces/hud.py`) displaying live LLM routes, graph node metrics, active daemons, CPU/RAM bars, and tool usage.
 - 🎙️ **Real-Time Duplex Voice Engine**: Low-latency WebSocket streaming audio engine (`interfaces/voice_duplex.py`) for instantaneous conversational interactions.
