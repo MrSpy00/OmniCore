@@ -53,7 +53,18 @@ class CLIGateway:
             if user_input.lower() in ("quit", "exit", "q"):
                 print("Goodbye.")
                 break
-            if user_input.lower() in ("/plan", "/doctor", "/memory", "/commit"):
+            if user_input.lower() == "/hud":
+                from interfaces.hud import generate_cyberpunk_hud_panel
+
+                tools_cnt = (
+                    len(self._router._registry)
+                    if hasattr(self._router, "_registry")
+                    else 40
+                )
+                mem_nodes = getattr(self._router._long_term, "count", lambda: 0)()
+                print(generate_cyberpunk_hud_panel(tools_count=tools_cnt, memory_nodes=mem_nodes))
+                continue
+            if user_input.startswith("/"):
                 msg = Message(
                     role=MessageRole.USER,
                     content=user_input,
@@ -69,10 +80,6 @@ class CLIGateway:
                 continue
             if user_input.lower().startswith(".omnicore approve"):
                 await self._handle_approval_toggle(user_input)
-                continue
-            if user_input.lower() == "/clear":
-                self._router._short_term.clear(conversation_id)
-                print("[System] Conversation cleared.")
                 continue
 
             msg = Message(

@@ -121,15 +121,26 @@ OMNI_LLM_MODEL=gemini-2.5-pro
 
 ### 3. Launching / Çalıştırma
 
+OmniCore supports 6 execution modes:
+
 ```bash
-# Interactive CLI Gateway
-python -m scripts.run --cli
+# 1. Interactive CLI Gateway (Default)
+python -m scripts.run --mode cli
 
-# Telegram Gateway
-python -m scripts.run --telegram
+# 2. Cyberpunk Telemetry HUD Gateway
+python -m scripts.run --mode hud
 
-# REST API Gateway
-python -m scripts.run --rest
+# 3. Telegram Bot Gateway
+python -m scripts.run --mode telegram
+
+# 4. REST API Gateway (FastAPI / Uvicorn on http://localhost:8000)
+python -m scripts.run --mode rest
+
+# 5. Enterprise MCP Server Gateway (JSON-RPC 2.0 via stdio)
+python -m scripts.run --mode mcp
+
+# 6. Real-Time Duplex Voice Engine Gateway
+python -m scripts.run --mode voice
 ```
 
 ---
@@ -144,6 +155,7 @@ python -m scripts.run --rest
 | `/models` | List all available Gemini & Groq models and active configuration. |
 | `/setmodel <id>` | Dynamically switch LLM model (e.g. `/setmodel gemini-2.5-pro`). |
 | `/reset` | Clear current short-term conversation context. |
+| `/hud` | Display Cyberpunk Telemetry HUD status panel. |
 
 ---
 

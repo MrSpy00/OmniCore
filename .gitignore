@@ -104,3 +104,9 @@ omnicore_packet_capture.txt
 
 # --- APScheduler SQLite job store ---
 apscheduler.db
+
+# --- Workspace generated runtime caches ---
+workspace/skills/__pycache__/
+workspace/data/
+workspace/*.tmp
+

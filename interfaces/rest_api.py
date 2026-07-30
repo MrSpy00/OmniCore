@@ -50,7 +50,7 @@ def create_app(router: CognitiveRouter) -> Any:
 
     app = FastAPI(
         title="OmniCore API",
-        version="0.1.0",
+        version="0.40.0",
         description="HTTP gateway for the OmniCore AI assistant.",
     )
 

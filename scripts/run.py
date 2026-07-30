@@ -105,6 +105,63 @@ async def _run(mode: str) -> None:
             logger.info("omnicore.gateway", type="cli")
             await gateway.run()
 
+        elif mode == "rest":
+            import uvicorn
+
+            from interfaces.rest_api import create_app
+
+            app = create_app(router)
+            config = uvicorn.Config(app=app, host="0.0.0.0", port=8000, log_level="info")
+            server = uvicorn.Server(config)
+            logger.info("omnicore.gateway", type="rest", port=8000)
+            await server.serve()
+
+        elif mode == "mcp":
+            from interfaces.mcp_gateway import MCPServerGateway
+
+            gateway = MCPServerGateway()
+            logger.info("omnicore.gateway", type="mcp")
+            print("[OmniCore MCP Gateway v0.40.0] Listening on stdio JSON-RPC 2.0...", flush=True)
+            while True:
+                line = await asyncio.to_thread(sys.stdin.readline)
+                if not line:
+                    break
+                resp = await gateway.handle_request_json(line)
+                print(resp, flush=True)
+
+        elif mode == "hud":
+            from interfaces.cli import CLIGateway, cli_approval_callback
+            from interfaces.hud import generate_cyberpunk_hud_panel
+
+            logger.info("omnicore.gateway", type="hud")
+            print(
+                generate_cyberpunk_hud_panel(
+                    router_provider=getattr(settings, "llm_provider", "gemini"),
+                    memory_nodes=0,
+                    active_daemons=1,
+                    tools_count=len(tool_registry),
+                )
+            )
+            router._guardian._callback = cli_approval_callback
+            gateway = CLIGateway(router)
+            await gateway.run()
+
+        elif mode == "voice":
+            from interfaces.voice_duplex import DuplexVoiceEngine
+
+            logger.info("omnicore.gateway", type="voice")
+            engine = DuplexVoiceEngine()
+            await engine.start_session()
+            print(
+                "[OmniCore Duplex Voice Engine v0.40.0] Session active. Press Ctrl+C to stop.",
+                flush=True,
+            )
+            try:
+                while engine.is_streaming:
+                    await asyncio.sleep(1)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                await engine.stop_session()
+
         else:
             print(f"Unknown mode: {mode}")
             sys.exit(1)
@@ -118,10 +175,10 @@ async def _run(mode: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="OmniCore AI Assistant")
+    parser = argparse.ArgumentParser(description="OmniCore AI OS Assistant v0.40.0")
     parser.add_argument(
         "--mode",
-        choices=["telegram", "cli"],
+        choices=["cli", "telegram", "rest", "mcp", "hud", "voice"],
         default="cli",
         help="Which gateway interface to launch (default: cli)",
     )

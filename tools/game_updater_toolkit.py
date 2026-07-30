@@ -14,8 +14,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
+
+try:
+    import winreg
+except ImportError:
+    winreg = None  # type: ignore
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
@@ -27,6 +33,10 @@ _RUNTIME = runtime_adapter()
 _STEAM_PATHS = [
     Path("C:/Program Files (x86)/Steam"),
     Path("C:/Program Files/Steam"),
+    Path("C:/Steam"),
+    Path("D:/Steam"),
+    Path("E:/Steam"),
+    Path("F:/Steam"),
     Path(os.path.expandvars("%ProgramFiles(x86)%/Steam")),
 ]
 
@@ -34,12 +44,56 @@ _STEAM_PATHS = [
 _EPIC_PATHS = [
     Path("C:/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe"),
     Path("C:/Program Files/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe"),
+    Path("D:/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe"),
 ]
 _EPIC_MANIFEST_DIR = Path("C:/ProgramData/Epic/EpicGamesLauncher/Data/Manifests")
 
 
 def _find_steam_path() -> Path | None:
+    """Find Steam installation path via registry keys or fallback directories."""
+    if winreg is not None:
+        registry_keys = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Valve\Steam"),
+        ]
+        for hive, key_path in registry_keys:
+            try:
+                key = winreg.OpenKey(hive, key_path)
+                val, _ = winreg.QueryValueEx(key, "InstallPath")
+                winreg.CloseKey(key)
+                p = Path(val)
+                if p.exists() and (p / "steam.exe").exists():
+                    return p
+            except Exception:
+                continue
+
     for p in _STEAM_PATHS:
+        if p.exists() and (p / "steam.exe").exists():
+            return p
+    return None
+
+
+def _find_epic_path() -> Path | None:
+    """Find Epic Games Launcher path via registry or fallback directories."""
+    if winreg is not None:
+        registry_keys = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\EpicGames\EpicGamesLauncher"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\EpicGames\EpicGamesLauncher"),
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\EpicGames\EpicGamesLauncher"),
+        ]
+        for hive, key_path in registry_keys:
+            try:
+                key = winreg.OpenKey(hive, key_path)
+                val, _ = winreg.QueryValueEx(key, "AppDataPath")
+                winreg.CloseKey(key)
+                exe = Path(val) / "Binaries" / "Win64" / "EpicGamesLauncher.exe"
+                if exe.exists():
+                    return exe
+            except Exception:
+                continue
+
+    for p in _EPIC_PATHS:
         if p.exists():
             return p
     return None
@@ -67,14 +121,10 @@ def _find_steam_library_folders(steam_root: Path) -> list[Path]:
 
     try:
         content = vdf_path.read_text(encoding="utf-8", errors="ignore")
-        for line in content.splitlines():
-            line = line.strip()
-            if '"path"' in line.lower():
-                parts = line.split('"')
-                if len(parts) >= 4:
-                    folder = Path(parts[3]) / "steamapps"
-                    if folder.exists() and folder not in libraries:
-                        libraries.append(folder)
+        for raw_path in re.findall(r'"path"\s+"([^"]+)"', content, re.IGNORECASE):
+            folder = Path(raw_path.replace("\\\\", "/")) / "steamapps"
+            if folder.exists() and folder not in libraries:
+                libraries.append(folder)
     except Exception:
         pass
     return libraries
@@ -201,26 +251,23 @@ class GameUpdater(BaseTool):
             for acf in lib.glob("appmanifest_*.acf"):
                 try:
                     content = acf.read_text(encoding="utf-8", errors="ignore")
-                    name_match = None
-                    appid_match = None
-                    for line in content.splitlines():
-                        line = line.strip()
-                        if '"name"' in line.lower():
-                            parts = line.split('"')
-                            if len(parts) >= 4:
-                                name_match = parts[3]
-                        if '"appid"' in line.lower():
-                            parts = line.split('"')
-                            if len(parts) >= 4:
-                                appid_match = parts[3]
-                    if name_match and appid_match and appid_match not in seen_appids:
-                        seen_appids.add(appid_match)
-                        games.append({
-                            "platform": "steam",
-                            "name": name_match,
-                            "app_id": appid_match,
-                            "manifest": acf.name,
-                        })
+                    appid_m = re.search(r'"appid"\s+"(\d+)"', content, re.IGNORECASE)
+                    name_m = re.search(r'"name"\s+"([^"]+)"', content, re.IGNORECASE)
+                    state_m = re.search(r'"StateFlags"\s+"(\d+)"', content, re.IGNORECASE)
+                    size_m = re.search(r'"SizeOnDisk"\s+"(\d+)"', content, re.IGNORECASE)
+
+                    if appid_m and name_m:
+                        appid = appid_m.group(1)
+                        if appid not in seen_appids:
+                            seen_appids.add(appid)
+                            games.append({
+                                "platform": "steam",
+                                "name": name_m.group(1),
+                                "app_id": appid,
+                                "state": int(state_m.group(1)) if state_m else 0,
+                                "size_bytes": int(size_m.group(1)) if size_m else 0,
+                                "manifest": acf.name,
+                            })
                 except Exception:
                     continue
         return games

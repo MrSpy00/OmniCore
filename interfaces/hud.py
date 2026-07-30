@@ -20,7 +20,7 @@ def generate_cyberpunk_hud_panel(
 
     lines = [
         " ┌────────────────────────────────────────────────────────┐",
-        " │ ⚡ OMNICORE CYBERPUNK TELEMETRY HUD v0.39.0             │",
+        " │ ⚡ OMNICORE CYBERPUNK TELEMETRY HUD v0.40.0             │",
         " ├────────────────────────────────────────────────────────┤",
         f" │ 🤖 ROUTER: [{router_provider.upper():<8}]  🛠️ TOOLS: {tools_count:<3}           │",
         f" │ 🕸️ GRAPH: [{memory_nodes} nodes]  🔄 DAEMONS: {active_daemons:<3}         │",
