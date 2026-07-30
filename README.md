@@ -1,20 +1,25 @@
-# OmniCore v0.38.0 — The Agentic OS Evolution
+# OmniCore v0.39.0 — Multi-Agent Federation, Duplex Voice & Cyberpunk HUD
 
 ![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
-![Build Status](https://img.shields.io/badge/Tests-131%20Passed-brightgreen.svg)
+![Build Status](https://img.shields.io/badge/Tests-136%20Passed-brightgreen.svg)
 ![Async Hygiene](https://img.shields.io/badge/Async%20Audit-0%20Issues-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-black.svg)
 
-**OmniCore** is a production-grade, enterprise-ready autonomous cognitive OS assistant framework. It bridges local system administration, self-improving skill creation, knowledge graph memory (GraphRAG), continuous background daemons, local Ollama offline fallback, kernel privilege triage, multi-drive file search, real-time voice synthesis, Steam/Epic game engine updating, web/GUI automation, and multi-provider LLM orchestration (Gemini, Groq & Ollama).
+**OmniCore** is a production-grade, enterprise-ready autonomous cognitive OS assistant framework. It bridges local system administration, multi-agent subagent swarms, cyberpunk terminal HUD telemetry, real-time duplex voice streaming, security audit toolkits, self-improving skill creation, knowledge graph memory (GraphRAG), continuous background daemons, local Ollama offline fallback, kernel privilege triage, multi-drive file search, Steam/Epic game engine updating, web/GUI automation, and multi-provider LLM orchestration (Gemini, Groq & Ollama).
 
 ---
 
 ## 🌟 English Overview
 
-OmniCore combines **User-Facing Capabilities** (voice loop, EdgeTTS speech, PyAudio listening, Steam & Epic launcher management, 2-stage categorized memory, Self-Improving Skill Curator) with **Kernel & OS Dominance Layer** (Knowledge Graph Memory, Continuous Background Event Daemons, Offline Ollama Fallback, NTFS `$MFT` / Everything `es.exe` instant file search, privilege triage via `whoami /priv` & `id`, LOLBins execution safety, and 4-tier risk governance).
+OmniCore combines **User-Facing Capabilities** (voice loop, EdgeTTS speech, PyAudio listening, Steam & Epic launcher management, 2-stage categorized memory, Self-Improving Skill Curator, Cyberpunk Terminal Telemetry HUD) with **Kernel & OS Dominance Layer** (Multi-Agent Swarm Protocol, Security Audit & Red Team Toolkit, Knowledge Graph Memory, Continuous Background Event Daemons, Offline Ollama Fallback, NTFS `$MFT` / Everything `es.exe` instant file search, privilege triage via `whoami /priv` & `id`, LOLBins execution safety, and 4-tier risk governance).
 
 ### Key Features
 
+- 🐝 **Multi-Agent Subagent Swarm Protocol**: Spawn specialized, parallel background subagents (`swarm_spawn_agent`, `swarm_list_agents`, `swarm_collect_results`) that execute tasks concurrently and aggregate findings.
+- 🎛️ **Cyberpunk Terminal Telemetry HUD**: Interactive CLI telemetry dashboard (`interfaces/hud.py`) displaying live LLM routes, graph node metrics, active daemons, CPU/RAM bars, and tool usage.
+- 🎙️ **Real-Time Duplex Voice Engine**: Low-latency WebSocket streaming audio engine (`interfaces/voice_duplex.py`) for instantaneous conversational interactions.
+- 🛡️ **Security Audit & Red Team Toolkit**: Asynchronous port scanning (`security_port_scan`), system security posture audit (`security_audit_system`), and CVE advisory lookups (`security_cve_lookup`).
+- 🌐 **Unified OS Platform Adapter**: Cross-platform system abstraction layer (`core/platform_adapter.py`) unifying Windows PowerShell/Win32 APIs, Linux Bash/systemd, and macOS launchd.
 - 🧠 **Cognitive Router & Failover**: Automatic multi-provider failover (Gemini 2.0 Flash / Pro, Groq Llama 3.3 70B & Local Ollama offline fallback) with count-based circuit breaker and semantic tool pruning.
 - ⚡ **Self-Improving Skill Curator**: Synthesize new Python tool classes dynamically at runtime (`skill_create`, `skill_list`, `skill_execute`) saved to `workspace/skills/`.
 - 🕸️ **Knowledge Graph Memory Engine**: GraphRAG entity-relation memory store (`memory/graph_memory.py`) connecting entities (`User -> owns -> OmniCore -> uses -> ChromaDB`) for multi-hop reasoning.
