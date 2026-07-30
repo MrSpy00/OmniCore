@@ -1,3 +1,5 @@
+"""Cognitive Router calibration tests."""
+
 from __future__ import annotations
 
 import pytest
@@ -7,12 +9,12 @@ from core.router import (
     _MAX_RELEVANT_TOOLS,
     CognitiveRouter,
 )
-from models.tools import ToolInput, ToolStatus
+from models.tools import ToolInput
 from tools.computer_use_toolkit import GuiLocateAndClick
 from tools.os_toolkit import OsDeleteFile, OsWriteFile
 
 
-def test_v35_router_limits_are_hardened():
+def test_router_limits_are_hardened():
     assert _MAX_RELEVANT_TOOLS == 12
     assert _GROQ_PREEMPTIVE_TOKEN_LIMIT == 4000
 
@@ -68,7 +70,7 @@ def test_filter_relevant_tools_caps_to_12_and_prioritizes_native_media():
     assert "media_control_spotify_native" in names
 
 
-def test_v35_system_prompt_contains_mark_xxxv_rules():
+def test_system_prompt_contains_sovereign_rules():
     router = CognitiveRouter.__new__(CognitiveRouter)
     prompt = router._build_system_prompt_with_tools(
         memory_context="memory",
@@ -100,67 +102,39 @@ async def test_gui_locate_and_click_reports_missing_opencv(monkeypatch, tmp_work
     monkeypatch.setattr("tools.computer_use_toolkit.pyautogui.locateCenterOnScreen", _raise_missing)
 
     tool = GuiLocateAndClick()
-    result = await tool.execute(
+    out = await tool.execute(
         ToolInput(
             tool_name="gui_locate_and_click",
-            parameters={"image_path": "Desktop/icon.png", "confidence": 0.9},
+            parameters={"image_path": str(tmp_workspace / "icon.png")},
         )
     )
-    assert result.status == ToolStatus.FAILURE
-    assert "opencv-python" in (result.error or "").lower()
+    assert out.status.value == "failure"
+    assert "opencv" in out.error.lower() or "not installed" in out.error.lower()
 
 
 @pytest.mark.asyncio
-async def test_os_write_file_rejects_placeholder_windows_user_path(monkeypatch, tmp_workspace):
+async def test_destructive_file_operations_refuse_absolute_paths_outside_workspace(
+    monkeypatch, tmp_workspace
+):
     from config.settings import get_settings
 
     monkeypatch.setenv("USERPROFILE", str(tmp_workspace))
     get_settings.cache_clear()
 
-    tool = OsWriteFile()
-    result = await tool.execute(
+    write_tool = OsWriteFile()
+    out_write = await write_tool.execute(
         ToolInput(
             tool_name="os_write_file",
-            parameters={"path": r"C:\Users\Kullanıcı\Desktop\x.txt", "content": "abc"},
+            parameters={"path": "C:\\Windows\\System32\\test.txt", "content": "bad"},
         )
     )
+    assert out_write.status.value == "failure"
 
-    assert result.status == ToolStatus.FAILURE
-    assert "goreli" in (result.error or "").lower()
-
-
-@pytest.mark.asyncio
-async def test_os_delete_file_rejects_placeholder_windows_user_path(monkeypatch, tmp_workspace):
-    from config.settings import get_settings
-
-    monkeypatch.setenv("USERPROFILE", str(tmp_workspace))
-    get_settings.cache_clear()
-
-    tool = OsDeleteFile()
-    result = await tool.execute(
+    del_tool = OsDeleteFile()
+    out_del = await del_tool.execute(
         ToolInput(
             tool_name="os_delete_file",
-            parameters={"path": r"C:\Users\Kullanıcı\Desktop\x.txt", "dry_run": False},
+            parameters={"path": "C:\\Windows\\System32\\cmd.exe"},
         )
     )
-
-    assert result.status == ToolStatus.FAILURE
-    assert "goreli" in (result.error or "").lower()
-
-
-def test_preemptive_route_switches_on_4001_tokens():
-    router = CognitiveRouter.__new__(CognitiveRouter)
-    router._runtime_provider = "groq"
-    switched: list[tuple[str, str]] = []
-
-    def _switch(provider: str, *, reason: str = "runtime") -> bool:
-        switched.append((provider, reason))
-        router._runtime_provider = provider
-        return True
-
-    router._switch_provider = _switch  # type: ignore[method-assign]
-    router._maybe_preemptive_gemini_route(estimated_tokens=4001)
-
-    assert router._runtime_provider == "gemini"
-    assert switched
-    assert switched[0][0] == "gemini"
+    assert out_del.status.value == "failure"

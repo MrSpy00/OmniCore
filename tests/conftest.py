@@ -15,6 +15,8 @@ from tools.api_toolkit import ApiDatetime
 from tools.os_toolkit import OsListDir, OsReadFile, OsWriteFile
 from tools.registry import ToolRegistry
 
+pytest_plugins = ("pytest_asyncio",)
+
 
 # ---------------------------------------------------------------------------
 # Settings override — use temp dirs so tests don't touch real state.
