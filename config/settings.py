@@ -15,9 +15,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Only models that are currently live and widely accessible are listed.
 # ---------------------------------------------------------------------------
 AVAILABLE_GROQ_MODELS: list[dict[str, str]] = [
-    {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B", "context": "128k", "speed": "fastest"},
-    {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "context": "128k", "speed": "fast"},
-    {"id": "llama-3.1-70b-versatile", "name": "Llama 3.1 70B", "context": "128k", "speed": "fast"},
+    {"id": "openai/gpt-oss-20b", "name": "GPT OSS 20B", "context": "128k", "speed": "fastest"},
+    {"id": "openai/gpt-oss-120b", "name": "GPT OSS 120B", "context": "128k", "speed": "fast"},
     {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B", "context": "32k", "speed": "fast"},
     {"id": "gemma2-9b-it", "name": "Gemma 2 9B IT", "context": "8k", "speed": "fast"},
     {"id": "llama3-70b-8192", "name": "Llama 3 70B", "context": "8k", "speed": "medium"},
@@ -82,11 +81,11 @@ class Settings(BaseSettings):
     groq_api_key_1: str = ""
     groq_api_key_2: str = ""
     groq_api_key_3: str = ""
-    groq_primary_model: str = "llama-3.1-8b-instant"
-    groq_fallback_model_1: str = "llama-3.3-70b-versatile"
+    groq_primary_model: str = "openai/gpt-oss-20b"
+    groq_fallback_model_1: str = "openai/gpt-oss-120b"
     groq_fallback_model_2: str = "mixtral-8x7b-32768"
-    groq_llm_model: str = "llama-3.1-8b-instant"
-    groq_fallback_models: str = "llama-3.3-70b-versatile,mixtral-8x7b-32768"
+    groq_llm_model: str = "openai/gpt-oss-20b"
+    groq_fallback_models: str = "openai/gpt-oss-120b,mixtral-8x7b-32768"
     llm_temperature: float = 0.2
     llm_max_output_tokens: int = 4096
 
@@ -150,7 +149,7 @@ class Settings(BaseSettings):
                 chain.append(model_name)
 
         if not chain:
-            chain = ["llama-3.1-8b-instant"]
+            chain = ["openai/gpt-oss-20b"]
         return chain
 
     @property

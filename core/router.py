@@ -83,7 +83,7 @@ class _GroqModelRotator:
     """Thread-safe round-robin Groq model selector."""
 
     def __init__(self, models: list[str]) -> None:
-        self._models = [m for m in models if m] or ["llama-3.1-8b-instant"]
+        self._models = [m for m in models if m] or ["openai/gpt-oss-20b"]
         self._cycle = itertools.cycle(self._models)
         self._lock = threading.Lock()
         self._current: str = ""
@@ -362,11 +362,16 @@ class CognitiveRouter:
                 key_pool=len(api_keys),
                 model_pool=len(models),
             )
-            return ChatGroq(
-                model=active_model,
-                api_key=SecretStr(active_key) if active_key else None,
-                temperature=settings.llm_temperature,
-            )
+            groq_kwargs: dict[str, Any] = {
+                "model": active_model,
+                "api_key": SecretStr(active_key) if active_key else None,
+                "temperature": settings.llm_temperature,
+            }
+            if "gpt-oss-20b" in active_model:
+                groq_kwargs["reasoning_effort"] = "low"
+            elif "gpt-oss-120b" in active_model:
+                groq_kwargs["reasoning_effort"] = "medium"
+            return ChatGroq(**groq_kwargs)
         if normalized == "gemini":
             if self._google_key_rotator is None:
                 self._google_key_rotator = _ApiKeyRotator(settings.google_api_keys)
@@ -466,11 +471,16 @@ class CognitiveRouter:
 
     def _create_groq_client(self, api_key: str, model_name: str) -> Any:
         """Create a fresh ChatGroq instance for the given route."""
-        return ChatGroq(
-            model=model_name,
-            api_key=SecretStr(api_key) if api_key else None,
-            temperature=self._settings.llm_temperature,
-        )
+        groq_kwargs: dict[str, Any] = {
+            "model": model_name,
+            "api_key": SecretStr(api_key) if api_key else None,
+            "temperature": self._settings.llm_temperature,
+        }
+        if "gpt-oss-20b" in model_name:
+            groq_kwargs["reasoning_effort"] = "low"
+        elif "gpt-oss-120b" in model_name:
+            groq_kwargs["reasoning_effort"] = "medium"
+        return ChatGroq(**groq_kwargs)
 
     def _destroy_current_llm(self) -> None:
         """Release current LLM client reference before hard re-instantiation."""
