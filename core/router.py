@@ -362,6 +362,11 @@ class CognitiveRouter:
                 key_pool=len(api_keys),
                 model_pool=len(models),
             )
+            if active_model == "llama-3.1-8b-instant":
+                active_model = "openai/gpt-oss-20b"
+            elif active_model == "llama-3.3-70b-versatile":
+                active_model = "openai/gpt-oss-120b"
+
             groq_kwargs: dict[str, Any] = {
                 "model": active_model,
                 "api_key": SecretStr(active_key) if active_key else None,
@@ -471,14 +476,20 @@ class CognitiveRouter:
 
     def _create_groq_client(self, api_key: str, model_name: str) -> Any:
         """Create a fresh ChatGroq instance for the given route."""
+        effective_model = model_name
+        if effective_model == "llama-3.1-8b-instant":
+            effective_model = "openai/gpt-oss-20b"
+        elif effective_model == "llama-3.3-70b-versatile":
+            effective_model = "openai/gpt-oss-120b"
+
         groq_kwargs: dict[str, Any] = {
-            "model": model_name,
+            "model": effective_model,
             "api_key": SecretStr(api_key) if api_key else None,
             "temperature": self._settings.llm_temperature,
         }
-        if "gpt-oss-20b" in model_name:
+        if "gpt-oss-20b" in effective_model:
             groq_kwargs["reasoning_effort"] = "low"
-        elif "gpt-oss-120b" in model_name:
+        elif "gpt-oss-120b" in effective_model:
             groq_kwargs["reasoning_effort"] = "medium"
         return ChatGroq(**groq_kwargs)
 
