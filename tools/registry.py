@@ -73,12 +73,32 @@ class ToolRegistry:
 
 def discover_tool_classes(tools_package_path: Path) -> list[type[BaseTool]]:
     """Discover all concrete BaseTool subclasses under the tools package."""
+    import sys
     discovered: list[type[BaseTool]] = []
     discovered_names: set[str] = set()
     package_name = "tools"
 
-    for module_info in pkgutil.iter_modules([str(tools_package_path)]):
-        module_name = module_info.name
+    search_paths = [str(tools_package_path)]
+    try:
+        import tools as _tools_pkg
+        if hasattr(_tools_pkg, "__path__"):
+            for p in _tools_pkg.__path__:
+                if p not in search_paths:
+                    search_paths.append(p)
+    except Exception:
+        pass
+
+    found_modules: set[str] = set()
+    for module_info in pkgutil.iter_modules(search_paths):
+        found_modules.add(module_info.name)
+
+    # In case of frozen binary where pkgutil cannot find raw files
+    if getattr(sys, "frozen", False):
+        for mod_name in list(sys.modules.keys()):
+            if mod_name.startswith("tools.") and not mod_name.endswith((".__init__", ".base", ".registry")):
+                found_modules.add(mod_name.split(".", 1)[1])
+
+    for module_name in sorted(found_modules):
         if module_name in {"__init__", "base", "registry"}:
             continue
 

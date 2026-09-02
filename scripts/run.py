@@ -14,9 +14,17 @@ import sys
 from pathlib import Path
 
 # Ensure project root is on sys.path so all local packages resolve.
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+if getattr(sys, "frozen", False):
+    _BUNDLE_ROOT = Path(sys._MEIPASS)
+    _EXE_DIR = Path(sys.executable).resolve().parent
+    _PROJECT_ROOT = _EXE_DIR if (_EXE_DIR / "tools").exists() else (_EXE_DIR.parent if (_EXE_DIR.parent / "tools").exists() else _BUNDLE_ROOT)
+    if str(_BUNDLE_ROOT) not in sys.path:
+        sys.path.insert(0, str(_BUNDLE_ROOT))
+else:
+    _BUNDLE_ROOT = Path(__file__).resolve().parent.parent
+    _PROJECT_ROOT = _BUNDLE_ROOT
+    if str(_PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(_PROJECT_ROOT))
 
 from config.logging import get_logger, setup_logging  # noqa: E402
 from config.settings import get_settings  # noqa: E402
@@ -36,7 +44,10 @@ logger = get_logger(__name__)
 def _build_tool_registry() -> ToolRegistry:
     """Discover and register all available tools dynamically."""
     registry = ToolRegistry()
-    for tool_cls in discover_tool_classes(_PROJECT_ROOT / "tools"):
+    tools_dir = _BUNDLE_ROOT / "tools"
+    if not tools_dir.exists():
+        tools_dir = _PROJECT_ROOT / "tools"
+    for tool_cls in discover_tool_classes(tools_dir):
         registry.register(tool_cls())
     return registry
 

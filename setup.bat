@@ -51,36 +51,49 @@ set "LOG_FILE=%LOG_FILE: =0%"
 cls
 echo.
 echo  ============================================================
-echo    OmniCore Setup ^& Installation Manager v1.0
+echo    OmniCore Setup ^& Installation Manager v1.1
 echo  ============================================================
 echo.
-echo    [1] Full Install (first time setup)
+echo    --- Setup ^& Maintenance ---
+echo    [1] Full Install (first time setup ^& uv sync)
 echo    [2] Quick Install (dependencies only)
-echo    [3] Update (pull latest + sync)
-echo    [4] Uninstall (remove from PATH)
-echo    [5] Health Check (diagnose issues)
-echo    [6] Launch CLI
-echo    [7] Launch REST API
-echo    [8] Launch Telegram Bot
-echo    [9] Launch HUD
-echo   [10] View Logs
-echo   [11] Exit
+echo    [3] Update (git pull + uv sync)
+echo    [4] Windows PATH (Add / Remove from PATH)
+echo    [5] Health Check (diagnose environment ^& keys)
+echo    [6] Run Test Suite (pytest 124 tests)
+echo    [7] Build Standalone EXE (OmniCore.exe)
+echo.
+echo    --- Launch Gateways ---
+echo    [8] Launch CLI (Interactive Terminal)
+echo    [9] Launch Web Dashboard (Browser GUI ^& Mic: 8080)
+echo   [10] Launch Duplex Voice Engine
+echo   [11] Launch REST API Gateway (Port 8000)
+echo   [12] Launch Telegram Bot
+echo   [13] Launch Cyberpunk HUD
+echo.
+echo    --- System ---
+echo   [14] View Logs
+echo   [15] Exit
 echo.
 echo  ============================================================
 echo.
-set /p "CHOICE=  Select option (1-11): "
+set /p "CHOICE=  Select option (1-15): "
 
 if "%CHOICE%"=="1" goto full_install
 if "%CHOICE%"=="2" goto quick_install
 if "%CHOICE%"=="3" goto update_project
-if "%CHOICE%"=="4" goto uninstall
+if "%CHOICE%"=="4" goto manage_path
 if "%CHOICE%"=="5" goto health_check
-if "%CHOICE%"=="6" goto launch_cli
-if "%CHOICE%"=="7" goto launch_rest
-if "%CHOICE%"=="8" goto launch_telegram
-if "%CHOICE%"=="9" goto launch_hud
-if "%CHOICE%"=="10" goto view_logs
-if "%CHOICE%"=="11" goto exit
+if "%CHOICE%"=="6" goto run_tests
+if "%CHOICE%"=="7" goto build_exe
+if "%CHOICE%"=="8" goto launch_cli
+if "%CHOICE%"=="9" goto launch_web
+if "%CHOICE%"=="10" goto launch_voice
+if "%CHOICE%"=="11" goto launch_rest
+if "%CHOICE%"=="12" goto launch_telegram
+if "%CHOICE%"=="13" goto launch_hud
+if "%CHOICE%"=="14" goto view_logs
+if "%CHOICE%"=="15" goto exit
 echo Invalid option. Press any key to try again...
 pause >nul
 goto menu
@@ -213,19 +226,27 @@ pause
 goto menu
 
 :: ============================================================
-::  UNINSTALL
+::  PATH MANAGEMENT
 :: ============================================================
-:uninstall
+:manage_path
 cls
-call :log "=== Uninstall ==="
+call :log "=== Windows PATH Management ==="
 echo.
-echo  Removing from PATH...
-call :remove_path
+echo    [1] Add OmniCore (.venv\Scripts) to User PATH
+echo    [2] Remove OmniCore from User PATH
+echo    [3] Return to Main Menu
 echo.
-call :log_success "OmniCore removed from PATH"
-echo  (Project files are kept — delete manually if needed)
-echo.
-pause
+set /p "PCHOICE=  Select option (1-3): "
+if "%PCHOICE%"=="1" (
+    call :setup_path
+    pause
+    goto menu
+)
+if "%PCHOICE%"=="2" (
+    call :remove_path
+    pause
+    goto menu
+)
 goto menu
 
 :: ============================================================
@@ -240,15 +261,15 @@ echo    OmniCore Health Check
 echo  ============================================================
 echo.
 
-echo  [1/7] Python version...
+echo  [1/8] Python version...
 call :check_python
 echo.
 
-echo  [2/7] uv package manager...
+echo  [2/8] uv package manager...
 call :check_uv
 echo.
 
-echo  [3/7] Dependencies...
+echo  [3/8] Dependencies...
 cd /d "%PROJECT_DIR%"
 uv pip check >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
@@ -258,7 +279,7 @@ if errorlevel 1 (
 )
 echo.
 
-echo  [4/7] Environment file...
+echo  [4/8] Environment files...
 if exist "%ENV_FILE%" (
     call :log_success ".env file exists"
 ) else (
@@ -268,9 +289,12 @@ if exist "%ENV_FILE%" (
         call :log_success "Created .env from .env.example"
     )
 )
+if exist "%PROJECT_DIR%\.env.local" (
+    call :log_success ".env.local exists (live persistent overrides active)"
+)
 echo.
 
-echo  [5/7] API keys configured...
+echo  [5/8] API keys configured...
 if exist "%ENV_FILE%" (
     findstr /C:"GOOGLE_API_KEY=your" "%ENV_FILE%" >nul 2>&1
     if not errorlevel 1 (
@@ -289,7 +313,7 @@ if exist "%ENV_FILE%" (
 )
 echo.
 
-echo  [6/7] Console script...
+echo  [6/8] Console script...
 uv run omnicore --help >nul 2>&1
 if errorlevel 1 (
     call :log_error "Console script not working"
@@ -298,13 +322,54 @@ if errorlevel 1 (
 )
 echo.
 
-echo  [7/7] Tool count...
+echo  [7/8] Tool registry count...
 uv run python -c "from tools.registry import discover_tool_classes; from pathlib import Path; print(f'  {len(discover_tool_classes(Path(\"tools\")))} tools registered')" 2>nul
+echo.
+
+echo  [8/8] Standalone Executable...
+if exist "%PROJECT_DIR%\dist\OmniCore.exe" (
+    "%PROJECT_DIR%\dist\OmniCore.exe" --help >nul 2>&1
+    if not errorlevel 1 (
+        call :log_success "dist\OmniCore.exe verified and working perfectly!"
+    ) else (
+        call :log_warning "dist\OmniCore.exe exists but failed verification test."
+    )
+) else (
+    call :log_warning "dist\OmniCore.exe not built yet (use option [7] to build)"
+)
 echo.
 
 echo  ============================================================
 echo    Health check complete. Log: %LOG_FILE%
 echo  ============================================================
+echo.
+pause
+goto menu
+
+:: ============================================================
+::  TESTS & BUILD
+:: ============================================================
+:run_tests
+cls
+call :log "=== Running Full Pytest Suite ==="
+echo.
+echo  Running all unit and integration tests...
+echo.
+cd /d "%PROJECT_DIR%"
+uv run pytest tests/ -v
+echo.
+pause
+goto menu
+
+:build_exe
+cls
+call :log "=== Building Standalone OmniCore.exe ==="
+echo.
+echo  Building self-contained executable with PyInstaller...
+echo  (This may take 1-2 minutes)
+echo.
+cd /d "%PROJECT_DIR%"
+uv run python build.py
 echo.
 pause
 goto menu
@@ -317,6 +382,28 @@ cls
 call :log "Launching CLI mode..."
 cd /d "%PROJECT_DIR%"
 uv run omnicore --mode cli
+goto menu
+
+:launch_web
+cls
+call :log "Launching Web Dashboard..."
+cd /d "%PROJECT_DIR%"
+echo.
+echo  OmniCore Web Dashboard starting on http://localhost:8080
+echo  Includes browser microphone and real-time status!
+echo.
+uv run omnicore --mode web
+goto menu
+
+:launch_voice
+cls
+call :log "Launching Duplex Voice Engine..."
+cd /d "%PROJECT_DIR%"
+echo.
+echo  OmniCore Duplex Voice Engine starting...
+echo  Speak clearly into your microphone.
+echo.
+uv run omnicore --mode voice
 goto menu
 
 :launch_rest

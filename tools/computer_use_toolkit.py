@@ -11,7 +11,13 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
-import imageio.v2 as imageio  # type: ignore[import-not-found]
+try:
+    import imageio.v2 as imageio  # type: ignore[import-not-found]
+except Exception:
+    try:
+        import imageio  # type: ignore[import-not-found]
+    except Exception:
+        imageio = None
 
 try:
     import mss  # type: ignore[import-not-found]

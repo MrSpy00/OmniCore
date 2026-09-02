@@ -7,7 +7,21 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+import sys
+
+def _resolve_project_root() -> Path:
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        if (exe_dir / ".env").exists() or (exe_dir / ".env.local").exists():
+            return exe_dir
+        if (exe_dir.parent / ".env").exists() or (exe_dir.parent / ".env.local").exists():
+            return exe_dir.parent
+        if (Path.cwd() / ".env").exists() or (Path.cwd() / ".env.local").exists():
+            return Path.cwd()
+        return exe_dir
+    return Path(__file__).resolve().parent.parent
+
+_PROJECT_ROOT = _resolve_project_root()
 
 
 # ---------------------------------------------------------------------------

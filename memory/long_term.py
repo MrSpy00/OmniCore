@@ -33,14 +33,24 @@ class LongTermMemory:
     def __init__(self, persist_dir: str | None = None) -> None:
         settings = get_settings()
         self._persist_dir = persist_dir or str(settings.chroma_persist_dir)
-        self._client = chromadb.PersistentClient(
-            path=self._persist_dir,
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
-        self._collection = self._client.get_or_create_collection(
-            name=_COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
-        )
+        try:
+            self._client = chromadb.PersistentClient(
+                path=self._persist_dir,
+                settings=ChromaSettings(anonymized_telemetry=False, is_persistent=True),
+            )
+            self._collection = self._client.get_or_create_collection(
+                name=_COLLECTION_NAME,
+                metadata={"hnsw:space": "cosine"},
+            )
+        except Exception as exc:
+            logger.warning("long_term.persistent_failed_fallback_ephemeral", error=str(exc))
+            self._client = chromadb.EphemeralClient(
+                settings=ChromaSettings(anonymized_telemetry=False)
+            )
+            self._collection = self._client.get_or_create_collection(
+                name=_COLLECTION_NAME,
+                metadata={"hnsw:space": "cosine"},
+            )
         logger.info(
             "long_term.initialized",
             persist_dir=self._persist_dir,

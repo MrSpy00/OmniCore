@@ -7,6 +7,7 @@ Changes are applied immediately AND saved to .env.local for persistence.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,19 @@ from config.logging import get_logger
 
 logger = get_logger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+def _resolve_project_root() -> Path:
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        if (exe_dir / ".env").exists() or (exe_dir / ".env.local").exists():
+            return exe_dir
+        if (exe_dir.parent / ".env").exists() or (exe_dir.parent / ".env.local").exists():
+            return exe_dir.parent
+        if (Path.cwd() / ".env").exists() or (Path.cwd() / ".env.local").exists():
+            return Path.cwd()
+        return exe_dir
+    return Path(__file__).resolve().parent.parent
+
+_PROJECT_ROOT = _resolve_project_root()
 _ENV_LOCAL = _PROJECT_ROOT / ".env.local"
 
 # All settings that users can modify at runtime, mapped to their env var names
