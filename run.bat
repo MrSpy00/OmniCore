@@ -12,9 +12,10 @@ set "PROJECT_DIR=%~dp0"
 set "PROJECT_DIR=%PROJECT_DIR:~0,-1%"
 cd /d "%PROJECT_DIR%"
 
-:: Parse arguments
+:: Parse arguments (default to web GUI when launched with no args)
 set "MODE=%~1"
-if "%MODE%"=="" set "MODE=cli"
+if "%MODE%"=="" set "MODE=web"
+
 
 :: Extract remaining arguments
 set "EXTRA_ARGS="

@@ -173,6 +173,7 @@ def create_dashboard_app() -> FastAPI:
             return {"success": ok, "message": msg}
         return JSONResponse({"error": "Missing key/value"}, status_code=400)
 
+    @app.get("/api/sysinfo")
     @app.get("/api/telemetry")
     async def api_telemetry():
         import psutil
@@ -184,8 +185,9 @@ def create_dashboard_app() -> FastAPI:
             "ram_percent": mem.percent,
             "ram_used_gb": round(mem.used / (1024**3), 1),
             "ram_total_gb": round(mem.total / (1024**3), 1),
-            "privacy": "100% Yerel / Local Hardware Monitoring. Disari veri iletilmez.",
+            "privacy": "100% Yerel / Local Hardware System Info. Disari veri iletilmez.",
         }
+
 
     return app
 
@@ -1122,9 +1124,9 @@ main.main-viewport {
               <div class="card-head-title" style="color:var(--accent-emerald);">🛡️ Gizlilik ve Veri Güvenliği</div>
             </div>
             <div style="font-size:0.84rem; color:var(--text-secondary); line-height:1.6;">
-              <p>• <strong>Sıfır Dış Telemetri:</strong> OmniCore sistem telemetrisi harici hiçbir şirkete (Google, Meta, bulut servisleri) gönderilmez.</p>
+              <p>• <strong>Sıfır Dış Veri Gönderimi:</strong> OmniCore sistem durumu ve donanım bilgisi harici hiçbir şirkete (Google, Meta, bulut servisleri) gönderilmez.</p>
               <p style="margin-top:6px;">• <strong>Lokal psutil Ölçümü:</strong> Tüm CPU ve RAM değerleri doğrudan işletim sistemi çekirdeğinden okunur.</p>
-              <p style="margin-top:6px;">• <strong>Vektör Bellek Gizliliği:</strong> ChromaDB telemetrisi devre dışı bırakılmıştır.</p>
+              <p style="margin-top:6px;">• <strong>Vektör Bellek Güvenliği:</strong> ChromaDB üçüncü taraf telemetrisi kod düzeyinde kapatılmıştır.</p>
             </div>
           </div>
         </div>
@@ -1159,7 +1161,8 @@ const I18N = {
     nav_settings: "Sistem & Yetki Ayarları",
     nav_resources: "Donanım & Araçlar",
     privacy_title: "%100 Yerel Gizlilik",
-    privacy_desc: "OmniCore tamamen cihazınızda çalışır. Donanım telemetrisi ve kullanım verileriniz dış sunuculara kesinlikle aktarılmaz.",
+    privacy_desc: "OmniCore tamamen cihazınızda çalışır. Donanım kaynak bilgisi ve kullanım verileriniz dış sunuculara kesinlikle aktarılmaz.",
+
     welcome_msg: "OmniCore Yapay Zeka İşletim Sistemine Hoş Geldiniz. Doğal dilde talimat verin.",
     mic_blocked_msg: "🎙️ Mikrofon izni engellendi: Tarayıcı adres çubuğundaki kilit simgesine (🔒) tıklayıp Mikrofona izin verin.",
     settings_title: "Model & Güvenlik Yönetimi",

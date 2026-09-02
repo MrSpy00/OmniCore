@@ -1443,7 +1443,44 @@ class CognitiveRouter:
                 ".omnicore approve yes — Otomatik onay modu\n"
                 ".omnicore ask        — Manuel onay modu (varsayılan)"
             )
+
+        if lowered.startswith(("/sysinfo", "/info")):
+
+            import platform
+            import psutil
+            cpu_pct = psutil.cpu_percent(interval=0.1)
+            vm = psutil.virtual_memory()
+            total_gb = vm.total / (1024 ** 3)
+            used_gb = vm.used / (1024 ** 3)
+            free_gb = vm.available / (1024 ** 3)
+            return (
+                "💻 Sistem Bilgisi (System Info)\n"
+                "─────────────────────────────\n"
+                f"  İşletim Sistemi: {platform.system()} {platform.release()} ({platform.machine()})\n"
+                f"  Python Sürümü:   {platform.python_version()}\n"
+                f"  CPU Kullanımı:   %{cpu_pct}\n"
+                f"  Bellek (RAM):    {used_gb:.1f} GB / {total_gb:.1f} GB (%{vm.percent}) [Boş: {free_gb:.1f} GB]\n"
+                f"  Gizlilik:        🔒 %100 Yerel (Veri iletilmez)\n"
+                "─────────────────────────────"
+            )
+
+        if lowered == "/set" or lowered.startswith("/set "):
+            parts = content.split(" ", 2)
+            if len(parts) < 3:
+                return (
+                    "💡 Kullanım: /set <anahtar> <değer>\n"
+                    "Örnek: /set approval_mode full\n"
+                    "Örnek: /set name <yeni_ad>\n"
+                    "Örnek: /set model <model_id>"
+                )
+            from config.live_config import get_live_config
+            key = parts[1].strip()
+            val = parts[2].strip()
+            success, msg = get_live_config().set(key, val)
+            return msg
+
         return None
+
 
     # -- internal helpers ------------------------------------------------------
 

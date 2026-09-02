@@ -69,7 +69,6 @@ packages_to_collect = [
     "langchain_core",
     "langchain_groq",
     "langchain_google_genai",
-    "imageio",
 ]
 
 for pkg in packages_to_collect:
@@ -93,8 +92,6 @@ metadata_packages = [
     "uvicorn",
     "starlette",
     "structlog",
-    "imageio",
-    "imageio-ffmpeg",
 ]
 for meta in metadata_packages:
     try:
@@ -114,17 +111,57 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib"],
+    excludes=[
+        "tkinter",
+        "matplotlib",
+        "scipy",
+        "pytest",
+        "curses",
+        "IPython",
+        "imageio_ffmpeg",
+    ],
+
     noarchive=False,
-    optimize=0,
+    optimize=1,
 )
-pyz = PYZ(a.pure)
+
+# Precision optimization: filter non-Windows binaries and redundant cache documents
+filtered_binaries = []
+for b in a.binaries:
+    name, path, typecode = b[0], b[1], b[2]
+    name_l = name.lower()
+    # Exclude heavy bundled ffmpeg (system ffmpeg or lightweight tools used instead)
+    if "ffmpeg" in name_l:
+        continue
+    # Exclude macOS and Linux platform drivers
+    if "selenium-manager" in name_l and ("macos" in name_l or "linux" in name_l):
+        continue
+    filtered_binaries.append(b)
+
+filtered_datas = []
+for d in a.datas:
+    name, path, typecode = d[0], d[1], d[2]
+    name_l = name.lower()
+    # Exclude non-Windows platform binaries/data
+    if "flac-linux" in name_l or "flac-mac" in name_l:
+        continue
+    if "selenium-manager" in name_l and ("macos" in name_l or "linux" in name_l):
+        continue
+    # Exclude heavy pocketsphinx models (Google Web Speech API is used)
+    if "pocketsphinx-data" in name_l:
+        continue
+    # Exclude unused 25MB discovery cache json files
+    if "googleapiclient" in name_l and "discovery_cache" in name_l:
+        continue
+    filtered_datas.append(d)
+
+pyz = PYZ(a.pure, optimize=1)
 
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
+    filtered_binaries,
+    filtered_datas,
     [],
     name='OmniCore',
     debug=False,
@@ -140,3 +177,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+

@@ -8,9 +8,11 @@ exact keyword match.
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Any
 
 import chromadb
+from chromadb import EmbeddingFunction, Documents, Embeddings
 from chromadb.config import Settings as ChromaSettings
 
 from config.logging import get_logger
@@ -19,6 +21,36 @@ from config.settings import get_settings
 logger = get_logger(__name__)
 
 _COLLECTION_NAME = "omnicore_memory"
+
+
+class FastLightweightEmbedding(EmbeddingFunction[Documents]):
+    """Deterministic, fast on-device embedding function.
+
+    Provides 64-dimensional normalized word-hash vectors. Requires zero C++
+    compilers or heavy ONNX runtimes. Never fails or raises onnxruntime errors.
+    """
+
+    def __init__(self) -> None:
+        pass
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return self._embed(input)
+
+    def embed_query(self, input: Documents) -> Embeddings:
+        return self._embed(input)
+
+    def _embed(self, input: Documents) -> Embeddings:
+        embeddings = []
+        for text in input:
+            vec = [0.0] * 64
+            words = text.lower().split()
+            for w in words:
+                h = int(hashlib.md5(w.encode()).hexdigest(), 16)
+                idx = h % 64
+                vec[idx] += 1.0
+            norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+            embeddings.append([x / norm for x in vec])
+        return embeddings
 
 
 class LongTermMemory:
@@ -33,24 +65,38 @@ class LongTermMemory:
     def __init__(self, persist_dir: str | None = None) -> None:
         settings = get_settings()
         self._persist_dir = persist_dir or str(settings.chroma_persist_dir)
+
+        # Check if onnxruntime is installed; if not, use FastLightweightEmbedding
+        embedding_fn = None
+        try:
+            import onnxruntime  # noqa: F401
+        except Exception:
+            embedding_fn = FastLightweightEmbedding()
+
         try:
             self._client = chromadb.PersistentClient(
                 path=self._persist_dir,
                 settings=ChromaSettings(anonymized_telemetry=False, is_persistent=True),
             )
-            self._collection = self._client.get_or_create_collection(
-                name=_COLLECTION_NAME,
-                metadata={"hnsw:space": "cosine"},
-            )
+            col_kwargs: dict[str, Any] = {
+                "name": _COLLECTION_NAME,
+                "metadata": {"hnsw:space": "cosine"},
+            }
+            if embedding_fn:
+                col_kwargs["embedding_function"] = embedding_fn
+            self._collection = self._client.get_or_create_collection(**col_kwargs)
         except Exception as exc:
             logger.warning("long_term.persistent_failed_fallback_ephemeral", error=str(exc))
             self._client = chromadb.EphemeralClient(
                 settings=ChromaSettings(anonymized_telemetry=False)
             )
-            self._collection = self._client.get_or_create_collection(
-                name=_COLLECTION_NAME,
-                metadata={"hnsw:space": "cosine"},
-            )
+            col_kwargs = {
+                "name": _COLLECTION_NAME,
+                "metadata": {"hnsw:space": "cosine"},
+            }
+            if embedding_fn:
+                col_kwargs["embedding_function"] = embedding_fn
+            self._collection = self._client.get_or_create_collection(**col_kwargs)
         logger.info(
             "long_term.initialized",
             persist_dir=self._persist_dir,
@@ -68,13 +114,27 @@ class LongTermMemory:
     ) -> str:
         """Embed and store a piece of text. Returns the document ID."""
         doc_id = doc_id or hashlib.sha256(text.encode()).hexdigest()[:16]
-        self._collection.upsert(
-            ids=[doc_id],
-            documents=[text],
-            metadatas=[metadata or {}],
-        )
-        logger.debug("long_term.stored", doc_id=doc_id)
+        upsert_kwargs: dict[str, Any] = {
+            "ids": [doc_id],
+            "documents": [text],
+        }
+        if metadata:
+            upsert_kwargs["metadatas"] = [metadata]
+        try:
+            self._collection.upsert(**upsert_kwargs)
+            logger.debug("long_term.stored", doc_id=doc_id)
+        except Exception as exc:
+            logger.warning("long_term.store_fallback_lightweight", error=str(exc))
+            try:
+                self._collection = self._client.get_or_create_collection(
+                    name=_COLLECTION_NAME,
+                    metadata={"hnsw:space": "cosine"},
+                )
+                self._collection.upsert(**upsert_kwargs)
+            except Exception as e2:
+                logger.error("long_term.store_fatal", error=str(e2))
         return doc_id
+
 
     # -- read -----------------------------------------------------------------
 
@@ -89,14 +149,30 @@ class LongTermMemory:
         Returns a list of dicts with keys: ``id``, ``document``, ``metadata``,
         ``distance``.
         """
-        kwargs: dict[str, Any] = {
-            "query_texts": [query],
-            "n_results": min(n_results, self._collection.count() or 1),
-        }
-        if where:
-            kwargs["where"] = where
+        try:
+            kwargs: dict[str, Any] = {
+                "query_texts": [query],
+                "n_results": min(n_results, self._collection.count() or 1),
+            }
+            if where:
+                kwargs["where"] = where
+            results = self._collection.query(**kwargs)
+        except Exception as exc:
+            logger.warning("long_term.recall_fallback_lightweight", error=str(exc))
+            try:
+                self._collection = self._client.get_or_create_collection(
+                    name=_COLLECTION_NAME,
+                    metadata={"hnsw:space": "cosine"},
+                    embedding_function=FastLightweightEmbedding(),
+                )
+                results = self._collection.query(
+                    query_texts=[query],
+                    n_results=min(n_results, self._collection.count() or 1),
+                )
+            except Exception as e2:
+                logger.error("long_term.recall_fatal", error=str(e2))
+                return []
 
-        results = self._collection.query(**kwargs)
         ids: list[list[str]] = results.get("ids") or [[]]  # type: ignore[assignment]
         documents: list[list[str]] = results.get("documents") or [[]]  # type: ignore[assignment]
         metadatas: list[list[dict]] = results.get("metadatas") or [[]]  # type: ignore[assignment]

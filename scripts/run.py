@@ -164,6 +164,7 @@ async def _run(mode: str, debug: bool = False) -> None:
 
         elif mode == "web":
             import uvicorn
+            import webbrowser
 
             from interfaces.dashboard import create_dashboard_app, set_router
 
@@ -172,8 +173,21 @@ async def _run(mode: str, debug: bool = False) -> None:
             config = uvicorn.Config(app=app, host="0.0.0.0", port=8080, log_level="info")
             server = uvicorn.Server(config)
             logger.info("omnicore.gateway", type="web", port=8080)
-            print("[OmniCore Dashboard] http://localhost:8080")
+            print("\n+==============================================================+")
+            print("|  🚀 OmniCore Desktop Web GUI Başlatıldı!                     |")
+            print("|  Tarayıcınız açılıyor: http://localhost:8080                  |")
+            print("|  (CLI modunda çalıştırmak için: OmniCore.exe --mode cli)     |")
+            print("+==============================================================+\n")
+
+            def _auto_open_browser():
+                try:
+                    webbrowser.open("http://localhost:8080")
+                except Exception:
+                    pass
+
+            asyncio.get_event_loop().call_later(1.0, _auto_open_browser)
             await server.serve()
+
 
         elif mode == "mcp":
             from interfaces.mcp_gateway import MCPServerGateway
@@ -271,13 +285,17 @@ async def _run(mode: str, debug: bool = False) -> None:
 
 
 def main() -> None:
+    is_frozen = getattr(sys, "frozen", False)
+    default_mode = "web" if is_frozen else "cli"
+
     parser = argparse.ArgumentParser(description="OmniCore AI OS Assistant v0.40.0")
     parser.add_argument(
         "--mode",
         choices=["cli", "telegram", "rest", "web", "mcp", "hud", "voice"],
-        default="cli",
-        help="Which gateway interface to launch (default: cli)",
+        default=default_mode,
+        help=f"Which gateway interface to launch (default: {default_mode})",
     )
+
     parser.add_argument(
         "--debug",
         action="store_true",

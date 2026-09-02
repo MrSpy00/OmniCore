@@ -49,12 +49,43 @@ from models.messages import Message, MessageRole
 
 logger = get_logger(__name__)
 
-_PROMPT = "\n[You] > "
+
+def _get_display_name() -> str:
+    """Get the personalized user display name."""
+    try:
+        from config.live_config import get_live_config
+        name = get_live_config().get("name")
+        if name and name.strip():
+            return name.strip()
+    except Exception:
+        pass
+    try:
+        settings = get_settings()
+        if getattr(settings, "user_name", "") and settings.user_name.strip():
+            return settings.user_name.strip()
+    except Exception:
+        pass
+    import os, getpass
+    try:
+        return os.environ.get("OMNICORE_USER_NAME") or getpass.getuser() or "Operator"
+    except Exception:
+        return "Operator"
+
+
+def _get_prompt_string() -> str:
+    """Generate dynamic prompt string with user's name and styled chevron."""
+    user = _get_display_name()
+    return f"\n⚡ [{user}] ❯ "
+
+
+# Commands that take arguments and should insert a trailing space on auto-completion
+COMMANDS_REQUIRING_ARGS = {"/set", "/setmodel", "/provider", "/perm", "/name", "/plan", "/config"}
 
 # All available slash commands with descriptions
 SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/help", "Yardım ve kullanım bilgisi"),
     ("/status", "Sistem durumu ve provider bilgisi"),
+    ("/sysinfo", "Sistem bilgisi, CPU ve RAM donanım durumu"),
     ("/models", "Kullanılabilir modeller ve API key durumu"),
     ("/setmodel", "Model değiştir: /setmodel <model-id>"),
     ("/provider", "Provider görüntüle/değiştir"),
@@ -71,13 +102,16 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
 ]
 SLASH_COMMAND_NAMES = [c[0] for c in SLASH_COMMANDS]
 
+# High-contrast, crystal-clear dropdown styling — works on ANSI & TrueColor terminals
 _PROMPT_STYLE = Style.from_dict({
-    "completion-menu.completion": "bg:#202124 #e8eaed",
-    "completion-menu.completion.current": "bg:#388bfd #ffffff bold",
-    "completion-menu.meta.completion": "bg:#161618 #9aa0a6",
-    "completion-menu.meta.completion.current": "bg:#388bfd #161618 bold",
-    "scrollbar.background": "bg:#202124",
-    "scrollbar.button": "bg:#5f6368",
+    # Completion dropdown menu
+    "completion-menu": "bg:#111827 #f9fafb",
+    "completion-menu.completion": "bg:#1e293b #f1f5f9",
+    "completion-menu.completion.current": "bg:#0284c7 #ffffff bold",
+    "completion-menu.meta.completion": "bg:#0f172a #94a3b8 italic",
+    "completion-menu.meta.completion.current": "bg:#0284c7 #fef08a bold",
+    "scrollbar.background": "bg:#0f172a",
+    "scrollbar.button": "bg:#38bdf8",
 })
 
 
@@ -97,13 +131,15 @@ if _HAS_PROMPT_TOOLKIT:
             if len(parts) == 1 and not text.endswith(" "):
                 for cmd_name, desc in SLASH_COMMANDS:
                     if cmd_name.startswith(cmd):
+                        insert_text = f"{cmd_name} " if cmd_name in COMMANDS_REQUIRING_ARGS else cmd_name
                         yield Completion(
-                            cmd_name,
+                            insert_text,
                             start_position=-len(cmd),
                             display=cmd_name,
                             display_meta=desc,
                         )
                 return
+
 
             # Subcommand completion
             sub_text = parts[1] if len(parts) > 1 else ""
@@ -559,12 +595,34 @@ class CLIGateway:
                     lambda: (shutil.get_terminal_size().lines, shutil.get_terminal_size().columns),
                 )
 
+            from prompt_toolkit.key_binding import KeyBindings
+            from prompt_toolkit.filters import completion_is_selected
+
+            kb = KeyBindings()
+
+            @kb.add("enter", filter=completion_is_selected)
+            def _(event):
+                """When a completion is highlighted in dropdown, Enter applies it instead of submitting premature commands."""
+                buf = event.current_buffer
+                selected = buf.complete_state.current_completion
+                if selected:
+                    buf.apply_completion(selected)
+                    text = buf.text.strip()
+                    cmd_root = text.split()[0] if text else ""
+                    if cmd_root in COMMANDS_REQUIRING_ARGS:
+                        if not buf.text.endswith(" "):
+                            buf.insert_text(" ")
+                        return
+                buf.validate_and_handle()
+
             self._prompt_session = PromptSession(
                 completer=OmniCompleter(),
                 complete_while_typing=True,
                 style=_PROMPT_STYLE,
+                key_bindings=kb,
                 output=out,
             )
+
         except Exception as exc:
             logger.debug("cli.prompt_toolkit_init_error", error=str(exc))
             self._prompt_session = None
@@ -661,8 +719,9 @@ class CLIGateway:
                 print(generate_cyberpunk_hud_panel(tools_count=tools_cnt, memory_nodes=mem_nodes))
                 continue
 
-            # Handle new config/permission commands locally (not via router)
-            if user_input.lower().startswith(("/config", "/set ", "/perm", "/provider", "/setmodel")):
+            # Intercept config and system info commands locally (not via router)
+            first_word = user_input.strip().split()[0].lower() if user_input.strip() else ""
+            if first_word in ("/config", "/set", "/perm", "/provider", "/setmodel", "/sysinfo", "/info"):
                 await self._handle_config_command(user_input)
                 continue
 
@@ -706,27 +765,65 @@ class CLIGateway:
 
     def _safe_input(self) -> str | None:
         """Run prompt_toolkit prompt or standard input() and return None on KeyboardInterrupt."""
+        prompt_str = _get_prompt_string()
         if self._prompt_session is not None:
             try:
-                return self._prompt_session.prompt(_PROMPT)
+                return self._prompt_session.prompt(prompt_str)
             except (KeyboardInterrupt, EOFError):
                 return None
             except Exception:
                 pass
         try:
-            return input(_PROMPT)
+            return input(prompt_str)
         except KeyboardInterrupt:
             return None
         except EOFError:
             raise
 
+    def _print_sysinfo(self) -> None:
+        """Display comprehensive local system and hardware information."""
+        import platform
+        import psutil
+        live_config = get_live_config()
+        settings = get_settings()
+        provider = live_config.get("provider") or getattr(settings, "llm_provider", "groq")
+        model = live_config.get("model") or getattr(settings, "groq_primary_model", "")
+        approval = live_config.get("approval_mode") or getattr(settings, "approval_mode", "ask")
+        tools_cnt = len(self._router._registry) if hasattr(self._router, "_registry") else 0
+
+        cpu_pct = psutil.cpu_percent(interval=0.1)
+        vm = psutil.virtual_memory()
+        total_gb = vm.total / (1024 ** 3)
+        used_gb = vm.used / (1024 ** 3)
+        free_gb = vm.available / (1024 ** 3)
+
+        print("\n" + "═" * 58)
+        print("  💻 OMNICORE SİSTEM BİLGİSİ (SYSTEM INFO)")
+        print("═" * 58)
+        print(f"  👤 Kullanıcı Adı   : {_get_display_name()}")
+        print(f"  🖥️  İşletim Sistemi : {platform.system()} {platform.release()} ({platform.machine()})")
+        print(f"  🐍 Python Sürümü   : {platform.python_version()}")
+        print(f"  🧠 Aktif LLM       : {provider} | {model}")
+        print(f"  🛡️  Yetki Modu      : {approval.upper()}")
+        print(f"  🔧 Araç Havuzu     : {tools_cnt} Otonom Araç")
+        print("─" * 58)
+        print(f"  ⚡ CPU Kullanımı   : %{cpu_pct}")
+        print(f"  📊 Bellek (RAM)    : {used_gb:.1f} GB / {total_gb:.1f} GB (%{vm.percent}) [Boş: {free_gb:.1f} GB]")
+        print("─" * 58)
+        print("  🔒 Gizlilik Durumu : %100 YEREL (Cihaz dışına veri aktarılmaz)")
+        print("═" * 58 + "\n")
+
     async def _handle_config_command(self, user_input: str) -> None:
-        """Handle /config, /set, /perm, /provider, /setmodel commands."""
+        """Handle /config, /set, /perm, /provider, /setmodel, /sysinfo commands."""
         parts = user_input.strip().split(maxsplit=2)
         cmd = parts[0].lower()
         subcmd = parts[1].lower() if len(parts) > 1 else ""
 
         live_config = get_live_config()
+
+        if cmd in ("/sysinfo", "/info"):
+            self._print_sysinfo()
+            return
 
         if cmd == "/config":
             if subcmd == "set" and len(parts) >= 3:
@@ -757,11 +854,16 @@ class CLIGateway:
 
         elif cmd == "/set":
             if len(parts) < 3:
-                print("Kullanım: /set <anahtar> <değer>")
-                print(f"Mevcut anahtarlar: {', '.join(CONFIG_SCHEMA.keys())}")
+                print("\n💡 Kullanım: /set <anahtar> <değer>")
+                print("   Örnek: /set approval_mode full")
+                print("   Örnek: /set name mrSpy")
+                print("   Örnek: /set model openai/gpt-oss-20b")
+                print("   Örnek: /set provider groq")
+                print(f"\n📋 Mevcut Anahtarlar:\n   {', '.join(CONFIG_SCHEMA.keys())}\n")
                 return
             key = parts[1].strip()
             value = parts[2].strip()
+
 
             # Handle model aliases
             if key == "model":
