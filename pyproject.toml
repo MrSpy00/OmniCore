@@ -33,7 +33,7 @@ dependencies = [
     "pywin32>=306; sys_platform == 'win32'",
     # Clipboard
     "pyperclip>=1.9.0",
-    "pycaw>=20240210",
+    "pycaw>=20240210; sys_platform == 'win32'",
     # Media
     "yt-dlp>=2024.7.0",
     "youtube-transcript-api>=0.6.2",
@@ -52,8 +52,8 @@ dependencies = [
     "cryptography>=42.0.0",
     "paramiko>=3.5.0",
     "feedparser>=6.0.11",
-    "pygetwindow>=0.0.9",
-    "win10toast>=0.9",
+    "pygetwindow>=0.0.9; sys_platform == 'win32'",
+    "win10toast>=0.9; sys_platform == 'win32'",
     # Audio Recording
     "sounddevice>=0.4.6",
     "soundfile>=0.12.1",
@@ -87,6 +87,14 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+check_untyped_defs = true
+disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

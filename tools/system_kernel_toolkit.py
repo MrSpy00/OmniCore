@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-import winreg
+import sys
+
+if sys.platform == "win32":
+    import winreg
+else:
+    winreg = None  # type: ignore[assignment]
 
 from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
