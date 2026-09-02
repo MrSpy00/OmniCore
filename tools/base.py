@@ -377,10 +377,11 @@ def _try_activate_with_pygetwindow(window_title: str, timeout_seconds: float) ->
 
 
 def _powershell_appactivate(window_title: str, last_error: str) -> dict[str, Any]:
-    escaped = window_title.replace("'", "''")
+    env = os.environ.copy()
+    env["OMNICORE_WINDOW_TITLE"] = window_title
     script = (
         "$ws = New-Object -ComObject WScript.Shell; "
-        f"if ($ws.AppActivate('{escaped}')) {{ 'true' }} else {{ 'false' }}"
+        "if ($ws.AppActivate($env:OMNICORE_WINDOW_TITLE)) { 'true' } else { 'false' }"
     )
     try:
         completed = subprocess.run(
@@ -388,6 +389,7 @@ def _powershell_appactivate(window_title: str, last_error: str) -> dict[str, Any
             capture_output=True,
             text=True,
             timeout=15,
+            env=env,
         )
         activated = "true" in (completed.stdout or "").lower()
         return {
@@ -410,7 +412,6 @@ def _powershell_appactivate(window_title: str, last_error: str) -> dict[str, Any
 def _force_window_foreground_windows_native(
     title_hint: str, timeout_seconds: float
 ) -> dict[str, Any]:
-    escaped = title_hint.replace("'", "''")
     timeout_ms = int(max(0.1, timeout_seconds) * 1000)
 
     csharp = (
@@ -426,12 +427,16 @@ def _force_window_foreground_windows_native(
         "}\n"
     )
 
+    env = os.environ.copy()
+    env["OMNICORE_WINDOW_TITLE"] = title_hint
+
     script = (
         "$ErrorActionPreference='Stop'; "
         + "Add-Type -TypeDefinition @'\n"
         + csharp
         + "'@ -Language CSharp; "
-        + f"$needle='{escaped}'; $deadline=(Get-Date).AddMilliseconds({timeout_ms}); "
+        + f"$deadline=(Get-Date).AddMilliseconds({timeout_ms}); "
+        + "$needle=$env:OMNICORE_WINDOW_TITLE; "
         + "$proc=$null; "
         + "while((Get-Date) -lt $deadline){ "
         + "$proc = Get-Process | Where-Object { "
@@ -458,6 +463,7 @@ def _force_window_foreground_windows_native(
             capture_output=True,
             text=True,
             timeout=max(10, int(timeout_seconds + 5)),
+            env=env,
         )
     except Exception as exc:
         return {

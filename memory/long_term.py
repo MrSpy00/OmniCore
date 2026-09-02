@@ -104,31 +104,46 @@ class LongTermMemory:
         logger.debug("long_term.recall", query=query[:80], n_results=len(items))
         return items
 
-    def get_all_memories_categorized(self) -> dict[str, list[str]]:
-        """Return all memories grouped by category (identity, preferences, projects, etc.)."""
+    _KNOWN_CATEGORIES = ("identity", "preferences", "projects", "relationships", "wishes", "notes")
+    _MAX_PER_CATEGORY = 50
+
+    def get_all_memories_categorized(
+        self, limit_per_category: int = _MAX_PER_CATEGORY
+    ) -> dict[str, list[str]]:
+        """Return all memories grouped by category with per-category limits."""
         if self._collection.count() == 0:
             return {}
 
-        results = self._collection.get(include=["documents", "metadatas"])
-        documents: list[str] = results.get("documents") or []
-        metadatas: list[dict] = results.get("metadatas") or []
+        categories: dict[str, list[str]] = {}
 
-        categories: dict[str, list[str]] = {
-            "identity": [],
-            "preferences": [],
-            "projects": [],
-            "relationships": [],
-            "wishes": [],
-            "notes": [],
-        }
+        for cat in self._KNOWN_CATEGORIES:
+            try:
+                results = self._collection.get(
+                    where={"category": cat},
+                    include=["documents"],
+                    limit=limit_per_category,
+                )
+                docs = results.get("documents") or []
+                if docs:
+                    categories[cat] = docs
+            except Exception:
+                continue
 
-        for doc, meta in zip(documents, metadatas):
-            cat = (meta.get("category") or "notes").lower()
-            if cat not in categories:
-                categories[cat] = []
-            categories[cat].append(doc)
+        uncategorized_results = self._collection.get(
+            include=["documents", "metadatas"],
+            limit=limit_per_category,
+        )
+        docs = uncategorized_results.get("documents") or []
+        metas = uncategorized_results.get("metadatas") or []
+        extra: list[str] = []
+        for doc, meta in zip(docs, metas):
+            cat = (meta.get("category") or "").lower()
+            if cat not in self._KNOWN_CATEGORIES:
+                extra.append(doc)
+        if extra:
+            categories["notes"] = categories.get("notes", []) + extra
 
-        return {k: v for k, v in categories.items() if v}
+        return categories
 
     def format_memory_for_prompt(self) -> str:
         """Format stored memories as a clean block for system prompt injection."""

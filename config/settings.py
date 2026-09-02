@@ -216,6 +216,9 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     scheduler_db_path: Path = Path("./data/apscheduler.db")
 
+    # --- REST API Gateway ----------------------------------------------------
+    rest_api_key: str = ""  # Bearer token auth (empty = open mode)
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

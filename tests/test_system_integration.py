@@ -13,7 +13,7 @@ from config.settings import Settings
 from core.daemon import EventReactorDaemon
 from core.guardian import Guardian
 from core.planner import Planner
-from core.router import _GroqKeyRotator
+from core.router import _ApiKeyRotator
 from interfaces.mcp_gateway import MCPServerGateway
 from interfaces.rest_api import create_app
 from interfaces.voice_duplex import DuplexVoiceEngine
@@ -40,24 +40,24 @@ from tools.system_kernel_toolkit import SysKillTaskForcefully
 # ---------------------------------------------------------------------------
 class TestGroqKeyRotator:
     def test_single_key_cycles(self):
-        rotator = _GroqKeyRotator(["key-A"])
+        rotator = _ApiKeyRotator(["key-A"])
         assert rotator.current == "key-A"
         assert rotator.next_key() == "key-A"
         assert rotator.next_key() == "key-A"
 
     def test_multiple_keys_cycle(self):
-        rotator = _GroqKeyRotator(["key-1", "key-2", "key-3"])
+        rotator = _ApiKeyRotator(["key-1", "key-2", "key-3"])
         assert rotator.current == "key-1"
         assert rotator.next_key() == "key-2"
         assert rotator.next_key() == "key-3"
         assert rotator.next_key() == "key-1"
 
     def test_empty_keys_fallback(self):
-        rotator = _GroqKeyRotator([])
+        rotator = _ApiKeyRotator([])
         assert rotator.current == ""
 
     def test_len(self):
-        rotator = _GroqKeyRotator(["a", "b"])
+        rotator = _ApiKeyRotator(["a", "b"])
         assert len(rotator) == 2
 
 

@@ -55,6 +55,7 @@ coverage.xml
 # --- Agent/session artifacts ---
 .agentignore
 .agents/
+.commandcode/
 OMNICORE_DOCS_TXT/
 prompt1.txt
 prompt2.txt

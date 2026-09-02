@@ -38,7 +38,7 @@ from memory.state import StateTracker
 from models.capabilities import RiskLevel
 from models.messages import Message, MessageRole
 from models.tasks import StepStatus, TaskStatus, TaskStep
-from models.tools import ToolInput
+from models.tools import ToolInput, ToolStatus
 from tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
@@ -47,19 +47,14 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Round-robin API key rotator for Groq multi-key support
 # ---------------------------------------------------------------------------
-class _GroqKeyRotator:
-    """Thread-safe round-robin Groq API key selector.
-
-    Cycles through ``GROQ_API_KEY_1``, ``_2``, ``_3`` (or the single
-    ``GROQ_API_KEY``) on each call to ``next_key()``.
-    """
+class _ApiKeyRotator:
+    """Generic thread-safe round-robin API key selector."""
 
     def __init__(self, keys: list[str]) -> None:
         self._keys = keys or [""]
         self._cycle = itertools.cycle(self._keys)
         self._lock = threading.Lock()
         self._current: str = ""
-        # Advance to the first key.
         self.next_key()
 
     @property
@@ -102,72 +97,34 @@ class _GroqModelRotator:
         return len(self._models)
 
 
-class _ApiKeyRotator:
-    """Generic thread-safe round-robin API key selector."""
+# ---------------------------------------------------------------------------
+# LLM error classification
+# ---------------------------------------------------------------------------
+_RATE_LIMIT_MARKERS: tuple[str, ...] = (
+    "429", "413", "payload too large", "request too large",
+    "content too large", "input too large", "rate_limit_exceeded",
+    "rate limit", "quota", "resource_exhausted", "too many requests",
+)
+_RETRYABLE_MARKERS: tuple[str, ...] = (
+    *_RATE_LIMIT_MARKERS, "context length", "token limit",
+    "quota exceeded", "timeout",
+)
 
-    def __init__(self, keys: list[str]) -> None:
-        self._keys = keys or [""]
-        self._cycle = itertools.cycle(self._keys)
-        self._lock = threading.Lock()
-        self._current: str = ""
-        self.next_key()
 
-    @property
-    def current(self) -> str:
-        return self._current
-
-    @property
-    def first(self) -> str:
-        return self._keys[0]
-
-    def next_key(self) -> str:
-        with self._lock:
-            self._current = next(self._cycle)
-        return self._current
-
-    def __len__(self) -> int:
-        return len(self._keys)
+def _classify_llm_error(exc: BaseException) -> tuple[bool, bool]:
+    """Return (is_retryable, is_rate_limit)."""
+    text = str(exc).lower()
+    is_rate_limit = any(m in text for m in _RATE_LIMIT_MARKERS)
+    is_retryable = any(m in text for m in _RETRYABLE_MARKERS) or is_rate_limit
+    return is_retryable, is_rate_limit
 
 
 def _is_retryable_llm_error(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    markers = (
-        "429",
-        "413",
-        "payload too large",
-        "request too large",
-        "content too large",
-        "input too large",
-        "context length",
-        "token limit",
-        "rate_limit_exceeded",
-        "rate limit",
-        "quota exceeded",
-        "resource_exhausted",
-        "too many requests",
-        "timeout",
-    )
-    return any(marker in text for marker in markers)
+    return _classify_llm_error(exc)[0]
 
 
 def _is_rate_limit_error(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    markers = (
-        "429",
-        "413",
-        "payload too large",
-        "request too large",
-        "content too large",
-        "input too large",
-        "context length",
-        "token limit",
-        "rate_limit_exceeded",
-        "rate limit",
-        "quota",
-        "resource_exhausted",
-        "too many requests",
-    )
-    return any(marker in text for marker in markers)
+    return _classify_llm_error(exc)[1]
 
 
 _SUPPORTED_PROVIDERS: tuple[str, ...] = ("groq", "gemini", "ollama")
@@ -318,7 +275,7 @@ class CognitiveRouter:
         self._state = state_tracker
 
         settings = get_settings()
-        self._key_rotator: _GroqKeyRotator | None = None
+        self._key_rotator: _ApiKeyRotator | None = None
         self._model_rotator: _GroqModelRotator | None = None
         self._google_key_rotator: _ApiKeyRotator | None = None
         self._settings = settings
@@ -348,7 +305,7 @@ class CognitiveRouter:
             models = settings.groq_model_chain
 
             if self._key_rotator is None:
-                self._key_rotator = _GroqKeyRotator(api_keys)
+                self._key_rotator = _ApiKeyRotator(api_keys)
             if self._model_rotator is None:
                 self._model_rotator = _GroqModelRotator(models)
 
@@ -500,11 +457,8 @@ class CognitiveRouter:
     def _rotate_groq_route_and_rebuild(self) -> None:
         """Rotate to next Groq key+model route and rebuild LLM."""
         self._refresh_runtime_settings()
-        self._key_rotator = _GroqKeyRotator(self._settings.groq_api_keys)
+        self._key_rotator = _ApiKeyRotator(self._settings.groq_api_keys)
         self._model_rotator = _GroqModelRotator(self._settings.groq_model_chain)
-
-        if self._key_rotator is None or self._model_rotator is None:
-            return
 
         old_key = self._key_rotator.current
         old_model = self._model_rotator.current
@@ -630,6 +584,7 @@ class CognitiveRouter:
 
         lowered_query = (query or "").lower()
         query_domains = infer_query_domains(lowered_query)
+        query_tokens = {token for token in re.split(r"[^a-z0-9_]+", lowered_query) if token}
         scored: list[tuple[int, dict[str, str]]] = []
 
         for tool in all_tools:
@@ -651,8 +606,7 @@ class CognitiveRouter:
             if name_l in lowered_query:
                 score += 180
 
-            tokens = {token for token in re.split(r"[^a-z0-9_]+", lowered_query) if token}
-            for token in tokens:
+            for token in query_tokens:
                 if token in name_l:
                     score += 35
                 if token in desc_l:
@@ -1074,7 +1028,7 @@ class CognitiveRouter:
             gemini_ids = {m["id"] for m in AVAILABLE_GEMINI_MODELS}
             groq_ids = {m["id"] for m in AVAILABLE_GROQ_MODELS}
             if model_id in gemini_ids:
-                self._settings.__dict__["omni_llm_model"] = model_id
+                self._settings = self._settings.model_copy(update={"omni_llm_model": model_id})
                 self._destroy_current_llm()
                 self._llm = self._build_llm(self._settings)
                 return (
@@ -1083,7 +1037,7 @@ class CognitiveRouter:
                     f"OMNI_LLM_MODEL={model_id} ayarlayin."
                 )
             if model_id in groq_ids:
-                self._settings.__dict__["groq_primary_model"] = model_id
+                self._settings = self._settings.model_copy(update={"groq_primary_model": model_id})
                 if self._model_rotator is not None:
                     self._model_rotator = None
                 self._destroy_current_llm()
@@ -1812,7 +1766,7 @@ def _contains_dummy_markers(text: str) -> bool:
 
 
 def _is_generic_or_empty_success(output) -> bool:
-    if getattr(output, "status", None) != "success":
+    if getattr(output, "status", None) != ToolStatus.SUCCESS:
         return False
 
     result = str(getattr(output, "result", "") or "").strip().lower()

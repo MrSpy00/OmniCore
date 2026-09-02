@@ -53,7 +53,7 @@ class RecoveryEngine:
         After 2 consecutive failures, returns a Turkish error message.
         """
         last_output: ToolOutput | None = None
-        effective_max = min(step.max_retries, self._max_retry_cap)
+        effective_max = max(1, min(step.max_retries, self._max_retry_cap))
 
         for attempt in range(effective_max + 1):
             try:
@@ -130,8 +130,17 @@ class RecoveryEngine:
             tool=tool.name,
             retries=effective_max,
         )
-        return last_output or ToolOutput(
+        if last_output:
+            last_output.error = (
+                f"[DÖNGÜ KORUMASI] {tool.name}: Tum denemeler tukendi "
+                f"({effective_max} deneme). Son hata: {last_output.error}"
+            )
+            return last_output
+        return ToolOutput(
             tool_name=tool.name,
             status=ToolStatus.FAILURE,
-            error=f"[DÖNGÜ KORUMASI] {tool.name}: Tum denemeler tukendi, sonuc alinamadi.",
+            error=(
+                f"[DÖNGÜ KORUMASI] {tool.name}: Tum denemeler tukendi "
+                f"({effective_max} deneme), sonuc alinamadi."
+            ),
         )
