@@ -1,4 +1,5 @@
 """Full integration test — boot OmniCore like a real user."""
+
 import asyncio
 import os
 import sys
@@ -32,6 +33,7 @@ def check(name, ok, detail=""):
 async def test_settings():
     print("\n=== SETTINGS ===")
     from config.settings import get_settings
+
     get_settings.cache_clear()
     s = get_settings()
     check("provider", s.llm_provider == "gemini")
@@ -147,6 +149,7 @@ async def test_recovery_engine():
 
     class AlwaysFail(BaseTool):
         name = "always_fail"
+
         async def execute(self, _input):
             return ToolOutput(tool_name="always_fail", status=ToolStatus.FAILURE, error="oops")
 

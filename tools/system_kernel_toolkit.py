@@ -138,14 +138,16 @@ def _inspect_privileges() -> dict[str, object]:
             ["whoami", "/groups"], capture_output=True, text=True, timeout=10
         ).stdout
         high_privs = [
-            priv for priv in [
+            priv
+            for priv in [
                 "SeImpersonatePrivilege",
                 "SeDebugPrivilege",
                 "SeBackupPrivilege",
                 "SeRestorePrivilege",
                 "SeTakeOwnershipPrivilege",
                 "SeLoadDriverPrivilege",
-            ] if priv.lower() in priv_out.lower()
+            ]
+            if priv.lower() in priv_out.lower()
         ]
         is_admin = "Administrators" in group_out or "High Integrity" in group_out
         return {
@@ -155,9 +157,7 @@ def _inspect_privileges() -> dict[str, object]:
             "groups_raw": group_out.strip(),
         }
     except Exception:
-        id_out = subprocess.run(
-            ["id"], capture_output=True, text=True, timeout=10
-        ).stdout
+        id_out = subprocess.run(["id"], capture_output=True, text=True, timeout=10).stdout
         return {"raw_id": id_out.strip()}
 
 

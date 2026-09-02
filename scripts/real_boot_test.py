@@ -1,4 +1,8 @@
 """Real user boot test — run like a user would."""
+
+from __future__ import annotations
+
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -12,8 +16,6 @@ os.environ["GOOGLE_API_KEY"] = "test-key-not-real"
 os.environ["SCHEDULER_ENABLED"] = "false"
 os.environ["SQLITE_DB_PATH"] = ":memory:"
 os.environ["CHROMA_PERSIST_DIR"] = "/tmp/oc_boot_test"
-
-import asyncio
 
 
 async def main():
@@ -30,6 +32,7 @@ async def main():
     # 1. Settings
     p("\n[1/10] Settings...")
     from config.settings import get_settings
+
     get_settings.cache_clear()
     s = get_settings()
     p(f"  provider={s.llm_provider} model={s.omni_llm_model}")
@@ -71,10 +74,10 @@ async def main():
     from core.policy import CapabilityPolicyEngine
     from core.recovery import RecoveryEngine
 
-    g = Guardian()
-    pl = Planner(llm=None)
+    Guardian()
+    Planner(llm=None)
     pol = CapabilityPolicyEngine()
-    rec = RecoveryEngine(max_attempts=2)
+    RecoveryEngine(max_attempts=2)
     p("  Guardian OK")
     p("  Planner OK")
     p("  PolicyEngine OK")
@@ -112,7 +115,11 @@ async def main():
     d1 = pol.evaluate(safe)
     p(f"  Safe step allowed: {d1.allowed}")
 
-    danger = TaskStep(description="rm", tool_name="os_write_file", parameters={"command": "rm -rf /"})
+    danger = TaskStep(
+        description="rm",
+        tool_name="os_write_file",
+        parameters={"command": "rm -rf /"},
+    )
     d2 = pol.evaluate(danger)
     p(f"  Dangerous blocked: {not d2.allowed}")
 

@@ -570,6 +570,7 @@ def _list_desktop_windows() -> list[dict[str, str]]:
     windows: list[dict[str, str]] = []
     try:
         import pygetwindow as gw
+
         for w in gw.getAllWindows():
             if w.title and w.title.strip():
                 windows.append({"title": w.title.strip(), "visible": str(w.visible)})
@@ -592,14 +593,17 @@ def _list_desktop_windows() -> list[dict[str, str]]:
         )
         if res.stdout.strip():
             import json
+
             data = json.loads(res.stdout)
             if isinstance(data, dict):
                 data = [data]
             for item in data:
-                windows.append({
-                    "title": item.get("MainWindowTitle", ""),
-                    "process": item.get("ProcessName", ""),
-                })
+                windows.append(
+                    {
+                        "title": item.get("MainWindowTitle", ""),
+                        "process": item.get("ProcessName", ""),
+                    }
+                )
     except Exception:
         pass
 
@@ -609,6 +613,7 @@ def _list_desktop_windows() -> list[dict[str, str]]:
 def _focus_window_by_title(title: str) -> bool:
     try:
         import pygetwindow as gw
+
         matches = gw.getWindowsWithTitle(title)
         if matches:
             matches[0].activate()

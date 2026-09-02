@@ -320,8 +320,7 @@ def _blocked_response(analysis: dict[str, object]) -> str:
     category = str(analysis.get("blocked_category") or "defensive_only")
     guidance = _SAFE_GUIDANCE.get(category, _SAFE_GUIDANCE["defensive_only"])
     return (
-        f"{guidance} Category: {category}. "
-        f"Matched marker: {analysis['matched_defensive_marker']}"
+        f"{guidance} Category: {category}. Matched marker: {analysis['matched_defensive_marker']}"
     )
 
 

@@ -44,9 +44,7 @@ class ReminderSet(BaseTool):
         message = str(self._first_param(params, "message", default="") or "")
         date_str = str(self._first_param(params, "date", default="") or "")
         time_str = str(self._first_param(params, "time", default="") or "")
-        task_name = str(
-            self._first_param(params, "task_name", "name", default="") or ""
-        )
+        task_name = str(self._first_param(params, "task_name", "name", default="") or "")
 
         if not message:
             return self._failure("'message' parametresi zorunludur.")
@@ -97,11 +95,16 @@ class ReminderSet(BaseTool):
         cmd = [
             "schtasks",
             "/Create",
-            "/TN", task_name,
-            "/TR", f"powershell -WindowStyle Hidden -Command \"{ps_action}\"",
-            "/SC", "ONCE",
-            "/SD", win_date,
-            "/ST", win_time,
+            "/TN",
+            task_name,
+            "/TR",
+            f'powershell -WindowStyle Hidden -Command "{ps_action}"',
+            "/SC",
+            "ONCE",
+            "/SD",
+            win_date,
+            "/ST",
+            win_time,
             "/F",  # force overwrite if exists
         ]
 
@@ -136,9 +139,7 @@ class ReminderList(BaseTool):
     """List all OmniCore reminders in Windows Task Scheduler."""
 
     name = "reminder_list"
-    description = (
-        "List all OmniCore reminders currently scheduled in Windows Task Scheduler."
-    )
+    description = "List all OmniCore reminders currently scheduled in Windows Task Scheduler."
     is_destructive = False
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -160,9 +161,7 @@ class ReminderList(BaseTool):
         if result.returncode != 0:
             return self._failure(f"schtasks hatası: {result.stderr}")
 
-        lines = [
-            line for line in result.stdout.splitlines() if "OmniCore_Reminder" in line
-        ]
+        lines = [line for line in result.stdout.splitlines() if "OmniCore_Reminder" in line]
         tasks = []
         for line in lines:
             parts = line.strip().strip('"').split('","')
@@ -180,8 +179,7 @@ class ReminderDelete(BaseTool):
 
     name = "reminder_delete"
     description = (
-        "Delete an OmniCore reminder from Windows Task Scheduler. "
-        "Parameters: task_name (required)."
+        "Delete an OmniCore reminder from Windows Task Scheduler. Parameters: task_name (required)."
     )
     is_destructive = True
 

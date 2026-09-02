@@ -1,6 +1,5 @@
-from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool
-
+from models.tools import ToolInput, ToolOutput
 
 class CustomTestTool(BaseTool):
     name = "custom_test_tool"

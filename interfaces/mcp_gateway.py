@@ -30,11 +30,13 @@ class MCPServerGateway:
             resp = await self.handle_request(req)
             return json.dumps(resp)
         except Exception as exc:
-            return json.dumps({
-                "jsonrpc": "2.0",
-                "error": {"code": -32700, "message": f"Parse error: {exc}"},
-                "id": None,
-            })
+            return json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32700, "message": f"Parse error: {exc}"},
+                    "id": None,
+                }
+            )
 
     async def handle_request(self, req: dict[str, Any]) -> dict[str, Any]:
         """Route JSON-RPC request to appropriate handler."""
@@ -56,11 +58,13 @@ class MCPServerGateway:
         if method == "tools/list":
             tool_list = []
             for name, cls in self.tool_classes.items():
-                tool_list.append({
-                    "name": name,
-                    "description": cls.description,
-                    "inputSchema": {"type": "object", "properties": {}},
-                })
+                tool_list.append(
+                    {
+                        "name": name,
+                        "description": cls.description,
+                        "inputSchema": {"type": "object", "properties": {}},
+                    }
+                )
             return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": tool_list}}
 
         if method == "tools/call":

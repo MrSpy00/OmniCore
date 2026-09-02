@@ -45,7 +45,7 @@ logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Round-robin API key rotator for Groq multi-key support
+# Round-robin API key rotator for multi-key support
 # ---------------------------------------------------------------------------
 class _ApiKeyRotator:
     """Generic thread-safe round-robin API key selector."""
@@ -101,13 +101,24 @@ class _GroqModelRotator:
 # LLM error classification
 # ---------------------------------------------------------------------------
 _RATE_LIMIT_MARKERS: tuple[str, ...] = (
-    "429", "413", "payload too large", "request too large",
-    "content too large", "input too large", "rate_limit_exceeded",
-    "rate limit", "quota", "resource_exhausted", "too many requests",
+    "429",
+    "413",
+    "payload too large",
+    "request too large",
+    "content too large",
+    "input too large",
+    "rate_limit_exceeded",
+    "rate limit",
+    "quota",
+    "resource_exhausted",
+    "too many requests",
 )
 _RETRYABLE_MARKERS: tuple[str, ...] = (
-    *_RATE_LIMIT_MARKERS, "context length", "token limit",
-    "quota exceeded", "timeout",
+    *_RATE_LIMIT_MARKERS,
+    "context length",
+    "token limit",
+    "quota exceeded",
+    "timeout",
 )
 
 
@@ -127,7 +138,27 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
     return _classify_llm_error(exc)[1]
 
 
-_SUPPORTED_PROVIDERS: tuple[str, ...] = ("groq", "gemini", "ollama")
+_SUPPORTED_PROVIDERS: tuple[str, ...] = (
+    "groq",
+    "gemini",
+    "openai",
+    "anthropic",
+    "deepseek",
+    "mistral",
+    "ollama",
+)
+
+
+_SUPPORTED_PROVIDERS: tuple[str, ...] = (
+    "groq",
+    "gemini",
+    "openai",
+    "anthropic",
+    "deepseek",
+    "mistral",
+    "ollama",
+)
+
 
 _OPERATIONAL_FACT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("windows", "User OS is Windows"),
@@ -353,14 +384,101 @@ class CognitiveRouter:
             )
             # Use OpenAI-compatible envelope or local fallback
             try:
-                from langchain_community.chat_models import ChatOllama
+                from langchain_ollama import ChatOllama
+
                 return ChatOllama(
                     model=settings.ollama_model,
                     base_url=settings.ollama_base_url,
                     temperature=settings.llm_temperature,
                 )
-            except Exception:
-                return _LocalLLMResponse(f"Local Ollama model fallback ({settings.ollama_model})")
+            except ImportError:
+                try:
+                    from langchain_community.chat_models import ChatOllama as ChatOllamaLegacy
+
+                    return ChatOllamaLegacy(
+                        model=settings.ollama_model,
+                        base_url=settings.ollama_base_url,
+                        temperature=settings.llm_temperature,
+                    )
+                except Exception:
+                    return _LocalLLMResponse(
+                        f"Local Ollama model fallback ({settings.ollama_model})"
+                    )
+        if normalized == "openai":
+            try:
+                from langchain_openai import ChatOpenAI
+
+                openai_key = getattr(settings, "openai_api_key", "")
+                openai_model = getattr(settings, "openai_model", "gpt-4o-mini")
+                openai_base_url = getattr(settings, "openai_base_url", "") or None
+                kwargs: dict[str, Any] = {
+                    "model": openai_model,
+                    "api_key": SecretStr(openai_key) if openai_key else None,
+                    "temperature": settings.llm_temperature,
+                    "max_tokens": settings.llm_max_output_tokens,
+                }
+                if openai_base_url:
+                    kwargs["base_url"] = openai_base_url
+                return ChatOpenAI(**kwargs)
+            except ImportError:
+                logger.warning("router.openai_not_installed", hint="pip install langchain-openai")
+                return _LocalLLMResponse("OpenAI provider: langchain-openai is not installed.")
+        if normalized == "anthropic":
+            try:
+                from langchain_anthropic import ChatAnthropic
+
+                anthropic_key = getattr(settings, "anthropic_api_key", "")
+                anthropic_model = getattr(settings, "anthropic_model", "claude-haiku-3-5")
+                return ChatAnthropic(
+                    model=anthropic_model,
+                    api_key=SecretStr(anthropic_key) if anthropic_key else None,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_output_tokens,
+                )
+            except ImportError:
+                logger.warning(
+                    "router.anthropic_not_installed",
+                    hint="pip install langchain-anthropic",
+                )
+                return _LocalLLMResponse(
+                    "Anthropic provider: langchain-anthropic is not installed."
+                )
+        if normalized == "deepseek":
+            try:
+                from langchain_openai import ChatOpenAI
+
+                deepseek_key = getattr(settings, "deepseek_api_key", "")
+                deepseek_model = getattr(settings, "deepseek_model", "deepseek-chat")
+                deepseek_base = getattr(
+                    settings, "deepseek_base_url", "https://api.deepseek.com/v1"
+                )
+                return ChatOpenAI(
+                    model=deepseek_model,
+                    api_key=SecretStr(deepseek_key) if deepseek_key else None,
+                    base_url=deepseek_base,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_output_tokens,
+                )
+            except ImportError:
+                return _LocalLLMResponse("DeepSeek provider: langchain-openai is not installed.")
+        if normalized == "mistral":
+            try:
+                from langchain_mistralai import ChatMistralAI
+
+                mistral_key = getattr(settings, "mistral_api_key", "")
+                mistral_model = getattr(settings, "mistral_model", "mistral-small-latest")
+                return ChatMistralAI(
+                    model=mistral_model,
+                    api_key=SecretStr(mistral_key) if mistral_key else None,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_output_tokens,
+                )
+            except ImportError:
+                logger.warning(
+                    "router.mistral_not_installed",
+                    hint="pip install langchain-mistralai",
+                )
+                return _LocalLLMResponse("Mistral provider: langchain-mistralai is not installed.")
 
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
@@ -377,6 +495,16 @@ class CognitiveRouter:
             return any(key.strip() for key in cfg.groq_api_keys)
         if normalized == "gemini":
             return any(key.strip() for key in cfg.google_api_keys)
+        if normalized == "openai":
+            return bool(getattr(cfg, "openai_api_key", "").strip())
+        if normalized == "anthropic":
+            return bool(getattr(cfg, "anthropic_api_key", "").strip())
+        if normalized == "deepseek":
+            return bool(getattr(cfg, "deepseek_api_key", "").strip())
+        if normalized == "mistral":
+            return bool(getattr(cfg, "mistral_api_key", "").strip())
+        if normalized == "ollama":
+            return getattr(cfg, "ollama_enabled", False)
         return False
 
     def _find_alternate_provider(self, current: str) -> str | None:
@@ -672,10 +800,7 @@ class CognitiveRouter:
         user_name = settings.user_name.strip() or None
         user_line = ""
         if user_name:
-            user_line = (
-                f"KULLANICI ADI: {user_name}. "
-                f"Kullanıcıya hitap ederken bu adı kullan. "
-            )
+            user_line = f"KULLANICI ADI: {user_name}. Kullanıcıya hitap ederken bu adı kullan. "
 
         tools_desc = "\n".join(
             f"- {t['name']}: {t['description']} (yikici={t['destructive']})" for t in tools
@@ -997,9 +1122,7 @@ class CognitiveRouter:
             gemini_keys = len([k for k in getattr(settings, "google_api_keys", []) if k])
             model_name = getattr(settings, "omni_llm_model", "unknown")
             is_plan = (
-                getattr(self._guardian, "plan_mode", False)
-                if hasattr(self, "_guardian")
-                else False
+                getattr(self._guardian, "plan_mode", False) if hasattr(self, "_guardian") else False
             )
             return (
                 "System diagnostics OK\n"
@@ -1019,26 +1142,63 @@ class CognitiveRouter:
             return "Konusma gecmisi temizlendi. \u267b\ufe0f Yeni konusmaya hazir!"
         if lowered.startswith("/models"):
             from config.settings import get_available_models
+
             all_models = get_available_models()
-            lines = ["Kullanilabilir LLM Modeller:\n"]
+            availability = self._settings.provider_availability
+            lines = ["📋 Kullanilabilir LLM Modeller:\n"]
+            current_provider = getattr(self, "_runtime_provider", "")
             for prov, models in all_models.items():
-                lines.append(f"\U0001f4cc {prov.upper()}:")
+                has_key = availability.get(prov, False)
+                key_status = "✅ API key var" if has_key else "❌ API key yok"
+                prov_marker = " ← aktif provider" if prov == current_provider else ""
+                lines.append(f"📌 {prov.upper()} ({key_status}){prov_marker}:")
                 for m in models:
-                    active = " [AKTIF]" if (
-                        (prov == "gemini" and m["id"] == self._settings.omni_llm_model)
-                        or (prov == "groq" and m["id"] == self._settings.groq_primary_model)
-                    ) else ""
+                    active = (
+                        " [AKTİF]"
+                        if (
+                            (prov == "gemini" and m["id"] == self._settings.omni_llm_model)
+                            or (prov == "groq" and m["id"] == self._settings.groq_primary_model)
+                            or (
+                                prov == "openai"
+                                and m["id"] == getattr(self._settings, "openai_model", "")
+                            )
+                            or (
+                                prov == "anthropic"
+                                and m["id"] == getattr(self._settings, "anthropic_model", "")
+                            )
+                            or (
+                                prov == "deepseek"
+                                and m["id"] == getattr(self._settings, "deepseek_model", "")
+                            )
+                            or (
+                                prov == "mistral"
+                                and m["id"] == getattr(self._settings, "mistral_model", "")
+                            )
+                            or (
+                                prov == "ollama"
+                                and m["id"] == getattr(self._settings, "ollama_model", "")
+                            )
+                        )
+                        else ""
+                    )
+                    dim = "" if has_key or prov == "ollama" else "  (key yok) "
                     lines.append(
                         f"  - {m['id']}{active}\n"
-                        f"    {m['name']} | context={m['context']} | speed={m['speed']}"
+                        f"    {dim}{m['name']} | ctx={m['context']} | {m['speed']}"
                     )
+            lines.append(
+                "\n💡 Model degistirmek: /setmodel <model-id>\n"
+                "💡 Provider degistirmek: /provider <provider>"
+            )
             return "\n".join(lines)
+
         if lowered.startswith("/setmodel "):
             parts = content.split(" ", 2)
             if len(parts) < 2:
                 return "Kullanim: /setmodel <model-id>  (orn: /setmodel gemini-2.5-pro)"
             model_id = parts[1].strip()
             from config.settings import AVAILABLE_GEMINI_MODELS, AVAILABLE_GROQ_MODELS
+
             gemini_ids = {m["id"] for m in AVAILABLE_GEMINI_MODELS}
             groq_ids = {m["id"] for m in AVAILABLE_GROQ_MODELS}
             if model_id in gemini_ids:
@@ -1086,19 +1246,39 @@ class CognitiveRouter:
             new_prov = parts[1].strip().lower()
             if new_prov == "auto":
                 self._user_pinned_provider = None
-                return "Otomatik provider gecisi acildi."
-            supported = ["gemini", "groq", "ollama"]
+                return "Otomatik provider geçişi açıldı."
+            supported = list(_SUPPORTED_PROVIDERS)
             if new_prov not in supported:
                 return f"Bilinmeyen provider: {new_prov}\nDesteklenen: {', '.join(supported)}"
+            if not self._provider_has_credentials(new_prov):
+                hint_map = {
+                    "openai": "OPENAI_API_KEY",
+                    "anthropic": "ANTHROPIC_API_KEY",
+                    "deepseek": "DEEPSEEK_API_KEY",
+                    "mistral": "MISTRAL_API_KEY",
+                    "gemini": "GOOGLE_API_KEY",
+                    "groq": "GROQ_API_KEY",
+                }
+                env_var = hint_map.get(new_prov, f"{new_prov.upper()}_API_KEY")
+                return (
+                    f"❌ {new_prov} için API key bulunamadı.\n"
+                    f".env dosyasına {env_var}=<api-key> ekleyin."
+                )
             self._user_pinned_provider = new_prov
             self._settings = self._settings.model_copy(update={"llm_provider": new_prov})
+            self._runtime_provider = new_prov
             self._destroy_current_llm()
             self._llm = self._build_llm(self._settings)
-            return f"Provider degistirildi: {new_prov}"
+            return f"✅ Provider değiştirildi: {new_prov}"
+
         if lowered.startswith("/status"):
             provider = getattr(self, "_runtime_provider", "unknown")
             tools_count = len(self._registry) if hasattr(self, "_registry") else 0
-            model_name = self._settings.omni_llm_model if provider == "gemini" else self._settings.groq_primary_model
+            model_name = (
+                self._settings.omni_llm_model
+                if provider == "gemini"
+                else self._settings.groq_primary_model
+            )
             is_plan = getattr(self._guardian, "plan_mode", False)
             user_name = self._settings.user_name.strip() or "(OmniCore)"
             return (

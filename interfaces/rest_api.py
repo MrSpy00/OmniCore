@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 # --- Rate Limiting (in-memory, per-user) -------------------------------------
 _rate_limits: dict[str, list[float]] = defaultdict(list)
 _RATE_LIMIT_WINDOW = 60  # seconds
-_RATE_LIMIT_MAX = 20     # max requests per window
+_RATE_LIMIT_MAX = 20  # max requests per window
 
 
 def _check_rate_limit(user_id: str) -> None:

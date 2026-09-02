@@ -58,10 +58,7 @@ class EventReactorDaemon:
             "running": self._running,
             "watcher_count": len(self._watchers),
             "alert_count": len(self._alerts),
-            "watchers": [
-                {"name": k, "path": str(v["path"])}
-                for k, v in self._watchers.items()
-            ],
+            "watchers": [{"name": k, "path": str(v["path"])} for k, v in self._watchers.items()],
             "alerts": [
                 {"metric": k, "threshold": v["threshold"], "triggered": v["triggered"]}
                 for k, v in self._alerts.items()

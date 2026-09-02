@@ -43,6 +43,7 @@ def _build_scheduler() -> AsyncIOScheduler:
         )
         return AsyncIOScheduler()
 
+
 class AutonomousPulse:
     """Background scheduler that executes proactive tasks.
 
@@ -155,9 +156,11 @@ class AutonomousPulse:
         jobs = []
         for job in self._scheduler.get_jobs():
             next_run = job.next_run_time
-            jobs.append({
-                "id": job.id,
-                "name": job.name,
-                "next_run": str(next_run) if next_run else "paused",
-            })
+            jobs.append(
+                {
+                    "id": job.id,
+                    "name": job.name,
+                    "next_run": str(next_run) if next_run else "paused",
+                }
+            )
         return jobs

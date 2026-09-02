@@ -16,6 +16,7 @@ def _minimal_router() -> CognitiveRouter:
     router = CognitiveRouter.__new__(CognitiveRouter)
     router._llm = None
     router._llm_semaphore = None
+    router._user_pinned_provider = None  # required by _maybe_preemptive_gemini_route
     router._circuit_breaker = SimpleNamespace(
         is_open=lambda: False,
         record_success=lambda: None,

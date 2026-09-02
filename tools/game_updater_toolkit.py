@@ -156,9 +156,7 @@ class GameUpdater(BaseTool):
             return self._failure("Bu araç yalnızca Windows'ta çalışır.")
 
         params = self._params(tool_input)
-        action = str(
-            self._first_param(params, "action", default="list") or "list"
-        ).strip().lower()
+        action = str(self._first_param(params, "action", default="list") or "list").strip().lower()
         app_id = str(self._first_param(params, "app_id", "appid", default="") or "")
         game_name = str(self._first_param(params, "game_name", "game", default="") or "")
 
@@ -260,14 +258,16 @@ class GameUpdater(BaseTool):
                         appid = appid_m.group(1)
                         if appid not in seen_appids:
                             seen_appids.add(appid)
-                            games.append({
-                                "platform": "steam",
-                                "name": name_m.group(1),
-                                "app_id": appid,
-                                "state": int(state_m.group(1)) if state_m else 0,
-                                "size_bytes": int(size_m.group(1)) if size_m else 0,
-                                "manifest": acf.name,
-                            })
+                            games.append(
+                                {
+                                    "platform": "steam",
+                                    "name": name_m.group(1),
+                                    "app_id": appid,
+                                    "state": int(state_m.group(1)) if state_m else 0,
+                                    "size_bytes": int(size_m.group(1)) if size_m else 0,
+                                    "manifest": acf.name,
+                                }
+                            )
                 except Exception:
                     continue
         return games
@@ -283,12 +283,14 @@ class GameUpdater(BaseTool):
                 display_name = data.get("DisplayName")
                 app_name = data.get("AppName")
                 if display_name:
-                    games.append({
-                        "platform": "epic",
-                        "name": display_name,
-                        "app_id": app_name or item_file.stem,
-                        "install_location": data.get("InstallLocation", ""),
-                    })
+                    games.append(
+                        {
+                            "platform": "epic",
+                            "name": display_name,
+                            "app_id": app_name or item_file.stem,
+                            "install_location": data.get("InstallLocation", ""),
+                        }
+                    )
             except Exception:
                 continue
         return games
@@ -300,7 +302,8 @@ class GameUpdater(BaseTool):
             if list_result.status.value == "success":
                 games = list_result.data.get("games", [])
                 matches = [
-                    g for g in games
+                    g
+                    for g in games
                     if game_name.lower() in g["name"].lower() and g.get("platform") == "steam"
                 ]
                 if matches:
@@ -321,8 +324,8 @@ class GameUpdater(BaseTool):
                 shell=True,
             )
             return self._success(
-                f"Steam güncelleme başlatıldı: AppID={app_id}" +
-                (f" ({game_name})" if game_name else ""),
+                f"Steam güncelleme başlatıldı: AppID={app_id}"
+                + (f" ({game_name})" if game_name else ""),
                 data={"app_id": app_id, "game_name": game_name, "method": "steam_url"},
             )
         except Exception as exc:
@@ -351,9 +354,11 @@ class GameUpdater(BaseTool):
             result = await asyncio.to_thread(
                 subprocess.run,
                 [
-                    "powershell", "-NoProfile", "-Command",
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
                     "Get-Process | Where-Object {$_.Name -like '*steam*'} "
-                    "| Select-Object Name,CPU,WorkingSet | ConvertTo-Json"
+                    "| Select-Object Name,CPU,WorkingSet | ConvertTo-Json",
                 ],
                 capture_output=True,
                 text=True,
@@ -393,6 +398,5 @@ class GameUpdater(BaseTool):
             )
         except Exception as exc:
             return self._failure(
-                f"Epic Games Launcher bulunamadı. "
-                f"Lütfen kurulu olduğundan emin olun. Hata: {exc}"
+                f"Epic Games Launcher bulunamadı. Lütfen kurulu olduğundan emin olun. Hata: {exc}"
             )

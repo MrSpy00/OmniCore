@@ -19,11 +19,46 @@ AVAILABLE_GROQ_MODELS: list[dict[str, str]] = [
     {"id": "openai/gpt-oss-120b", "name": "GPT OSS 120B", "context": "128k", "speed": "fast"},
     {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B", "context": "32k", "speed": "fast"},
     {"id": "gemma2-9b-it", "name": "Gemma 2 9B IT", "context": "8k", "speed": "fast"},
+    {
+        "id": "llama-3.3-70b-versatile",
+        "name": "Llama 3.3 70B",
+        "context": "128k",
+        "speed": "medium",
+    },
+    {
+        "id": "llama-3.1-8b-instant",
+        "name": "Llama 3.1 8B Instant",
+        "context": "128k",
+        "speed": "fastest",
+    },
     {"id": "llama3-70b-8192", "name": "Llama 3 70B", "context": "8k", "speed": "medium"},
     {"id": "llama3-8b-8192", "name": "Llama 3 8B", "context": "8k", "speed": "fastest"},
+    {
+        "id": "deepseek-r1-distill-llama-70b",
+        "name": "DeepSeek R1 Distill 70B",
+        "context": "128k",
+        "speed": "medium",
+    },
+    {"id": "qwen-qwq-32b", "name": "Qwen QwQ 32B", "context": "128k", "speed": "medium"},
+    {
+        "id": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "name": "Llama 4 Scout 17B",
+        "context": "128k",
+        "speed": "fast",
+    },
 ]
 
 AVAILABLE_GEMINI_MODELS: list[dict[str, str]] = [
+    # Gemini 2.5 (current generation)
+    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "context": "1M", "speed": "fastest"},
+    {
+        "id": "gemini-2.5-flash-lite",
+        "name": "Gemini 2.5 Flash Lite",
+        "context": "1M",
+        "speed": "fastest",
+    },
+    {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "context": "2M", "speed": "medium"},
+    # Gemini 2.0 (previous gen — still available)
     {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "context": "1M", "speed": "fastest"},
     {
         "id": "gemini-2.0-flash-lite",
@@ -31,27 +66,76 @@ AVAILABLE_GEMINI_MODELS: list[dict[str, str]] = [
         "context": "1M",
         "speed": "fastest",
     },
-    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "context": "1M", "speed": "fast"},
+    # Gemini 1.5 (legacy)
+    {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro", "context": "2M", "speed": "medium"},
+    {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash", "context": "1M", "speed": "fast"},
     {
-        "id": "gemini-2.5-flash-preview-05-20",
-        "name": "Gemini 2.5 Flash Prev",
+        "id": "gemini-1.5-flash-8b",
+        "name": "Gemini 1.5 Flash 8B",
         "context": "1M",
-        "speed": "fast",
+        "speed": "fastest",
     },
-    {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "context": "1M", "speed": "medium"},
+]
+
+AVAILABLE_OPENAI_MODELS: list[dict[str, str]] = [
+    {"id": "gpt-4o", "name": "GPT-4o", "context": "128k", "speed": "fast"},
+    {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "context": "128k", "speed": "fastest"},
+    {"id": "gpt-4.1", "name": "GPT-4.1", "context": "1M", "speed": "fast"},
+    {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "context": "1M", "speed": "fastest"},
+    {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "context": "1M", "speed": "fastest"},
+    {"id": "o3-mini", "name": "o3-mini (Reasoning)", "context": "200k", "speed": "medium"},
+    {"id": "o4-mini", "name": "o4-mini (Reasoning)", "context": "200k", "speed": "medium"},
+]
+
+AVAILABLE_ANTHROPIC_MODELS: list[dict[str, str]] = [
+    {"id": "claude-opus-4-5", "name": "Claude Opus 4.5", "context": "200k", "speed": "slow"},
+    {"id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5", "context": "200k", "speed": "medium"},
+    {"id": "claude-haiku-3-5", "name": "Claude Haiku 3.5", "context": "200k", "speed": "fastest"},
+    {"id": "claude-3-opus-20240229", "name": "Claude 3 Opus", "context": "200k", "speed": "slow"},
     {
-        "id": "gemini-2.5-pro-preview-06-05",
-        "name": "Gemini 2.5 Pro Prev",
-        "context": "1M",
+        "id": "claude-3-5-sonnet-20241022",
+        "name": "Claude 3.5 Sonnet",
+        "context": "200k",
         "speed": "medium",
     },
-    {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro Legacy", "context": "2M", "speed": "medium"},
-    {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash Legacy", "context": "1M", "speed": "fast"},
 ]
+
+AVAILABLE_DEEPSEEK_MODELS: list[dict[str, str]] = [
+    {"id": "deepseek-chat", "name": "DeepSeek Chat V3", "context": "64k", "speed": "fast"},
+    {
+        "id": "deepseek-reasoner",
+        "name": "DeepSeek Reasoner R1",
+        "context": "64k",
+        "speed": "medium",
+    },
+]
+
+AVAILABLE_MISTRAL_MODELS: list[dict[str, str]] = [
+    {"id": "mistral-large-latest", "name": "Mistral Large", "context": "128k", "speed": "medium"},
+    {"id": "mistral-small-latest", "name": "Mistral Small", "context": "32k", "speed": "fast"},
+    {"id": "codestral-latest", "name": "Codestral", "context": "32k", "speed": "fast"},
+    {"id": "open-mixtral-8x22b", "name": "Mixtral 8x22B", "context": "64k", "speed": "medium"},
+]
+
+AVAILABLE_OLLAMA_MODELS: list[dict[str, str]] = [
+    {"id": "llama3.2", "name": "Llama 3.2 (local)", "context": "128k", "speed": "varies"},
+    {"id": "llama3.1", "name": "Llama 3.1 (local)", "context": "128k", "speed": "varies"},
+    {"id": "mistral", "name": "Mistral (local)", "context": "32k", "speed": "varies"},
+    {"id": "gemma2", "name": "Gemma 2 (local)", "context": "8k", "speed": "varies"},
+    {"id": "qwen2.5", "name": "Qwen 2.5 (local)", "context": "128k", "speed": "varies"},
+    {"id": "phi4", "name": "Phi-4 (local)", "context": "16k", "speed": "varies"},
+    {"id": "deepseek-r1", "name": "DeepSeek R1 (local)", "context": "64k", "speed": "varies"},
+]
+
 
 AVAILABLE_PROVIDERS: dict[str, list[dict[str, str]]] = {
     "gemini": AVAILABLE_GEMINI_MODELS,
     "groq": AVAILABLE_GROQ_MODELS,
+    "openai": AVAILABLE_OPENAI_MODELS,
+    "anthropic": AVAILABLE_ANTHROPIC_MODELS,
+    "deepseek": AVAILABLE_DEEPSEEK_MODELS,
+    "mistral": AVAILABLE_MISTRAL_MODELS,
+    "ollama": AVAILABLE_OLLAMA_MODELS,
 }
 
 
@@ -72,11 +156,15 @@ class Settings(BaseSettings):
     # --- LLM -----------------------------------------------------------------
     llm_provider: str = "gemini"
     llm_fallback_order: str = "groq,gemini"
+
+    # Google Gemini
     google_api_key: str = ""
     google_api_key_2: str = ""
     google_api_key_3: str = ""
-    # Primary Gemini model — default updated to 2.0-flash for speed & cost
-    omni_llm_model: str = "gemini-2.0-flash"
+    # Default to gemini-2.5-flash (gemini-2.0-flash was deprecated)
+    omni_llm_model: str = "gemini-2.5-flash"
+
+    # Groq
     groq_api_key: str = ""
     groq_api_key_1: str = ""
     groq_api_key_2: str = ""
@@ -86,12 +174,28 @@ class Settings(BaseSettings):
     groq_fallback_model_2: str = "mixtral-8x7b-32768"
     groq_llm_model: str = "openai/gpt-oss-20b"
     groq_fallback_models: str = "openai/gpt-oss-120b,mixtral-8x7b-32768"
+
+    # OpenAI
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    openai_base_url: str = ""  # empty = use official OpenAI endpoint
+
+    # Anthropic
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-haiku-3-5"
+
+    # DeepSeek
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-chat"
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+
+    # Mistral
+    mistral_api_key: str = ""
+    mistral_model: str = "mistral-small-latest"
+
+    # LLM general
     llm_temperature: float = 0.2
     llm_max_output_tokens: int = 4096
-
-    # --- Future provider API keys (for extensibility) -------------------------
-    openai_api_key: str = ""
-    anthropic_api_key: str = ""
 
     # --- Local Offline LLM Fallback (Ollama / LM Studio) ----------------------
     ollama_enabled: bool = True
@@ -167,13 +271,14 @@ class Settings(BaseSettings):
     def provider_preference(self) -> list[str]:
         """Return provider preference order with the primary provider first.
 
-        Supported providers in current runtime are ``groq`` and ``gemini``.
+        Supported providers in current runtime: groq, gemini, openai, anthropic,
+        deepseek, mistral, ollama.
         """
         primary = (self.llm_provider or "").strip().lower() or "gemini"
         fallback_tokens = [
             token.strip().lower() for token in self.llm_fallback_order.split(",") if token.strip()
         ]
-        supported = ["groq", "gemini"]
+        supported = list(AVAILABLE_PROVIDERS.keys())
 
         ordered: list[str] = []
         for candidate in [primary, *fallback_tokens, *supported]:
@@ -184,11 +289,14 @@ class Settings(BaseSettings):
     @property
     def provider_availability(self) -> dict[str, bool]:
         """Return whether each provider has at least one usable API key."""
-        groq_available = any(key.strip() for key in self.groq_api_keys)
-        gemini_available = any(key.strip() for key in self.google_api_keys)
         return {
-            "groq": groq_available,
-            "gemini": gemini_available,
+            "groq": any(key.strip() for key in self.groq_api_keys),
+            "gemini": any(key.strip() for key in self.google_api_keys),
+            "openai": bool(self.openai_api_key.strip()),
+            "anthropic": bool(self.anthropic_api_key.strip()),
+            "deepseek": bool(self.deepseek_api_key.strip()),
+            "mistral": bool(self.mistral_api_key.strip()),
+            "ollama": self.ollama_enabled,
         }
 
     # --- Telegram Gateway ----------------------------------------------------
@@ -221,6 +329,8 @@ class Settings(BaseSettings):
 
     # --- Personalization -----------------------------------------------------
     user_name: str = ""  # Optional display name (empty = use "OmniCore")
+    # Internal system name — never changes
+    system_name: str = "OmniCore"
 
 
 @lru_cache(maxsize=1)
@@ -235,13 +345,13 @@ def get_available_models(provider: str | None = None) -> dict[str, list[dict[str
     Parameters
     ----------
     provider:
-        If specified, return models only for that provider (``"gemini"`` or
-        ``"groq"``). If ``None``, return models for all providers.
+        If specified, return models only for that provider. If ``None``,
+        return models for all providers.
 
     Returns
     -------
     dict
-        ``{"gemini": [...], "groq": [...]}`` or a single-key dict.
+        Provider-keyed dict of model lists.
     """
     if provider is None:
         return dict(AVAILABLE_PROVIDERS)

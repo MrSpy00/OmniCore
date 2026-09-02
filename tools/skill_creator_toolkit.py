@@ -41,9 +41,9 @@ class SkillCreate(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        skill_name = str(
-            self._first_param(params, "skill_name", "name", default="") or ""
-        ).strip().lower()
+        skill_name = (
+            str(self._first_param(params, "skill_name", "name", default="") or "").strip().lower()
+        )
         code = str(self._first_param(params, "code", "script", default="") or "").strip()
 
         if not skill_name or not code:
@@ -87,11 +87,13 @@ class SkillList(BaseTool):
         for py in py_files:
             if py.name == "__init__.py":
                 continue
-            skills_info.append({
-                "name": py.stem,
-                "file": py.name,
-                "size_bytes": str(py.stat().st_size),
-            })
+            skills_info.append(
+                {
+                    "name": py.stem,
+                    "file": py.name,
+                    "size_bytes": str(py.stat().st_size),
+                }
+            )
 
         return self._success(
             f"Found {len(skills_info)} custom skills in workspace/skills.",
@@ -111,9 +113,9 @@ class SkillExecute(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        skill_name = str(
-            self._first_param(params, "skill_name", "name", default="") or ""
-        ).strip().lower()
+        skill_name = (
+            str(self._first_param(params, "skill_name", "name", default="") or "").strip().lower()
+        )
 
         if not skill_name:
             return self._failure("skill_name parameter is required.")
@@ -144,10 +146,6 @@ def _load_skill_tool(file_path: Path) -> BaseTool | None:
 
     for attr_name in dir(mod):
         obj = getattr(mod, attr_name)
-        if (
-            isinstance(obj, type)
-            and issubclass(obj, BaseTool)
-            and obj is not BaseTool
-        ):
+        if isinstance(obj, type) and issubclass(obj, BaseTool) and obj is not BaseTool:
             return obj()
     return None

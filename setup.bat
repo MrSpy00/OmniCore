@@ -410,32 +410,50 @@ goto menu
 :: ============================================================
 ::  PATH MANAGEMENT
 :: ============================================================
+::setup_path label was accidentally written as comment — restoring:
 :setup_path
-    :: Check if already in PATH
-    echo %PATH% | findstr /C:"%PROJECT_DIR%" >nul 2>&1
+    set "VENV_SCRIPTS=%PROJECT_DIR%\.venv\Scripts"
+
+    :: Verify the venv scripts directory exists
+    if not exist "%VENV_SCRIPTS%\" (
+        call :log_warning "Virtual environment not found at %VENV_SCRIPTS%"
+        call :log_warning "Run option [1] Full Install first."
+        exit /b 1
+    )
+
+    :: Check if .venv\Scripts already in PATH
+    echo %PATH% | findstr /C:"%VENV_SCRIPTS%" >nul 2>&1
     if not errorlevel 1 (
-        call :log_success "Already in PATH"
+        call :log_success ".venv\Scripts already in PATH"
         exit /b 0
     )
 
-    :: Add to user PATH via registry
-    call :log "Adding to user PATH..."
-    powershell -Command "[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';%PROJECT_DIR%', 'User')" >> "%LOG_FILE%" 2>&1
+    :: Add .venv\Scripts to user PATH via registry
+    call :log "Adding %VENV_SCRIPTS% to user PATH..."
+    powershell -Command "[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';%VENV_SCRIPTS%', 'User')" >> "%LOG_FILE%" 2>&1
     if errorlevel 1 (
         call :log_error "Failed to add to PATH"
         exit /b 1
     )
 
-    :: Also update current session PATH
-    set "PATH=%PATH%;%PROJECT_DIR%"
+    :: Update current session PATH too
+    set "PATH=%PATH%;%VENV_SCRIPTS%"
 
-    call :log_success "Added to PATH (restart terminal to take effect)"
+    :: Create a convenience omnicore.bat wrapper in the project dir
+    :: (Useful if user adds project dir to PATH separately)
+    echo @echo off > "%PROJECT_DIR%\omnicore.bat"
+    echo "%VENV_SCRIPTS%\omnicore.exe" %%* >> "%PROJECT_DIR%\omnicore.bat"
+
+    call :log_success "Added to PATH: %VENV_SCRIPTS%"
+    call :log_success "Restart terminal or run: refreshenv"
     exit /b 0
 
 :remove_path
-    powershell -Command "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); $p = ($p -split ';' | Where-Object { $_ -ne '%PROJECT_DIR%' }) -join ';'; [Environment]::SetEnvironmentVariable('Path', $p, 'User')" >> "%LOG_FILE%" 2>&1
+    set "VENV_SCRIPTS=%PROJECT_DIR%\.venv\Scripts"
+    powershell -Command "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); $p = ($p -split ';' | Where-Object { $_ -ne '%VENV_SCRIPTS%' }) -join ';'; [Environment]::SetEnvironmentVariable('Path', $p, 'User')" >> "%LOG_FILE%" 2>&1
     call :log_success "Removed from PATH"
     exit /b 0
+
 
 :: ============================================================
 ::  EXIT

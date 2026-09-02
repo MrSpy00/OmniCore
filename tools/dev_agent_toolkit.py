@@ -26,19 +26,10 @@ class DevAgentScaffold(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        pname = str(
-            self._first_param(params, "project_name", "name", default="")
-            or ""
-        ).strip()
-        desc = str(
-            self._first_param(params, "description", "desc", default="") or ""
-        )
-        ptype = str(
-            self._first_param(params, "project_type", "type", default="python")
-        ).lower()
-        out = str(
-            self._first_param(params, "output_dir", "dir", default="") or ""
-        )
+        pname = str(self._first_param(params, "project_name", "name", default="") or "").strip()
+        desc = str(self._first_param(params, "description", "desc", default="") or "")
+        ptype = str(self._first_param(params, "project_type", "type", default="python")).lower()
+        out = str(self._first_param(params, "output_dir", "dir", default="") or "")
 
         if not pname:
             return self._failure("project_name is required")

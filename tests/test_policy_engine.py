@@ -13,10 +13,9 @@ class TestCapabilityPolicyEngine:
         step = TaskStep(
             tool_name="terminal_execute",
             description="attempt kernel probe",
-            parameters={"command": (
-                "bpftrace -e "
-                "'tracepoint:syscalls:sys_enter_openat { printf(\"x\") }'"
-            )},
+            parameters={
+                "command": ("bpftrace -e 'tracepoint:syscalls:sys_enter_openat { printf(\"x\") }'")
+            },
             risk_level=RiskLevel.HIGH,
             dry_run_done=True,
         )
@@ -61,7 +60,7 @@ class TestCapabilityPolicyEngine:
         step = TaskStep(
             tool_name="terminal_execute",
             description="attempt reverse analysis attach",
-            parameters={"command": "cdb.exe -c \"bp User32!MessageBoxW; g\" app.exe"},
+            parameters={"command": 'cdb.exe -c "bp User32!MessageBoxW; g" app.exe'},
             risk_level=RiskLevel.HIGH,
             dry_run_done=True,
         )
@@ -106,10 +105,11 @@ class TestCapabilityPolicyEngine:
         step = TaskStep(
             tool_name="terminal_execute",
             description="attempt WMI persistence",
-            parameters={"command": (
-                "wmic /namespace:\\root\\subscription "
-                "PATH CommandLineEventConsumer CREATE"
-            )},
+            parameters={
+                "command": (
+                    "wmic /namespace:\\root\\subscription PATH CommandLineEventConsumer CREATE"
+                )
+            },
             risk_level=RiskLevel.HIGH,
             dry_run_done=True,
         )

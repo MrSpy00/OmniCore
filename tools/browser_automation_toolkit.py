@@ -55,6 +55,7 @@ class BrowserTakeScreenshot(BaseTool):
         save_path = str(self._first_param(params, "save_path", "path", default="") or "").strip()
 
         from tools.computer_use_toolkit import ScreenCapture
+
         sub_input = ToolInput(
             tool_name="screen_capture",
             parameters={"output_path": save_path} if save_path else {},
@@ -73,6 +74,7 @@ def _fetch_url_html(url: str) -> str:
 
 def _extract_clean_text_from_html(html: str) -> str:
     import re
+
     # Strip script and style tags
     clean = re.sub(r"<(script|style).*?>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
     # Strip HTML tags

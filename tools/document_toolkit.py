@@ -26,10 +26,8 @@ class DocReadPdf(BaseTool):
         try:
             target = _resolve_sandboxed(path)
             if target.suffix.lower() == ".pdf":
-
                 text = await asyncio.to_thread(_read_pdf, target)
             elif target.suffix.lower() == ".docx":
-
                 text = await asyncio.to_thread(_read_docx, target)
             else:
                 return self._failure("Unsupported file type. Use PDF or DOCX.")

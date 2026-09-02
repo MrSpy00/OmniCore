@@ -387,7 +387,7 @@ async def test_game_updater_vdf_and_acf_parsing(tmp_path: Path):
     steamapps = steam_root / "steamapps"
     steamapps.mkdir(parents=True)
 
-    vdf_content = '''
+    vdf_content = """
 "libraryfolders"
 {
     "0"
@@ -395,7 +395,7 @@ async def test_game_updater_vdf_and_acf_parsing(tmp_path: Path):
         "path"      "C:\\\\Program Files (x86)\\\\Steam"
     }
 }
-'''
+"""
     vdf_file = steamapps / "libraryfolders.vdf"
     vdf_file.write_text(vdf_content, encoding="utf-8")
 

@@ -52,8 +52,7 @@ class VideoGetInfo(BaseTool):
 
     name = "video_get_info"
     description = (
-        "Get YouTube video title and basic info using yt-dlp. "
-        "Parameters: url (YouTube URL)."
+        "Get YouTube video title and basic info using yt-dlp. Parameters: url (YouTube URL)."
     )
     is_destructive = False
 

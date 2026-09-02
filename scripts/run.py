@@ -44,6 +44,7 @@ def _build_tool_registry() -> ToolRegistry:
 async def _run(mode: str, debug: bool = False) -> None:
     # Set log level based on --debug flag.
     import logging as _logging
+
     log_level = _logging.DEBUG if debug else _logging.ERROR
     _logging.basicConfig(level=log_level)
     setup_logging()
@@ -57,17 +58,25 @@ async def _run(mode: str, debug: bool = False) -> None:
 
     logger.info("omnicore.starting", mode=mode, model=settings.omni_llm_model)
 
-    # Validate required secrets.
-    if settings.llm_provider.strip().lower() == "groq":
-        if not settings.groq_api_key:
-            logger.error("omnicore.missing_groq_api_key")
-            print("ERROR: GROQ_API_KEY is not set. Copy .env.example to .env and fill it in.")
-            sys.exit(1)
-    else:
-        if not settings.google_api_key:
-            logger.error("omnicore.missing_google_api_key")
-            print("ERROR: GOOGLE_API_KEY is not set. Copy .env.example to .env and fill it in.")
-            sys.exit(1)
+    # Validate required secrets — check only the active provider.
+    provider = settings.llm_provider.strip().lower()
+    availability = settings.provider_availability
+    if provider not in ("ollama",) and not availability.get(provider, False):
+        provider_env_map = {
+            "groq": "GROQ_API_KEY",
+            "gemini": "GOOGLE_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "deepseek": "DEEPSEEK_API_KEY",
+            "mistral": "MISTRAL_API_KEY",
+        }
+        env_var = provider_env_map.get(provider, f"{provider.upper()}_API_KEY")
+        logger.error("omnicore.missing_api_key", provider=provider)
+        print(
+            f"ERROR: {env_var} is not set for provider '{provider}'.\n"
+            "Copy .env.example to .env and fill in your API key."
+        )
+        sys.exit(1)
 
     # Boot subsystems.
     short_term = ShortTermMemory()

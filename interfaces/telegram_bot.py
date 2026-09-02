@@ -272,7 +272,7 @@ class TelegramGateway:
                         attempts=_attempt + 1,
                     )
                     return ApprovalResult.DENIED
-                backoff = 0.5 * (2 ** _attempt)
+                backoff = 0.5 * (2**_attempt)
                 logger.warning(
                     "telegram.approval_send_retry",
                     attempt=_attempt + 1,

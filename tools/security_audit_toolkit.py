@@ -120,6 +120,7 @@ def _run_system_security_audit() -> dict[str, Any]:
 
 def _check_is_admin() -> bool:
     import ctypes
+
     try:
         return ctypes.windll.shell32.IsUserAnAdmin() != 0
     except Exception:
