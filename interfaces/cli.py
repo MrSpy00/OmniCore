@@ -108,7 +108,7 @@ class CLIGateway:
         while True:
             try:
                 user_input = await asyncio.to_thread(input, _PROMPT)
-            except (EOFError, KeyboardInterrupt):
+            except (EOFError, KeyboardInterrupt, asyncio.CancelledError):
                 print("\nGoodbye.")
                 break
 

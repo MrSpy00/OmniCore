@@ -197,7 +197,12 @@ def main() -> None:
         help="Enable verbose debug logging",
     )
     args = parser.parse_args()
-    asyncio.run(_run(args.mode, debug=args.debug))
+    try:
+        asyncio.run(_run(args.mode, debug=args.debug))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        print("\nGoodbye.")
+    except SystemExit:
+        pass
 
 
 if __name__ == "__main__":
