@@ -424,7 +424,7 @@ class WebPlayYoutubeVideoVisible(BaseTool):
 
     def _focus_browser(self) -> dict:
         for title in ("YouTube", "Chrome", "Edge", "Firefox", "Brave", "Opera"):
-            res = force_window_foreground(title, timeout_seconds=1.5)
+            res = force_window_foreground(title, timeout_seconds=0.3)
             if res.get("activated"):
                 return res
         return {"activated": False}

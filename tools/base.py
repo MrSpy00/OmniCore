@@ -412,8 +412,64 @@ def _powershell_appactivate(window_title: str, last_error: str) -> dict[str, Any
 def _force_window_foreground_windows_native(
     title_hint: str, timeout_seconds: float
 ) -> dict[str, Any]:
-    timeout_ms = int(max(0.1, timeout_seconds) * 1000)
+    if not title_hint:
+        return {"activated": False, "method": "win32_ctypes", "error": "empty_title_hint"}
 
+    # --- Fast-path: Pure Win32 ctypes (0-5ms, zero subprocess overhead) ---
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        title_lower = title_hint.lower()
+        deadline = time.time() + max(0.1, timeout_seconds)
+
+        found_hwnd: int | None = None
+        found_title: str = ""
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+        def _enum_cb(hwnd: Any, _lparam: Any) -> bool:
+            nonlocal found_hwnd, found_title
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                val = buf.value
+                if title_lower in val.lower():
+                    found_hwnd = hwnd
+                    found_title = val
+                    return False
+            return True
+
+        cb = WNDENUMPROC(_enum_cb)
+
+        while time.time() < deadline:
+            user32.EnumWindows(cb, 0)
+            if found_hwnd:
+                break
+            time.sleep(0.03)
+
+        if found_hwnd:
+            user32.ShowWindowAsync(found_hwnd, 9)  # SW_RESTORE
+            try:
+                user32.SwitchToThisWindow(found_hwnd, True)
+            except Exception:
+                pass
+            ok = bool(user32.SetForegroundWindow(found_hwnd))
+            return {
+                "activated": True,
+                "method": "win32_ctypes",
+                "matched_title": found_title,
+                "hwnd": int(found_hwnd),
+            }
+    except Exception:
+        pass
+
+    # --- Fallback: PowerShell if ctypes enumeration misses or on restricted environments ---
+    timeout_ms = int(max(0.1, timeout_seconds) * 1000)
     csharp = (
         "using System;\n"
         "using System.Runtime.InteropServices;\n"
@@ -465,7 +521,7 @@ def _force_window_foreground_windows_native(
             ["powershell", "-NoProfile", "-Command", script],
             capture_output=True,
             text=True,
-            timeout=max(10, int(timeout_seconds + 5)),
+            timeout=max(5, int(timeout_seconds + 3)),
             env=env,
         )
     except Exception as exc:
@@ -493,3 +549,4 @@ def _force_window_foreground_windows_native(
         "stderr": completed.stderr,
         "returncode": completed.returncode,
     }
+
