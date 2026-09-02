@@ -101,7 +101,24 @@ class AutonomousPulse:
                 replace_existing=True,
             )
 
-        self._scheduler.start()
+        try:
+            self._scheduler.start()
+        except Exception as exc:
+            logger.warning(
+                "pulse.startup_fallback",
+                reason=f"Scheduler start failed ({exc}); falling back to in-memory",
+            )
+            self._scheduler = AsyncIOScheduler()
+            for job_def in BUILTIN_JOBS:
+                self._scheduler.add_job(
+                    self._execute_scheduled_task,
+                    trigger=CronTrigger.from_crontab(job_def["cron"]),
+                    id=job_def["id"],
+                    name=job_def["name"],
+                    kwargs={"prompt": job_def["prompt"]},
+                    replace_existing=True,
+                )
+            self._scheduler.start()
         logger.info("pulse.started", job_count=len(self._scheduler.get_jobs()))
 
     async def stop(self) -> None:
