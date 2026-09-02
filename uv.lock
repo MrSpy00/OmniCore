@@ -1908,7 +1908,7 @@ wheels = [
 [[package]]
 name = "omnicore"
 version = "0.40.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "apscheduler" },

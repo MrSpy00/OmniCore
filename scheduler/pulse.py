@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 
 
 def _build_scheduler() -> AsyncIOScheduler:
-    """Build an AsyncIOScheduler with SQLite persistence if SQLAlchemy is available."""
+    """Build an AsyncIOScheduler with SQLite persistence if available."""
     settings = get_settings()
     try:
         from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore  # type: ignore[import]
@@ -36,10 +36,10 @@ def _build_scheduler() -> AsyncIOScheduler:
         scheduler = AsyncIOScheduler(jobstores=jobstores)
         logger.info("pulse.jobstore", backend="sqlite", path=str(db_path))
         return scheduler
-    except ImportError:
+    except (ImportError, Exception) as exc:
         logger.warning(
             "pulse.jobstore_fallback",
-            reason="SQLAlchemy not installed; using in-memory job store",
+            reason=f"SQLAlchemy unavailable or incompatible ({exc}); using in-memory job store",
         )
         return AsyncIOScheduler()
 
