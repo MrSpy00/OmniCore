@@ -292,6 +292,7 @@ class CognitiveRouter:
         )
         self._recovery = RecoveryEngine(max_attempts=settings.recovery_max_attempts)
         self._policy = CapabilityPolicyEngine()
+        self._user_pinned_provider: str | None = None  # Set when user uses /provider
 
     def _build_llm(self, settings) -> Any:
         return self._build_llm_for_provider(self._runtime_provider, settings)
@@ -736,6 +737,9 @@ class CognitiveRouter:
         return self._estimate_tokens(f"{system_prompt}\n{recent_text}")
 
     def _maybe_preemptive_gemini_route(self, estimated_tokens: int) -> None:
+        # Never auto-switch if user explicitly selected a provider.
+        if self._user_pinned_provider:
+            return
         if self._runtime_provider != "groq":
             return
         if estimated_tokens <= _GROQ_PREEMPTIVE_TOKEN_LIMIT:
@@ -1065,16 +1069,28 @@ class CognitiveRouter:
             parts = content.split(" ", 1)
             if len(parts) < 2 or not parts[1].strip():
                 current = self._settings.llm_provider.strip().lower() or "gemini"
+                pinned = " (sabit)" if self._user_pinned_provider else ""
                 avail = self._settings.provider_preference
+                keys = self._settings.provider_availability
+                status_lines = []
+                for p in avail:
+                    s = "API key var" if keys.get(p) else "API key yok"
+                    marker = " <-- mevcut" if p == current else ""
+                    status_lines.append(f"  {p}: {s}{marker}")
                 return (
-                    f"Mevcut provider: {current}\n"
-                    f"Kullanilabilir: {', '.join(avail)}\n"
-                    "Degistirmek icin: /provider <gemini|groq|ollama>"
+                    f"Mevcut provider: {current}{pinned}\n"
+                    "Durum:\n" + "\n".join(status_lines) + "\n\n"
+                    "Degistirmek icin: /provider <gemini|groq|ollama>\n"
+                    "Otomatik gecisi acmak icin: /provider auto"
                 )
             new_prov = parts[1].strip().lower()
+            if new_prov == "auto":
+                self._user_pinned_provider = None
+                return "Otomatik provider gecisi acildi."
             supported = ["gemini", "groq", "ollama"]
             if new_prov not in supported:
                 return f"Bilinmeyen provider: {new_prov}\nDesteklenen: {', '.join(supported)}"
+            self._user_pinned_provider = new_prov
             self._settings = self._settings.model_copy(update={"llm_provider": new_prov})
             self._destroy_current_llm()
             self._llm = self._build_llm(self._settings)

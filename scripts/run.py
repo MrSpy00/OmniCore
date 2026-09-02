@@ -44,15 +44,16 @@ def _build_tool_registry() -> ToolRegistry:
 async def _run(mode: str, debug: bool = False) -> None:
     # Set log level based on --debug flag.
     import logging as _logging
-    _logging.basicConfig(level=_logging.DEBUG if debug else _logging.WARNING)
+    log_level = _logging.DEBUG if debug else _logging.ERROR
+    _logging.basicConfig(level=log_level)
     setup_logging()
     settings = get_settings()
 
     # Override ALL loggers to match debug flag.
     if not debug:
-        _logging.getLogger().setLevel(_logging.WARNING)
+        _logging.getLogger().setLevel(_logging.ERROR)
         for name in _logging.Logger.manager.loggerDict:
-            _logging.getLogger(name).setLevel(_logging.WARNING)
+            _logging.getLogger(name).setLevel(_logging.ERROR)
 
     logger.info("omnicore.starting", mode=mode, model=settings.omni_llm_model)
 
