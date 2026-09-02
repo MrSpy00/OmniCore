@@ -54,21 +54,54 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _focus_window_by_title(title: str) -> bool:
+    """Try to bring a window matching title to foreground. Returns True if successful."""
+    if not title.strip():
+        return False
+    try:
+        from tools.base import force_window_foreground
+        result = force_window_foreground(title, timeout_seconds=3.0)
+        return bool(result.get("activated", False))
+    except Exception:
+        return False
+
+
+def _get_window_bbox(title: str) -> dict[str, int] | None:
+    """Get bounding box of a window by title for region capture."""
+    if not title.strip():
+        return None
+    try:
+        import pygetwindow as gw  # type: ignore[import-not-found]
+        windows = gw.getWindowsWithTitle(title)
+        if windows:
+            w = windows[0]
+            if w.width > 0 and w.height > 0:
+                return {"left": w.left, "top": w.top, "width": w.width, "height": w.height}
+    except Exception:
+        pass
+    return None
+
+
 class GuiAnalyzeScreen(BaseTool):
     name = "gui_analyze_screen"
     description = "Take a screenshot and extract visible text using Gemini vision."
-    is_destructive = True
+    is_destructive = False  # Read-only operation, no approval needed
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
+        # Default to Desktop/screenshot for easy access
         output_path = str(
-            self._first_param(params, "output_path", "path", default="vision_capture.png")
+            self._first_param(params, "output_path", "path", default="Desktop/screenshot.png")
         )
         region = params.get("region")
         if isinstance(region, str):
             region = None
         target = str(
             self._first_param(params, "target", "element", "query", default="") or ""
+        ).strip()
+        # app_name: window title to focus BEFORE taking screenshot
+        app_name = str(
+            self._first_param(params, "app", "app_name", "application", "window", default="") or ""
         ).strip()
         click = bool(params.get("click", False))
         verify_after_click = bool(params.get("verify_after_click", False))
@@ -80,15 +113,31 @@ class GuiAnalyzeScreen(BaseTool):
             save_path = _resolve_sandboxed(output_path)
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
+            # Focus target window BEFORE capturing if app_name is specified
+            if app_name:
+                await asyncio.to_thread(_focus_window_by_title, app_name)
+                await asyncio.to_thread(time.sleep, 0.8)  # Let window come to foreground
+                # Try to get window bounds for region capture
+                if region is None:
+                    window_bbox = await asyncio.to_thread(_get_window_bbox, app_name)
+                    if window_bbox:
+                        region = window_bbox
+
             text = ""
             max_chars = int(params.get("max_chars", 20_000))
             payload: dict[str, Any] = {"path": str(save_path), "text": text}
+            if app_name:
+                payload["focused_app"] = app_name
 
             locator_attempts: list[dict[str, Any]] = []
             located: dict[str, Any] | None = None
             attempts = max(0, scroll_retries) + 1
 
             for attempt in range(1, attempts + 1):
+                # Re-focus window before each retry if scrolling happened
+                if app_name and attempt > 1:
+                    await asyncio.to_thread(_focus_window_by_title, app_name)
+                    await asyncio.to_thread(time.sleep, 0.3)
                 await asyncio.to_thread(_capture_screen, save_path, region)
                 text = await asyncio.to_thread(
                     analyze_image_with_gemini, save_path, SCREEN_ANALYSIS_PROMPT
@@ -176,7 +225,7 @@ def analyze_image_with_gemini(path: Path, prompt: str = SCREEN_ANALYSIS_PROMPT) 
         try:
             client = genai.Client(api_key=key)
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=[
                     prompt,
                     types.Part.from_bytes(data=base64.b64decode(encoded), mime_type="image/png"),

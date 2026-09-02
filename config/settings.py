@@ -148,7 +148,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=str(_PROJECT_ROOT / ".env"),
+        env_file=(str(_PROJECT_ROOT / ".env"), str(_PROJECT_ROOT / ".env.local")),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -312,6 +312,7 @@ class Settings(BaseSettings):
 
     # --- HITL Guardian -------------------------------------------------------
     hitl_timeout_minutes: int = 5
+    approval_mode: str = "ask"  # ask, safe, or yes/full (persisted via APPROVAL_MODE)
 
     # --- Paths ---------------------------------------------------------------
     chroma_persist_dir: Path = Path("./data/chromadb")

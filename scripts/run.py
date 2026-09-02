@@ -96,6 +96,11 @@ async def _run(mode: str, debug: bool = False) -> None:
         approval_callback=None,  # overridden below per gateway
     )
 
+    # Apply persisted approval mode
+    from config.live_config import get_live_config
+    saved_approval = get_live_config().get("approval_mode") or getattr(settings, "approval_mode", "ask")
+    router._guardian.set_mode(saved_approval)
+
     # Start the scheduler.
     pulse = AutonomousPulse(router, state_tracker)
     await pulse.start()
@@ -135,6 +140,19 @@ async def _run(mode: str, debug: bool = False) -> None:
             logger.info("omnicore.gateway", type="rest", port=8000)
             await server.serve()
 
+        elif mode == "web":
+            import uvicorn
+
+            from interfaces.dashboard import create_dashboard_app, set_router
+
+            set_router(router)
+            app = create_dashboard_app()
+            config = uvicorn.Config(app=app, host="0.0.0.0", port=8080, log_level="info")
+            server = uvicorn.Server(config)
+            logger.info("omnicore.gateway", type="web", port=8080)
+            print("[OmniCore Dashboard] http://localhost:8080")
+            await server.serve()
+
         elif mode == "mcp":
             from interfaces.mcp_gateway import MCPServerGateway
 
@@ -166,20 +184,57 @@ async def _run(mode: str, debug: bool = False) -> None:
             await gateway.run()
 
         elif mode == "voice":
-            from interfaces.voice_duplex import DuplexVoiceEngine
+            from interfaces.voice_duplex import VoiceEngine
 
             logger.info("omnicore.gateway", type="voice")
-            engine = DuplexVoiceEngine()
-            await engine.start_session()
-            print(
-                "[OmniCore Duplex Voice Engine v0.40.0] Session active. Press Ctrl+C to stop.",
-                flush=True,
-            )
+            voice = VoiceEngine(router)
+            deps = voice.check_dependencies()
+            missing = [k for k, v in deps.items() if not v]
+            if missing:
+                print(f"Voice deps missing: {', '.join(missing)}")
+                print("Install: uv add SpeechRecognition sounddevice edge-tts")
+                sys.exit(1)
+            print("[OmniCore Voice] Dinlemeye hazir. Konusmaya baslayin.")
+            print("[OmniCore Voice] Komutlar: 'quit' = cikis, 'kayit' = kayit bitir")
             try:
-                while engine.is_streaming:
-                    await asyncio.sleep(1)
+                while True:
+                    try:
+                        result = await asyncio.to_thread(
+                            lambda: asyncio.run(voice.listen_and_respond())
+                        )
+                    except Exception:
+                        # Run in main loop if thread fails
+                        result = await voice.listen_and_respond()
+
+                    if result.get("user_text"):
+                        print(f"\n  [Siz] {result['user_text']}")
+                        print(f"  [OmniCore] {result['response_text']}")
+                    if result.get("response_audio"):
+                        # Play audio if possible
+                        try:
+                            import tempfile
+                            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                                f.write(result["response_audio"])
+                                audio_path = f.name
+                            # Try to play with system command
+                            import subprocess
+                            if sys.platform == "win32":
+                                subprocess.Popen(
+                                    ["start", "", audio_path],
+                                    shell=True,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                )
+                            else:
+                                subprocess.Popen(
+                                    ["mpg123", audio_path],
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                )
+                        except Exception:
+                            pass
             except (KeyboardInterrupt, asyncio.CancelledError):
-                await engine.stop_session()
+                print("\n[OmniCore Voice] Session ended.")
 
         else:
             print(f"Unknown mode: {mode}")
@@ -197,7 +252,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="OmniCore AI OS Assistant v0.40.0")
     parser.add_argument(
         "--mode",
-        choices=["cli", "telegram", "rest", "mcp", "hud", "voice"],
+        choices=["cli", "telegram", "rest", "web", "mcp", "hud", "voice"],
         default="cli",
         help="Which gateway interface to launch (default: cli)",
     )

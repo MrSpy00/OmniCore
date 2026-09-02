@@ -20,7 +20,7 @@ from tools.registry import ToolRegistry
 
 def test_settings_default_model():
     s = Settings()
-    assert s.omni_llm_model == "gemini-2.0-flash"
+    assert s.omni_llm_model == "gemini-2.5-flash"
 
 
 def test_settings_recovery_max_attempts_default():

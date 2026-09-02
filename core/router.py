@@ -190,19 +190,25 @@ _QUERY_TOOL_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ag", ("net_", "api_", "dns", "socket", "ping")),
     ("internet", ("net_", "api_", "web_")),
     ("web", ("web_", "browser", "http", "api_")),
-    ("tarayici", ("web_", "gui_", "browser")),
-    ("browser", ("web_", "gui_", "browser")),
+    ("tarayici", ("web_play_youtube_video_visible", "os_open_browser_visible", "web_")),
+    ("browser", ("web_play_youtube_video_visible", "os_open_browser_visible", "web_")),
+    ("youtube", ("web_play_youtube_video_visible", "media_", "web_")),
+    ("video", ("web_play_youtube_video_visible", "media_", "web_")),
+    ("kanal", ("web_play_youtube_video_visible", "os_open_browser_visible", "web_")),
     ("gui", ("gui_", "vision", "screen", "click", "mouse")),
-    ("ekran", ("gui_", "vision", "screen", "ocr")),
+    ("ekran", ("gui_take_screenshot", "gui_analyze_screen", "vision")),
+    ("screenshot", ("gui_take_screenshot", "gui_analyze_screen")),
+    ("goruntu", ("gui_take_screenshot", "gui_analyze_screen", "media_")),
     ("vision", ("vision", "gui_", "ocr", "screen")),
     ("ocr", ("vision", "gui_", "screen")),
-    ("resim", ("media_", "image", "vision")),
-    ("video", ("media_", "video", "web_")),
+    ("resim", ("gui_take_screenshot", "media_", "image", "vision")),
     ("ses", ("media_", "audio")),
-    ("spotify", ("media_control_native", "media_control_spotify_native", "media_control")),
-    ("muzik", ("media_control_native", "media_control_spotify_native", "media_control")),
-    ("music", ("media_control_native", "media_control_spotify_native", "media_control")),
-    ("oynat", ("media_control_native", "media_control_spotify_native", "media_control")),
+    ("spotify", ("media_control_spotify_native", "os_launch_application", "media_control_native")),
+    ("muzik", ("media_control_spotify_native", "media_control_native", "web_play_youtube_video_visible")),
+    ("music", ("media_control_spotify_native", "media_control_native", "web_play_youtube_video_visible")),
+    ("oynat", ("web_play_youtube_video_visible", "media_control_spotify_native", "media_control_native")),
+    ("uygulama", ("os_launch_application", "os_list_processes", "sys_")),
+    ("program", ("os_launch_application", "os_list_processes", "sys_")),
     ("guvenlik", ("security", "encrypt", "decrypt", "audit")),
     ("security", ("security", "encrypt", "decrypt", "audit")),
 )
@@ -213,7 +219,7 @@ _QUERY_TOOL_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
 _TR_SYNONYMS: dict[str, tuple[str, ...]] = {
     "dosya": ("file", "fs", "read", "write", "path"),
     "klasor": ("dir", "folder", "path", "list"),
-    "ac": ("open", "launch", "browser", "start", "gui"),
+    "ac": ("open", "launch", "browser", "start", "gui", "play"),
     "kapat": ("close", "kill", "stop", "process"),
     "sil": ("delete", "remove", "clean", "unlink"),
     "yaz": ("write", "create", "append", "save"),
@@ -221,9 +227,13 @@ _TR_SYNONYMS: dict[str, tuple[str, ...]] = {
     "indir": ("download", "fetch", "get", "http"),
     "yukle": ("upload", "send", "post", "http"),
     "calistir": ("run", "execute", "launch", "process"),
-    "ekran": ("screen", "gui", "screenshot", "display", "vision"),
+    "ekran": ("screenshot", "screen", "gui", "display", "vision"),
+    "goruntu": ("screenshot", "image", "vision", "screen"),
     "ses": ("audio", "volume", "music", "sound", "spotify"),
-    "goruntu": ("image", "vision", "ocr", "screen", "media"),
+    "youtube": ("youtube", "video", "play", "browser"),
+    "spotify": ("spotify", "media", "music", "launch"),
+    "uygulama": ("launch", "application", "process", "app"),
+    "video": ("video", "youtube", "media", "play"),
     "pil": ("battery", "power", "system"),
     "sistem": ("system", "info", "process", "os"),
     "ag": ("net", "network", "ping", "dns", "socket"),
@@ -834,9 +844,20 @@ class CognitiveRouter:
             "KURAL 9: ASLA C:\\Users\\Kullanıcı gibi yer tutucu/uydurma mutlak yol üretme. "
             "Her zaman Desktop/dosya.txt gibi göreli yol kullan. "
             "Yerel çözümlemeyi sisteme bırak. "
-            "KURAL 10: Kullanıcı kod tabanında 'scan/search/find/ara/tara' isterse "
-            "hemen agent_spawn_subtask ile delegasyon yap; "
-            "alt görevlerde dev_glob_search ve dev_grep_analyzer kullan."
+            "KURAL 10: Dogrudan arac calistir. agent_spawn_subtask sadece dosya sistemi "
+            "taramasi icin kullanilir. Web, tarayici, youtube, gui islerinde ASLA "
+            "delegasyon yapma, dogrudan ilgili araci cagir. "
+            "KURAL 11: Ekran görüntüsü (screenshot) alınırken HER ZAMAN doğrudan gui_take_screenshot "
+            "aracını kullan ve output_path parametresine doğrudan masaüstü dosya yolunu ver "
+            "(örn: 'Desktop/screenshot.png' veya 'Desktop/spotify_anasayfa.png'). "
+            "ASLA ekran görüntüsü aldıktan sonra terminalden mv/move komutu çalıştırma! "
+            "Eğer belirli bir uygulamanın (örn: Spotify, Chrome) ekran görüntüsü istenmişse, "
+            "önce os_launch_application ile uygulamayı başlat, ardından gui_take_screenshot "
+            "aracına app_name parametresini ver (örn: app_name='Spotify'). "
+            "KURAL 12: YouTube'da video açmak, oynatmak veya aratmak istendiğinde HER ZAMAN "
+            "doğrudan web_play_youtube_video_visible aracını kullan (query='aranacak video veya kanal'). "
+            "Tarayıcı otomatik olarak kullanıcının ekranında görünür açılacaktır. "
+            "KURAL 13: Genel web siteleri açılmak istendiğinde doğrudan os_open_browser_visible aracını kullan."
         )
         return (
             f"{mandated}\n\n"
@@ -1029,10 +1050,27 @@ class CognitiveRouter:
 
     # -- public API -----------------------------------------------------------
 
+    async def _emit_progress(
+        self,
+        callback: Any,
+        event_type: str,
+        data: dict[str, Any],
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            if asyncio.iscoroutinefunction(callback):
+                await callback(event_type, data)
+            else:
+                callback(event_type, data)
+        except Exception:
+            pass
+
     async def handle_message(
         self,
         user_message: Message,
         conversation_id: str = "default",
+        on_progress: Any = None,
     ) -> str:
         """Process a user message end-to-end and return the assistant reply.
 
@@ -1053,6 +1091,8 @@ class CognitiveRouter:
         # 1. Store in short-term memory.
         self._short_term.add_message(conversation_id, user_message)
         self._route_provider_if_needed(user_message.content)
+
+        await self._emit_progress(on_progress, "thinking", {"text": "İstek analiz ediliyor..."})
 
         # 2. Retrieve relevant long-term memories.
         memory_context = self._build_memory_context(user_message, n_results=6)
@@ -1079,7 +1119,9 @@ class CognitiveRouter:
         classification = await self._classify_intent(user_message.content, lc_messages)
 
         if classification["needs_plan"]:
-            reply = await self._execute_plan(user_message, classification, conversation_id)
+            reply = await self._execute_plan(
+                user_message, classification, conversation_id, on_progress=on_progress
+            )
         else:
             # Simple conversational reply — no tools needed.
             response = await self._ainvoke_with_retry(lc_messages)
@@ -1115,22 +1157,32 @@ class CognitiveRouter:
             state = "ON" if enabled else "OFF"
             return f"Plan mode {state}. Destructive steps will be dry-run enforced."
         if lowered.startswith("/doctor"):
+            from config.live_config import get_live_config
+
             provider = getattr(self, "_runtime_provider", "unknown")
             tools_count = len(self._registry) if hasattr(self, "_registry") else 0
             settings = getattr(self, "_settings", None) or get_settings()
+            live_config = get_live_config()
             groq_keys = len([k for k in getattr(settings, "groq_api_keys", []) if k])
             gemini_keys = len([k for k in getattr(settings, "google_api_keys", []) if k])
-            model_name = getattr(settings, "omni_llm_model", "unknown")
+            model_name = live_config.get("model") or getattr(settings, "omni_llm_model", "unknown")
             is_plan = (
                 getattr(self._guardian, "plan_mode", False) if hasattr(self, "_guardian") else False
             )
+            perm_mode = self._guardian.mode.value if hasattr(self._guardian, "mode") else "ask"
             return (
-                "System diagnostics OK\n"
-                f"provider={provider}\n"
-                f"model={model_name}\n"
-                f"plan_mode={is_plan}\n"
-                f"tools={tools_count}\n"
-                f"groq_keys={groq_keys} | gemini_keys={gemini_keys}"
+                "🔍 Sistem Tanılaması\n"
+                "─────────────────────\n"
+                f"  Provider:     {provider}\n"
+                f"  Model:        {model_name}\n"
+                f"  Plan modu:    {'Açık' if is_plan else 'Kapalı'}\n"
+                f"  Araçlar:      {tools_count}\n"
+                f"  Groq keys:    {groq_keys}\n"
+                f"  Gemini keys:  {gemini_keys}\n"
+                f"  İzin modu:    {perm_mode}\n"
+                f"  Circuit:      {'Aktif' if self._circuit_breaker.is_open else 'Kapalı'}\n"
+                "─────────────────────\n"
+                "  ✅ Tüm sistemler çalışıyor"
             )
         if lowered.startswith("/memory"):
             items = self._long_term.recall(user_message.content, n_results=5)
@@ -1142,90 +1194,130 @@ class CognitiveRouter:
             return "Konusma gecmisi temizlendi. \u267b\ufe0f Yeni konusmaya hazir!"
         if lowered.startswith("/models"):
             from config.settings import get_available_models
+            from config.live_config import get_live_config
 
             all_models = get_available_models()
             availability = self._settings.provider_availability
-            lines = ["📋 Kullanilabilir LLM Modeller:\n"]
+            live_config = get_live_config()
+            lines = ["📋 Kullanılabilir LLM Modeller:\n"]
             current_provider = getattr(self, "_runtime_provider", "")
+
+            # Get the currently active model for each provider (runtime values)
+            active_models = {
+                "gemini": live_config.get("model") or self._settings.omni_llm_model,
+                "groq": live_config.get("model") or self._settings.groq_primary_model,
+                "openai": getattr(self._settings, "openai_model", ""),
+                "anthropic": getattr(self._settings, "anthropic_model", ""),
+                "deepseek": getattr(self._settings, "deepseek_model", ""),
+                "mistral": getattr(self._settings, "mistral_model", ""),
+                "ollama": getattr(self._settings, "ollama_model", ""),
+            }
+            # If the runtime provider is groq, the active groq model might differ from settings
+            if current_provider == "groq" and self._model_rotator is not None:
+                active_models["groq"] = self._model_rotator.current
+
             for prov, models in all_models.items():
                 has_key = availability.get(prov, False)
                 key_status = "✅ API key var" if has_key else "❌ API key yok"
                 prov_marker = " ← aktif provider" if prov == current_provider else ""
                 lines.append(f"📌 {prov.upper()} ({key_status}){prov_marker}:")
                 for m in models:
-                    active = (
-                        " [AKTİF]"
-                        if (
-                            (prov == "gemini" and m["id"] == self._settings.omni_llm_model)
-                            or (prov == "groq" and m["id"] == self._settings.groq_primary_model)
-                            or (
-                                prov == "openai"
-                                and m["id"] == getattr(self._settings, "openai_model", "")
-                            )
-                            or (
-                                prov == "anthropic"
-                                and m["id"] == getattr(self._settings, "anthropic_model", "")
-                            )
-                            or (
-                                prov == "deepseek"
-                                and m["id"] == getattr(self._settings, "deepseek_model", "")
-                            )
-                            or (
-                                prov == "mistral"
-                                and m["id"] == getattr(self._settings, "mistral_model", "")
-                            )
-                            or (
-                                prov == "ollama"
-                                and m["id"] == getattr(self._settings, "ollama_model", "")
-                            )
-                        )
-                        else ""
-                    )
+                    is_active = m["id"] == active_models.get(prov, "")
+                    active = " [AKTİF]" if is_active else ""
                     dim = "" if has_key or prov == "ollama" else "  (key yok) "
                     lines.append(
                         f"  - {m['id']}{active}\n"
                         f"    {dim}{m['name']} | ctx={m['context']} | {m['speed']}"
                     )
             lines.append(
-                "\n💡 Model degistirmek: /setmodel <model-id>\n"
-                "💡 Provider degistirmek: /provider <provider>"
+                "\n💡 Model değiştirmek: /setmodel <model-id>\n"
+                "💡 Kısa isim: flash, lite, pro, 20b, 120b, mixtral...\n"
+                "💡 Provider değiştirmek: /provider <provider>"
             )
             return "\n".join(lines)
 
         if lowered.startswith("/setmodel "):
             parts = content.split(" ", 2)
             if len(parts) < 2:
-                return "Kullanim: /setmodel <model-id>  (orn: /setmodel gemini-2.5-pro)"
+                return "Kullanim: /setmodel <model-id>  (orn: /setmodel gemini-2.5-pro veya /setmodel flash)"
             model_id = parts[1].strip()
-            from config.settings import AVAILABLE_GEMINI_MODELS, AVAILABLE_GROQ_MODELS
+            from config.live_config import get_live_config, resolve_model_alias
+            from config.settings import (
+                AVAILABLE_GEMINI_MODELS,
+                AVAILABLE_GROQ_MODELS,
+                AVAILABLE_OPENAI_MODELS,
+                AVAILABLE_ANTHROPIC_MODELS,
+                AVAILABLE_DEEPSEEK_MODELS,
+                AVAILABLE_MISTRAL_MODELS,
+                AVAILABLE_OLLAMA_MODELS,
+            )
 
-            gemini_ids = {m["id"] for m in AVAILABLE_GEMINI_MODELS}
-            groq_ids = {m["id"] for m in AVAILABLE_GROQ_MODELS}
-            if model_id in gemini_ids:
+            # Resolve aliases
+            current_provider = getattr(self, "_runtime_provider", "gemini")
+            model_id = resolve_model_alias(model_id, current_provider)
+
+            all_gemini = {m["id"] for m in AVAILABLE_GEMINI_MODELS}
+            all_groq = {m["id"] for m in AVAILABLE_GROQ_MODELS}
+            all_openai = {m["id"] for m in AVAILABLE_OPENAI_MODELS}
+            all_anthropic = {m["id"] for m in AVAILABLE_ANTHROPIC_MODELS}
+            all_deepseek = {m["id"] for m in AVAILABLE_DEEPSEEK_MODELS}
+            all_mistral = {m["id"] for m in AVAILABLE_MISTRAL_MODELS}
+            all_ollama = {m["id"] for m in AVAILABLE_OLLAMA_MODELS}
+
+            live_config = get_live_config()
+
+            if model_id in all_gemini:
+                live_config.set_model_for_provider("gemini", model_id)
                 self._settings = self._settings.model_copy(update={"omni_llm_model": model_id})
                 self._destroy_current_llm()
                 self._llm = self._build_llm(self._settings)
-                return (
-                    f"Gemini modeli degistirildi: {model_id}\n"
-                    f"Degisikligi kalici yapmak icin .env dosyasinda "
-                    f"OMNI_LLM_MODEL={model_id} ayarlayin."
-                )
-            if model_id in groq_ids:
-                self._settings = self._settings.model_copy(update={"groq_primary_model": model_id})
+                return f"✅ Gemini modeli değiştirildi ve kaydedildi: {model_id}"
+            if model_id in all_groq:
+                live_config.set_model_for_provider("groq", model_id)
+                self._settings = self._settings.model_copy(update={"groq_primary_model": model_id, "groq_llm_model": model_id})
                 if self._model_rotator is not None:
                     self._model_rotator = None
                 self._destroy_current_llm()
                 self._llm = self._build_llm(self._settings)
-                return (
-                    f"Groq modeli degistirildi: {model_id}\n"
-                    f"Degisikligi kalici yapmak icin .env dosyasinda "
-                    f"GROQ_PRIMARY_MODEL={model_id} ayarlayin."
-                )
+                return f"✅ Groq modeli değiştirildi ve kaydedildi: {model_id}"
+            if model_id in all_openai:
+                live_config.set_model_for_provider("openai", model_id)
+                self._settings = self._settings.model_copy(update={"openai_model": model_id})
+                self._destroy_current_llm()
+                self._llm = self._build_llm(self._settings)
+                return f"✅ OpenAI modeli değiştirildi ve kaydedildi: {model_id}"
+            if model_id in all_anthropic:
+                live_config.set_model_for_provider("anthropic", model_id)
+                self._settings = self._settings.model_copy(update={"anthropic_model": model_id})
+                self._destroy_current_llm()
+                self._llm = self._build_llm(self._settings)
+                return f"✅ Anthropic modeli değiştirildi ve kaydedildi: {model_id}"
+            if model_id in all_deepseek:
+                live_config.set_model_for_provider("deepseek", model_id)
+                self._settings = self._settings.model_copy(update={"deepseek_model": model_id})
+                self._destroy_current_llm()
+                self._llm = self._build_llm(self._settings)
+                return f"✅ DeepSeek modeli değiştirildi ve kaydedildi: {model_id}"
+            if model_id in all_mistral:
+                live_config.set_model_for_provider("mistral", model_id)
+                self._settings = self._settings.model_copy(update={"mistral_model": model_id})
+                self._destroy_current_llm()
+                self._llm = self._build_llm(self._settings)
+                return f"✅ Mistral modeli değiştirildi ve kaydedildi: {model_id}"
+            if model_id in all_ollama:
+                live_config.set_model_for_provider("ollama", model_id)
+                self._settings = self._settings.model_copy(update={"ollama_model": model_id})
+                self._destroy_current_llm()
+                self._llm = self._build_llm(self._settings)
+                return f"✅ Ollama modeli değiştirildi ve kaydedildi: {model_id}"
             return (
-                f"Bilinmeyen model: {model_id}\n"
-                "Mevcut modelleri gormek icin /models komutunu kullanin."
+                f"❌ Bilinmeyen model: {model_id}\n"
+                "Mevcut modelleri görmek için /models komutunu kullanın.\n"
+                "Kısa isim kullanabilirsiniz: flash, lite, pro, 20b, 120b, mixtral..."
             )
         if lowered.startswith("/provider"):
+            from config.live_config import get_live_config
+
             parts = content.split(" ", 1)
             if len(parts) < 2 or not parts[1].strip():
                 current = self._settings.llm_provider.strip().lower() or "gemini"
@@ -1262,8 +1354,11 @@ class CognitiveRouter:
                 env_var = hint_map.get(new_prov, f"{new_prov.upper()}_API_KEY")
                 return (
                     f"❌ {new_prov} için API key bulunamadı.\n"
-                    f".env dosyasına {env_var}=<api-key> ekleyin."
+                    f"/config ile API key ayarlayabilirsiniz veya .env dosyasına {env_var}=<api-key> ekleyin."
                 )
+            # Persist to live config
+            live_config = get_live_config()
+            live_config.set("provider", new_prov)
             self._user_pinned_provider = new_prov
             self._settings = self._settings.model_copy(update={"llm_provider": new_prov})
             self._runtime_provider = new_prov
@@ -1272,57 +1367,81 @@ class CognitiveRouter:
             return f"✅ Provider değiştirildi: {new_prov}"
 
         if lowered.startswith("/status"):
+            from config.live_config import get_live_config
+
             provider = getattr(self, "_runtime_provider", "unknown")
             tools_count = len(self._registry) if hasattr(self, "_registry") else 0
+            live_config = get_live_config()
             model_name = (
-                self._settings.omni_llm_model
+                live_config.get("model") or self._settings.omni_llm_model
                 if provider == "gemini"
-                else self._settings.groq_primary_model
+                else live_config.get("model") or self._settings.groq_primary_model
             )
             is_plan = getattr(self._guardian, "plan_mode", False)
-            user_name = self._settings.user_name.strip() or "(OmniCore)"
+            user_name = (
+                live_config.get("name")
+                or self._settings.user_name.strip()
+                or "(OmniCore)"
+            )
+            perm_mode = self._guardian.mode.value if hasattr(self._guardian, "mode") else "ask"
+            perm_label = {"yes": "🔓 Tam Yetki", "ask": "🔒 Sorarak Onay"}.get(perm_mode, perm_mode)
             return (
-                f"Kullanici: {user_name}\n"
-                f"Provider: {provider} | Model: {model_name}\n"
-                f"Araclar: {tools_count} | Plan modu: {'ACIK' if is_plan else 'KAPALI'}\n"
-                f"Hafiza: kisa-vade aktif, uzun-vade ChromaDB"
+                f"👤 Kullanıcı: {user_name}\n"
+                f"🤖 Provider: {provider} | Model: {model_name}\n"
+                f"🔧 Araçlar: {tools_count} | Plan modu: {'AÇIK' if is_plan else 'KAPALI'}\n"
+                f"🛡️ İzin: {perm_label}\n"
+                f"💾 Hafıza: kısa-vade aktif, uzun-vade ChromaDB"
             )
         if lowered.startswith("/name"):
+            from config.live_config import get_live_config
+
             parts = content.split(" ", 1)
             if len(parts) < 2 or not parts[1].strip():
-                current = self._settings.user_name.strip() or "(OmniCore)"
+                current = (
+                    get_live_config().get("name")
+                    or self._settings.user_name.strip()
+                    or "(OmniCore)"
+                )
                 return (
-                    f"Mevcut gorunen ad: {current}\n"
-                    "Degistirmek icin: /name <yeni-ad>\n"
-                    "Sifirlamak icin: /name off"
+                    f"Mevcut görünen ad: {current}\n"
+                    "Değiştirmek için: /name <yeni-ad>\n"
+                    "Sıfırlamak için: /name off"
                 )
             new_name = parts[1].strip()
-            if new_name.lower() in ("off", "reset", "sifirla", "kapat"):
+            live_config = get_live_config()
+            if new_name.lower() in ("off", "reset", "sıfırla", "sifirla", "kapat"):
+                live_config.set("name", "")
                 self._settings = self._settings.model_copy(update={"user_name": ""})
-                return "Gorunen ad sifirlandi. Bundan sonra OmniCore olarak taniniyorum."
+                return "Görünen ad sıfırlandı. Bundan sonra OmniCore olarak tanınıyorum."
+            live_config.set("name", new_name)
             self._settings = self._settings.model_copy(update={"user_name": new_name})
             return (
-                f"Hosgeldin {new_name}! Bundan sonra sana {new_name} olarak hitap edecegim.\n"
-                "Degisikligi kalici yapmak icin .env dosyasinda USER_NAME=yeni-adin ayarlayin."
+                f"Hoş geldin {new_name}! Bundan sonra sana {new_name} olarak hitap edeceğim.\n"
+                "Değişiklik otomatik kaydedildi (.env.local)."
             )
         if lowered.startswith("/help"):
             return (
-                "\U0001f4cb OmniCore Komutlari:\n\n"
-                "/help           — Bu yardim mesaji\n"
-                "/status         — Sistem durumu ozeti\n"
-                "/name [ad]      — Gorunen adini goster/degistir\n"
-                "/provider [ad]  — Provider goster/degistir (gemini/groq/ollama)\n"
-                "/setmodel <id>  — Aktif modeli degistir\n"
-                "/models         — Kullanilabilir LLM modellerini listele\n"
-                "/plan           — Plan modunu ac/kapat\n"
-                "/doctor         — Detayli sistem tekhisi\n"
-                "/memory         — Hafiza onizleme\n"
-                "/reset          — Konusma gecmisini temizle\n"
+                "📋 OmniCore Komutları:\n\n"
+                "/help           — Bu yardım mesajı\n"
+                "/status         — Sistem durumu özeti\n"
+                "/name [ad]      — Görünen adını göster/değiştir\n"
+                "/provider [ad]  — Provider göster/değiştir (gemini/groq/ollama)\n"
+                "/setmodel <id>  — Aktif modeli değiştir (kısa isim: flash, pro, 20b)\n"
+                "/models         — Kullanılabilir LLM modellerini listele\n"
+                "/config         — Yapılandırma ayarlarını göster\n"
+                "/config set K V — Ayar değiştir (kalıcı)\n"
+                "/set K V        — Hızlı ayar değiştir (kısa yolu)\n"
+                "/perm [mod]     — İzin modu: full/safe/ask\n"
+                "/plan           — Plan modunu aç/kapat\n"
+                "/doctor         — Detaylı sistem teşhisi\n"
+                "/memory         — Hafıza önizleme\n"
+                "/reset          — Konuşma geçmişini temizle\n"
                 "/hud            — Cyberpunk HUD paneli\n"
-                "/commit         — Git commit yardimcisi\n\n"
-                "Diger komutlar:\n"
+                "/commit         — Git commit yardımcısı\n\n"
+                "Kısayollar:\n"
+                "/               — Komut menüsünü aç (↑↓ ile seçim)\n"
                 ".omnicore approve yes — Otomatik onay modu\n"
-                ".omnicore approve ask — Manuel onay modu (varsayilan)"
+                ".omnicore ask        — Manuel onay modu (varsayılan)"
             )
         return None
 
@@ -1677,6 +1796,7 @@ class CognitiveRouter:
         user_message: Message,
         classification: dict[str, Any],
         conversation_id: str,
+        on_progress: Any = None,
     ) -> str:
         """Build a TaskPlan from the classification and execute step by step."""
         plan = self._planner.build_plan(
@@ -1691,10 +1811,45 @@ class CognitiveRouter:
 
         plan.status = TaskStatus.EXECUTING
         results_summary: list[str] = []
+        total_steps = len(plan.steps)
 
-        for step in plan.steps:
+        await self._emit_progress(
+            on_progress,
+            "plan_created",
+            {
+                "total": total_steps,
+                "steps": [
+                    {"step": i + 1, "tool": s.tool_name, "description": s.description}
+                    for i, s in enumerate(plan.steps)
+                ],
+            },
+        )
+
+        for idx, step in enumerate(plan.steps, 1):
             step.status = StepStatus.IN_PROGRESS
+            await self._emit_progress(
+                on_progress,
+                "step_start",
+                {
+                    "step": idx,
+                    "total": total_steps,
+                    "tool": step.tool_name,
+                    "description": step.description,
+                },
+            )
+
             if await self._handle_unknown_tool_step(step, user_message, results_summary):
+                await self._emit_progress(
+                    on_progress,
+                    "step_end",
+                    {
+                        "step": idx,
+                        "total": total_steps,
+                        "tool": step.tool_name,
+                        "status": "unknown_tool",
+                        "result": step.result,
+                    },
+                )
                 continue
 
             if step.delegated:
@@ -1702,6 +1857,17 @@ class CognitiveRouter:
                     step, user_message, results_summary
                 )
                 if delegated_ok:
+                    await self._emit_progress(
+                        on_progress,
+                        "step_end",
+                        {
+                            "step": idx,
+                            "total": total_steps,
+                            "tool": step.tool_name,
+                            "status": "ok",
+                            "result": step.result,
+                        },
+                    )
                     continue
 
             tool, tool_input = await self._build_tool_input(step)
@@ -1712,6 +1878,17 @@ class CognitiveRouter:
                 results_summary,
             )
             if not policy_allowed:
+                await self._emit_progress(
+                    on_progress,
+                    "step_end",
+                    {
+                        "step": idx,
+                        "total": total_steps,
+                        "tool": step.tool_name,
+                        "status": "policy_denied",
+                        "result": step.result,
+                    },
+                )
                 continue
 
             approved = await self._handle_approval_gate(
@@ -1723,6 +1900,17 @@ class CognitiveRouter:
                 results_summary,
             )
             if not approved:
+                await self._emit_progress(
+                    on_progress,
+                    "step_end",
+                    {
+                        "step": idx,
+                        "total": total_steps,
+                        "tool": step.tool_name,
+                        "status": "denied",
+                        "result": "Action denied by user",
+                    },
+                )
                 continue
 
             output = await self._execute_step_with_fallback(step, tool, tool_input, user_message)
@@ -1733,11 +1921,30 @@ class CognitiveRouter:
                 results_summary,
             )
 
+            status_str = "ok" if (output and output.status.value == "success") else "error"
+            await self._emit_progress(
+                on_progress,
+                "step_end",
+                {
+                    "step": idx,
+                    "total": total_steps,
+                    "tool": step.tool_name,
+                    "status": status_str,
+                    "result": step.result or (output.message if output else ""),
+                },
+            )
+
         # Finalize plan.
         await self._finalize_plan_state(plan)
 
         await self._state.save_task(
             plan.id, plan.user_request, plan.status.value, plan.model_dump_json()
+        )
+
+        await self._emit_progress(
+            on_progress,
+            "summarizing",
+            {"text": "Sonuçlar toplanıyor ve yanıt hazırlanıyor..."},
         )
 
         return await self._summarize_plan_results(user_message, results_summary)

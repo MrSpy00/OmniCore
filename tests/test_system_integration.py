@@ -122,13 +122,28 @@ def test_planner_marks_delegated_steps():
         [
             {
                 "tool": "dev_grep_analyzer",
-                "description": "Search for TODO markers in code",
+                "description": "grep code for TODO markers",
                 "parameters": {"pattern": "TODO"},
             }
         ],
     )
     assert plan.steps[0].delegated is True
     assert plan.steps[0].delegation_strategy == "swarm"
+
+
+def test_planner_does_not_delegate_web_steps():
+    planner = Planner(llm=None)  # type: ignore[arg-type]
+    plan = planner.build_plan(
+        "open youtube",
+        [
+            {
+                "tool": "web_play_youtube_video_visible",
+                "description": "youtube'da video ara ve ac",
+                "parameters": {"query": "test"},
+            }
+        ],
+    )
+    assert plan.steps[0].delegated is False
 
 
 # ---------------------------------------------------------------------------

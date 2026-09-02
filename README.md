@@ -108,31 +108,44 @@ uv sync
 GOOGLE_API_KEY=your_gemini_api_key_here
 GROQ_API_KEY=your_groq_api_key_here
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-OMNI_LLM_MODEL=gemini-2.0-flash
+OMNI_LLM_MODEL=gemini-2.5-flash
 ```
 
 #### 3. Çalıştırma Modları
 
-OmniCore 6 farklı çalıştırma modunu destekler:
+OmniCore 7 farklı çalıştırma modunu destekler:
 
 ```bash
 # 1. Etkileşimli Terminal Modu (Varsayılan CLI)
-python -m scripts.run --mode cli
+uv run omnicore
 
-# 2. Siberpunk Telemetri Ekranı (HUD Modu)
-python -m scripts.run --mode hud
+# 2. Web Dashboard (Modern arayuz - varsayilan port 8080)
+uv run omnicore --mode web
 
-# 3. Telegram Bot Modu
-python -m scripts.run --mode telegram
+# 3. Siberpunk Telemetri Ekranı (HUD Modu)
+uv run omnicore --mode hud
 
-# 4. REST API Sunucu Modu (FastAPI / Uvicorn http://localhost:8000)
-python -m scripts.run --mode rest
+# 4. Telegram Bot Modu
+uv run omnicore --mode telegram
 
-# 5. Kurumsal MCP Sunucu Modu (JSON-RPC 2.0 stdio)
-python -m scripts.run --mode mcp
+# 5. REST API Sunucu Modu (FastAPI / Uvicorn http://localhost:8000)
+uv run omnicore --mode rest
 
-# 6. Gerçek Zamanlı Çift Yönlü Ses Motoru Modu
-python -m scripts.run --mode voice
+# 6. Kurumsal MCP Sunucu Modu (JSON-RPC 2.0 stdio)
+uv run omnicore --mode mcp
+
+# 7. Sesli Konusma Motoru (STT + TTS + LLM)
+uv run omnicore --mode voice
+```
+
+#### 4. EXE Olusturma
+
+```bash
+# PyInstaller ile EXE olustur
+uv run python build.py
+
+# Pencere modu (gui)
+uv run python build.py --windowed
 ```
 
 ---
@@ -141,13 +154,23 @@ python -m scripts.run --mode voice
 
 | Komut | İşlev |
 | :--- | :--- |
-| `/plan` | Plan Modunu değiştirir (Yıkıcı işlemler için ön izleme zorunlu kılar). |
-| `/doctor` | Sistem teşhisini çalıştırır (Sağlayıcı durumu, araç sayısı, API key kontrolü). |
-| `/memory` | Kalıcı hafıza kayıtlarını görüntüler. |
-| `/models` | Kullanılabilir tüm Gemini ve Groq modellerini listeler. |
-| `/setmodel <id>` | Dinamik olarak LLM modelini değiştirir (Örn: `/setmodel gemini-2.5-pro`). |
-| `/reset` | Mevcut kısa süreli konuşma geçmişini temizler. |
-| `/hud` | Siberpunk telemetri bilgi panelini ekrana basar. |
+| `/` | Komut menusu (ok tuslari ile secim) |
+| `/help` | Yardim mesaji |
+| `/status` | Sistem durumu ozeti |
+| `/models` | Kullanilabilir LLM modelleri ve API key durumu |
+| `/setmodel <id>` | Model degistir (orn: `/setmodel flash`, `/setmodel pro`) |
+| `/provider <ad>` | Provider degistir (gemini/groq/ollama) |
+| `/config` | Yapilandirma ayarlarini goruntule |
+| `/config set K V` | Ayar degistir (kalici) |
+| `/set K V` | Hizli ayar degistir |
+| `/perm <mod>` | Izin modu: full/safe/ask |
+| `/name <ad>` | Gorunen adi degistir |
+| `/plan` | Plan modunu ac/kapat |
+| `/doctor` | Sistem tanilamasi |
+| `/memory` | Hafiza onizleme |
+| `/reset` | Konusma gecmisini temizle |
+| `/hud` | Cyberpunk HUD paneli |
+| `/commit` | Git commit yardimcisi |
 
 ---
 
@@ -264,31 +287,34 @@ Copy `.env.example` to `.env` and set your API keys:
 GOOGLE_API_KEY=your_gemini_api_key_here
 GROQ_API_KEY=your_groq_api_key_here
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-OMNI_LLM_MODEL=gemini-2.0-flash
+OMNI_LLM_MODEL=gemini-2.5-flash
 ```
 
 #### 3. Execution Modes
 
-OmniCore supports 6 operational modes:
+OmniCore supports 7 operational modes:
 
 ```bash
 # 1. Interactive Terminal CLI (Default)
-python -m scripts.run --mode cli
+uv run omnicore
 
-# 2. Cyberpunk Telemetry HUD Panel
-python -m scripts.run --mode hud
+# 2. Web Dashboard (Modern UI - default port 8080)
+uv run omnicore --mode web
 
-# 3. Telegram Bot Gateway
-python -m scripts.run --mode telegram
+# 3. Cyberpunk Telemetry HUD Panel
+uv run omnicore --mode hud
 
-# 4. REST API Gateway (FastAPI / Uvicorn on http://localhost:8000)
-python -m scripts.run --mode rest
+# 4. Telegram Bot Gateway
+uv run omnicore --mode telegram
 
-# 5. Enterprise MCP Gateway (JSON-RPC 2.0 via stdio)
-python -m scripts.run --mode mcp
+# 5. REST API Gateway (FastAPI / Uvicorn on http://localhost:8000)
+uv run omnicore --mode rest
 
-# 6. Real-Time Duplex Voice Engine
-python -m scripts.run --mode voice
+# 6. Enterprise MCP Gateway (JSON-RPC 2.0 via stdio)
+uv run omnicore --mode mcp
+
+# 7. Voice Engine (STT + TTS + LLM)
+uv run omnicore --mode voice
 ```
 
 ---

@@ -142,17 +142,39 @@ class GuiScrollMouse(BaseTool):
 
 class GuiTakeScreenshot(BaseTool):
     name = "gui_take_screenshot"
-    description = "Take a screenshot of the entire screen or a region."
-    is_destructive = True
+    description = (
+        "Take a screenshot of the entire screen or a specific application window and save "
+        "directly to file (e.g., Desktop/screenshot.png). "
+        "Parameters: output_path (default 'Desktop/screenshot.png'), app_name (optional app/window to focus)."
+    )
+    is_destructive = False  # Read-only operation
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
         output_path = self._first_param(
-            params, "output_path", "file_path", "path", default="screenshot.png"
+            params, "output_path", "file_path", "path", default="Desktop/screenshot.png"
         )
         region = params.get("region")
         if isinstance(region, str):
             region = None
+        # app_name: window title to focus BEFORE taking screenshot
+        app_name = str(
+            self._first_param(params, "app", "app_name", "application", "window", default="") or ""
+        ).strip()
+
+        # Heuristic: if app_name is not provided, infer from output_path or common apps
+        if not app_name:
+            out_lower = str(output_path).lower()
+            if "spotify" in out_lower:
+                app_name = "Spotify"
+            elif "chrome" in out_lower:
+                app_name = "Chrome"
+            elif "edge" in out_lower:
+                app_name = "Edge"
+            elif "discord" in out_lower:
+                app_name = "Discord"
+            elif "steam" in out_lower:
+                app_name = "Steam"
 
         try:
             save_path = _resolve_output_target(str(output_path))
@@ -161,6 +183,27 @@ class GuiTakeScreenshot(BaseTool):
             elif str(output_path).strip().lower() in {"desktop", "downloads", "documents"}:
                 save_path = _resolve_output_target(str(output_path)) / "screenshot.png"
             save_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Focus target window BEFORE capturing if app_name is specified
+            if app_name:
+                try:
+                    from tools.base import force_window_foreground
+                    await asyncio.to_thread(force_window_foreground, app_name, timeout_seconds=4.0)
+                    await asyncio.sleep(1.2)  # Allow window to come to foreground and repaint
+                    # Try to get window bounds for region capture
+                    if region is None:
+                        try:
+                            import pygetwindow as gw  # type: ignore[import-not-found]
+                            windows = await asyncio.to_thread(gw.getWindowsWithTitle, app_name)
+                            if windows:
+                                w = windows[0]
+                                if w.width > 0 and w.height > 0:
+                                    region = {"left": w.left, "top": w.top, "width": w.width, "height": w.height}
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
             if _RUNTIME.is_windows:
                 try:
                     _capture_screen_dotnet(save_path, region if isinstance(region, dict) else None)
@@ -176,7 +219,7 @@ class GuiTakeScreenshot(BaseTool):
 
             return self._success(
                 f"Screenshot saved to {save_path.name}",
-                data={"path": str(save_path)},
+                data={"path": str(save_path), "focused_app": app_name or None},
             )
         except Exception as exc:
             return self._failure(str(exc))

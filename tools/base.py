@@ -423,6 +423,8 @@ def _force_window_foreground_windows_native(
         '  [DllImport("user32.dll")]\n'
         "  public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);\n"
         '  [DllImport("user32.dll")]\n'
+        "  public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);\n"
+        '  [DllImport("user32.dll")]\n'
         "  public static extern IntPtr GetForegroundWindow();\n"
         "}\n"
     )
@@ -440,14 +442,15 @@ def _force_window_foreground_windows_native(
         + "$proc=$null; "
         + "while((Get-Date) -lt $deadline){ "
         + "$proc = Get-Process | Where-Object { "
-        + "$_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like ('*' + $needle + '*') "
+        + "$_.MainWindowHandle -ne 0 -and ($_.MainWindowTitle -like ('*' + $needle + '*') -or $_.ProcessName -like ('*' + $needle + '*')) "
         + "} | Select-Object -First 1; "
         + "if($proc){ break }; Start-Sleep -Milliseconds 120 } "
         + "if(-not $proc){ "
         + "$out=[PSCustomObject]@{activated=$false;method='powershell_user32';"
         + "error='window_not_found'}; $out|ConvertTo-Json -Compress; exit 2 } "
         + "$h=[IntPtr]$proc.MainWindowHandle; "
-        + "[WinApi]::ShowWindowAsync($h,9) | Out-Null; Start-Sleep -Milliseconds 60; "
+        + "[WinApi]::ShowWindowAsync($h,9) | Out-Null; Start-Sleep -Milliseconds 80; "
+        + "[WinApi]::SwitchToThisWindow($h, $true); "
         + "$ok=[WinApi]::SetForegroundWindow($h); "
         + "$active=[WinApi]::GetForegroundWindow(); "
         + "$activated=($active -eq $h) -or $ok; "

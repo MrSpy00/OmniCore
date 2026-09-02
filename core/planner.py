@@ -95,12 +95,30 @@ _HIGH_RISK_MARKERS = (
 )
 
 _DELEGATION_MARKERS = (
-    "search",
-    "find",
-    "scan",
-    "grep",
-    "bul",
-    "ara",
+    "scan directory",
+    "scan files",
+    "grep code",
+    "scan codebase",
+    "find in code",
+    "search code",
+)
+
+# Tools that should NEVER be delegated to swarm — they are specific actions
+_NON_DELEGATABLE_PREFIXES = (
+    "web_",
+    "browser_",
+    "gui_",
+    "os_",
+    "terminal_",
+    "dev_execute",
+    "media_",
+    "sys_",
+    "security_",
+    "hardware_",
+    "game_",
+    "steam_",
+    "audio_",
+    "network_",
 )
 
 
@@ -256,10 +274,14 @@ class Planner:
         if step.delegated:
             return
 
-        lowered_desc = (step.description or "").lower()
         lowered_tool = (step.tool_name or "").lower()
-        if any(marker in lowered_desc for marker in _DELEGATION_MARKERS) or any(
-            marker in lowered_tool for marker in _DELEGATION_MARKERS
-        ):
+
+        # Never delegate specific action tools (web, gui, browser, etc.)
+        if any(lowered_tool.startswith(prefix) for prefix in _NON_DELEGATABLE_PREFIXES):
+            return
+
+        # Only delegate when description explicitly matches codebase scan patterns
+        lowered_desc = (step.description or "").lower()
+        if any(marker in lowered_desc for marker in _DELEGATION_MARKERS):
             step.delegated = True
             step.delegation_strategy = "swarm"

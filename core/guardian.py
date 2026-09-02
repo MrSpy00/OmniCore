@@ -29,6 +29,7 @@ class ApprovalMode(StrEnum):
 
     ASK = "ask"
     YES = "yes"
+    SAFE = "safe"
 
 
 class Guardian:
@@ -65,8 +66,10 @@ class Guardian:
 
     def set_mode(self, mode: str) -> ApprovalMode:
         normalized = (mode or "").strip().lower()
-        if normalized == ApprovalMode.YES.value:
+        if normalized in (ApprovalMode.YES.value, "full"):
             self._mode = ApprovalMode.YES
+        elif normalized in (ApprovalMode.SAFE.value, "guvenli"):
+            self._mode = ApprovalMode.SAFE
         else:
             self._mode = ApprovalMode.ASK
         logger.info("guardian.mode_updated", mode=self._mode.value)
@@ -100,6 +103,26 @@ class Guardian:
                 mode=self._mode.value,
             )
             return ApprovalResult.APPROVED
+
+        if self._mode == ApprovalMode.SAFE:
+            desc_l = action_description.lower()
+            critical_keywords = (
+                "format",
+                "disk_wipe",
+                "reg_delete",
+                "delete_all",
+                "shutdown",
+                "drop database",
+                "rmdir /s",
+                "rm -rf /",
+            )
+            if not any(kw in desc_l for kw in critical_keywords):
+                logger.info(
+                    "guardian.safe_mode_auto_approved",
+                    action=action_description,
+                    user_id=user_id,
+                )
+                return ApprovalResult.APPROVED
 
         if self._callback is None:
             logger.warning(

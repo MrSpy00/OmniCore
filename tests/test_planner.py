@@ -67,7 +67,7 @@ class TestPlannerBuildPlan:
             [
                 {
                     "tool": "dev_grep_analyzer",
-                    "description": "Search TODO strings",
+                    "description": "grep code for TODO strings",
                     "parameters": {"pattern": "TODO"},
                 }
             ],
@@ -75,3 +75,33 @@ class TestPlannerBuildPlan:
         step = plan.steps[0]
         assert step.delegated is True
         assert step.delegation_strategy == "swarm"
+
+    def test_does_not_delegate_web_tools(self):
+        planner = Planner(llm=None)  # type: ignore[arg-type]
+        plan = planner.build_plan(
+            "Open YouTube",
+            [
+                {
+                    "tool": "web_play_youtube_video_visible",
+                    "description": "YouTube'da video ara ve ac",
+                    "parameters": {"query": "test"},
+                }
+            ],
+        )
+        step = plan.steps[0]
+        assert step.delegated is False
+
+    def test_does_not_delegate_gui_tools(self):
+        planner = Planner(llm=None)  # type: ignore[arg-type]
+        plan = planner.build_plan(
+            "Take screenshot",
+            [
+                {
+                    "tool": "gui_analyze_screen",
+                    "description": "Ekran goruntusu al",
+                    "parameters": {},
+                }
+            ],
+        )
+        step = plan.steps[0]
+        assert step.delegated is False

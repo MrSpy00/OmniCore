@@ -230,9 +230,11 @@ class OsLaunchApplication(BaseTool):
 
         try:
             await asyncio.to_thread(_launch_windows_app, app)
-            foreground = await asyncio.to_thread(force_window_foreground, app)
+            # Give application time to create and map its window (especially Spotify, Electron apps, browsers)
+            await asyncio.sleep(1.5)
+            foreground = await asyncio.to_thread(force_window_foreground, app, timeout_seconds=4.0)
             return self._success(
-                f"Launch request sent for {app}",
+                f"Uygulama başlatıldı ve öne getirildi: {app}",
                 data={"app": app, "foreground": foreground},
             )
         except Exception as exc:
@@ -259,7 +261,7 @@ class OsGetNowPlaying(BaseTool):
 class OsOpenBrowserVisible(BaseTool):
     name = "os_open_browser_visible"
     description = "Open a URL in the user's real default browser in a visible tab."
-    is_destructive = True
+    is_destructive = False  # Safe browser tab opening
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
@@ -271,9 +273,18 @@ class OsOpenBrowserVisible(BaseTool):
 
         try:
             await asyncio.to_thread(webbrowser.open_new_tab, url)
-            return self._success("Opened visible browser tab", data={"url": url})
+            await asyncio.sleep(1.0)
+            fg = await asyncio.to_thread(self._focus_browser)
+            return self._success("Opened visible browser tab", data={"url": url, "foreground": fg})
         except Exception as exc:
             return self._failure(str(exc))
+
+    def _focus_browser(self) -> dict:
+        for title in ("Chrome", "Edge", "Firefox", "Brave", "Opera"):
+            res = force_window_foreground(title, timeout_seconds=1.5)
+            if res.get("activated"):
+                return res
+        return {"activated": False}
 
 
 class OsClipboardHistoryManager(BaseTool):
@@ -368,10 +379,10 @@ async def _clipboard_restore_action(tool: OsClipboardHistoryManager, index) -> T
 class WebPlayYoutubeVideoVisible(BaseTool):
     name = "web_play_youtube_video_visible"
     description = (
-        "Search YouTube for a video query and open the top result in the user's "
-        "real default browser. Physical browser opening is mandatory."
+        "Search YouTube for a video or channel query and open it in the user's "
+        "real default browser visibly. Physical browser opening is mandatory."
     )
-    is_destructive = True
+    is_destructive = False  # Opening a media URL is safe
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
@@ -388,8 +399,9 @@ class WebPlayYoutubeVideoVisible(BaseTool):
             url = query if query.startswith("http") else f"https://{query}"
             try:
                 await asyncio.to_thread(webbrowser.open_new_tab, url)
-                fg = await asyncio.to_thread(force_window_foreground, "YouTube")
-                return self._success("Opened YouTube video", data={"url": url, "foreground": fg})
+                await asyncio.sleep(1.0)
+                fg = await asyncio.to_thread(self._focus_browser)
+                return self._success("Opened YouTube video in browser", data={"url": url, "foreground": fg})
             except Exception as exc:
                 return self._failure(str(exc))
 
@@ -401,13 +413,21 @@ class WebPlayYoutubeVideoVisible(BaseTool):
         )
         try:
             await asyncio.to_thread(webbrowser.open_new_tab, search_url)
-            fg = await asyncio.to_thread(force_window_foreground, "YouTube")
+            await asyncio.sleep(1.0)
+            fg = await asyncio.to_thread(self._focus_browser)
             return self._success(
-                f"Opened YouTube search for '{query}'",
+                f"YouTube açıldı ve '{query}' için arama yapıldı",
                 data={"url": search_url, "query": query, "foreground": fg},
             )
         except Exception as exc:
             return self._failure(str(exc))
+
+    def _focus_browser(self) -> dict:
+        for title in ("YouTube", "Chrome", "Edge", "Firefox", "Brave", "Opera"):
+            res = force_window_foreground(title, timeout_seconds=1.5)
+            if res.get("activated"):
+                return res
+        return {"activated": False}
 
 
 class SysForceForeground(BaseTool):

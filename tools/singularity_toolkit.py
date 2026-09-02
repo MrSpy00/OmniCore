@@ -147,8 +147,8 @@ class SysHardwareSerials(BaseTool):
 
 class DesktopSendNotification(BaseTool):
     name = "desktop_send_notification"
-    description = "Send a native Windows desktop notification."
-    is_destructive = True
+    description = "Send a native Windows desktop popup/toast notification."
+    is_destructive = False  # Safe notification, no approval needed
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
@@ -157,8 +157,25 @@ class DesktopSendNotification(BaseTool):
         if not message:
             return self._failure("message is required")
         try:
-            notifier = await asyncio.to_thread(_get_toast_notifier)
-            await asyncio.to_thread(notifier.show_toast, title, message, duration=5, threaded=False)
+            try:
+                notifier = await asyncio.to_thread(_get_toast_notifier)
+                await asyncio.to_thread(notifier.show_toast, title, message, duration=5, threaded=True)
+            except Exception:
+                # PowerShell Windows Runtime toast notification fallback
+                def _ps_toast():
+                    import subprocess
+                    ps_cmd = (
+                        f"[reflection.assembly]::loadwithpartialname('System.Windows.Forms') | Out-Null; "
+                        f"$notify = New-Object System.Windows.Forms.NotifyIcon; "
+                        f"$notify.Icon = [System.Drawing.SystemIcons]::Information; "
+                        f"$notify.BalloonTipTitle = '{title}'; "
+                        f"$notify.BalloonTipText = '{message}'; "
+                        f"$notify.Visible = $True; "
+                        f"$notify.ShowBalloonTip(5000); Start-Sleep -Seconds 1; $notify.Dispose()"
+                    )
+                    subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, timeout=8)
+                await asyncio.to_thread(_ps_toast)
+
             return self._success(
                 "Desktop notification sent", data={"title": title, "message": message}
             )

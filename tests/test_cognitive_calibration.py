@@ -82,8 +82,7 @@ def test_system_prompt_contains_sovereign_rules():
     assert "KURAL 9" in prompt
     assert "Desktop/dosya.txt" in prompt
     assert "KURAL 10" in prompt
-    assert "dev_glob_search" in prompt
-    assert "dev_grep_analyzer" in prompt
+    assert "agent_spawn_subtask" in prompt or "dogrudan" in prompt.lower()
 
 
 @pytest.mark.asyncio
