@@ -1061,6 +1061,36 @@ class CognitiveRouter:
                 f"Bilinmeyen model: {model_id}\n"
                 "Mevcut modelleri gormek icin /models komutunu kullanin."
             )
+        if lowered.startswith("/provider"):
+            parts = content.split(" ", 1)
+            if len(parts) < 2 or not parts[1].strip():
+                current = self._settings.llm_provider.strip().lower() or "gemini"
+                avail = self._settings.provider_preference
+                return (
+                    f"Mevcut provider: {current}\n"
+                    f"Kullanilabilir: {', '.join(avail)}\n"
+                    "Degistirmek icin: /provider <gemini|groq|ollama>"
+                )
+            new_prov = parts[1].strip().lower()
+            supported = ["gemini", "groq", "ollama"]
+            if new_prov not in supported:
+                return f"Bilinmeyen provider: {new_prov}\nDesteklenen: {', '.join(supported)}"
+            self._settings = self._settings.model_copy(update={"llm_provider": new_prov})
+            self._destroy_current_llm()
+            self._llm = self._build_llm(self._settings)
+            return f"Provider degistirildi: {new_prov}"
+        if lowered.startswith("/status"):
+            provider = getattr(self, "_runtime_provider", "unknown")
+            tools_count = len(self._registry) if hasattr(self, "_registry") else 0
+            model_name = self._settings.omni_llm_model if provider == "gemini" else self._settings.groq_primary_model
+            is_plan = getattr(self._guardian, "plan_mode", False)
+            user_name = self._settings.user_name.strip() or "(OmniCore)"
+            return (
+                f"Kullanici: {user_name}\n"
+                f"Provider: {provider} | Model: {model_name}\n"
+                f"Araclar: {tools_count} | Plan modu: {'ACIK' if is_plan else 'KAPALI'}\n"
+                f"Hafiza: kisa-vade aktif, uzun-vade ChromaDB"
+            )
         if lowered.startswith("/name"):
             parts = content.split(" ", 1)
             if len(parts) < 2 or not parts[1].strip():
@@ -1082,15 +1112,18 @@ class CognitiveRouter:
         if lowered.startswith("/help"):
             return (
                 "\U0001f4cb OmniCore Komutlari:\n\n"
-                "/help    — Bu yardim mesaji\n"
-                "/name    — Gorunen adini goster/degistir\n"
-                "/plan    — Plan modunu ac/kapat (destructive adimlar dry-run)\n"
-                "/doctor  — Sistem durumu ve provider bilgisi\n"
-                "/memory  — Uzun donemli hafiza onizleme\n"
-                "/reset   — Bu konusmanin gecmisini temizle\n"
-                "/models  — Kullanilabilir LLM modellerini listele\n"
-                "/setmodel <model-id> — Aktif modeli degistir (oturuma ozel)\n"
-                "/commit  — Git commit yardimcisi\n\n"
+                "/help           — Bu yardim mesaji\n"
+                "/status         — Sistem durumu ozeti\n"
+                "/name [ad]      — Gorunen adini goster/degistir\n"
+                "/provider [ad]  — Provider goster/degistir (gemini/groq/ollama)\n"
+                "/setmodel <id>  — Aktif modeli degistir\n"
+                "/models         — Kullanilabilir LLM modellerini listele\n"
+                "/plan           — Plan modunu ac/kapat\n"
+                "/doctor         — Detayli sistem tekhisi\n"
+                "/memory         — Hafiza onizleme\n"
+                "/reset          — Konusma gecmisini temizle\n"
+                "/hud            — Cyberpunk HUD paneli\n"
+                "/commit         — Git commit yardimcisi\n\n"
                 "Diger komutlar:\n"
                 ".omnicore approve yes — Otomatik onay modu\n"
                 ".omnicore approve ask — Manuel onay modu (varsayilan)"
