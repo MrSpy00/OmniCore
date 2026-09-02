@@ -667,6 +667,15 @@ class CognitiveRouter:
         memory_context: str,
         tools: list[dict[str, str]],
     ) -> str:
+        settings = get_settings()
+        user_name = settings.user_name.strip() or None
+        user_line = ""
+        if user_name:
+            user_line = (
+                f"KULLANICI ADI: {user_name}. "
+                f"Kullanıcıya hitap ederken bu adı kullan. "
+            )
+
         tools_desc = "\n".join(
             f"- {t['name']}: {t['description']} (yikici={t['destructive']})" for t in tools
         )
@@ -705,6 +714,7 @@ class CognitiveRouter:
         )
         return (
             f"{mandated}\n\n"
+            f"{user_line}\n"
             "## Kullanılabilir Araçlar\n"
             f"{tools_desc}\n\n"
             "## İlgili Hatıralar\n"
@@ -1051,10 +1061,29 @@ class CognitiveRouter:
                 f"Bilinmeyen model: {model_id}\n"
                 "Mevcut modelleri gormek icin /models komutunu kullanin."
             )
+        if lowered.startswith("/name"):
+            parts = content.split(" ", 1)
+            if len(parts) < 2 or not parts[1].strip():
+                current = self._settings.user_name.strip() or "(OmniCore)"
+                return (
+                    f"Mevcut gorunen ad: {current}\n"
+                    "Degistirmek icin: /name <yeni-ad>\n"
+                    "Sifirlamak icin: /name off"
+                )
+            new_name = parts[1].strip()
+            if new_name.lower() in ("off", "reset", "sifirla", "kapat"):
+                self._settings = self._settings.model_copy(update={"user_name": ""})
+                return "Gorunen ad sifirlandi. Bundan sonra OmniCore olarak taniniyorum."
+            self._settings = self._settings.model_copy(update={"user_name": new_name})
+            return (
+                f"Hosgeldin {new_name}! Bundan sonra sana {new_name} olarak hitap edecegim.\n"
+                "Degisikligi kalici yapmak icin .env dosyasinda USER_NAME=yeni-adin ayarlayin."
+            )
         if lowered.startswith("/help"):
             return (
                 "\U0001f4cb OmniCore Komutlari:\n\n"
                 "/help    — Bu yardim mesaji\n"
+                "/name    — Gorunen adini goster/degistir\n"
                 "/plan    — Plan modunu ac/kapat (destructive adimlar dry-run)\n"
                 "/doctor  — Sistem durumu ve provider bilgisi\n"
                 "/memory  — Uzun donemli hafiza onizleme\n"

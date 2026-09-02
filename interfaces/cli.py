@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 
 from config.logging import get_logger
+from config.settings import get_settings
 from core.guardian import ApprovalResult
 from core.router import CognitiveRouter
 from models.messages import Message, MessageRole
@@ -16,9 +17,15 @@ from models.messages import Message, MessageRole
 logger = get_logger(__name__)
 
 _PROMPT = "\n[You] > "
-_BANNER = """
+
+
+def _get_banner() -> str:
+    """Return a personalized CLI banner."""
+    settings = get_settings()
+    name = settings.user_name.strip() or "OmniCore"
+    return f"""
 +-------------------------------------+
-|         OmniCore - CLI Mode         |
+|     {name} - CLI Mode         |
 |  Type a message or 'quit' to exit.  |
 |  Use .omnicore approve yes|ask.     |
 +-------------------------------------+
@@ -37,7 +44,7 @@ class CLIGateway:
 
     async def run(self) -> None:
         """Start the REPL loop."""
-        print(_BANNER)
+        print(_get_banner())
         conversation_id = "cli_session"
 
         while True:

@@ -41,9 +41,18 @@ def _build_tool_registry() -> ToolRegistry:
     return registry
 
 
-async def _run(mode: str) -> None:
+async def _run(mode: str, debug: bool = False) -> None:
+    # Set log level based on --debug flag.
+    import logging as _logging
+    _logging.basicConfig(level=_logging.DEBUG if debug else _logging.WARNING)
     setup_logging()
     settings = get_settings()
+
+    # Override ALL loggers to match debug flag.
+    if not debug:
+        _logging.getLogger().setLevel(_logging.WARNING)
+        for name in _logging.Logger.manager.loggerDict:
+            _logging.getLogger(name).setLevel(_logging.WARNING)
 
     logger.info("omnicore.starting", mode=mode, model=settings.omni_llm_model)
 
@@ -182,8 +191,13 @@ def main() -> None:
         default="cli",
         help="Which gateway interface to launch (default: cli)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose debug logging",
+    )
     args = parser.parse_args()
-    asyncio.run(_run(args.mode))
+    asyncio.run(_run(args.mode, debug=args.debug))
 
 
 if __name__ == "__main__":

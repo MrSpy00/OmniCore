@@ -219,6 +219,9 @@ class Settings(BaseSettings):
     # --- REST API Gateway ----------------------------------------------------
     rest_api_key: str = ""  # Bearer token auth (empty = open mode)
 
+    # --- Personalization -----------------------------------------------------
+    user_name: str = ""  # Optional display name (empty = use "OmniCore")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
