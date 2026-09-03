@@ -17,10 +17,8 @@
 
 ---
 
-## 🇹🇷 Türkçe Detaylı Açıklama
-
 <p align="left">
-  <img src="assets/flag_tr.svg" alt="Türkçe" width="24" height="16"/>
+  <img src="assets/flag_tr.svg" alt="Türkçe" width="28" height="20"/>
 </p>
 
 ### 💡 Mimari ve Öne Çıkan Yetenekler
@@ -203,10 +201,8 @@ uv run ruff check .
 
 ---
 
-## 🇬🇧 English Detailed Overview
-
 <p align="left">
-  <img src="assets/flag_gb.svg" alt="English" width="24" height="16"/>
+  <img src="assets/flag_gb.svg" alt="English" width="28" height="20"/>
 </p>
 
 ### 💡 Architecture and Core Capabilities
