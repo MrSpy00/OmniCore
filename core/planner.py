@@ -7,6 +7,7 @@ objects.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -281,3 +282,192 @@ class Planner:
         if any(marker in lowered_desc for marker in _DELEGATION_MARKERS):
             step.delegated = True
             step.delegation_strategy = "swarm"
+
+
+class WorkflowExecutionEngine:
+    """Long-Horizon Task Workflow Engine with SQLite Checkpointing & ReAct Recovery.
+
+    Enables multi-step tasks to persist step results across system reboots, resume
+    interrupted plans, and self-reflect on step failure with alternative branching.
+    """
+
+    def __init__(self, db_path: Path | None = None) -> None:
+        if db_path is None:
+            home_dir = Path.home() / ".omnicore"
+            home_dir.mkdir(parents=True, exist_ok=True)
+            self._db_path = home_dir / "workflows.db"
+        else:
+            self._db_path = db_path
+
+        self._init_db()
+
+    def _init_db(self) -> None:
+        import sqlite3
+
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workflow_checkpoints (
+                    workflow_id TEXT NOT NULL,
+                    step_index INTEGER NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    parameters_json TEXT,
+                    result_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (workflow_id, step_index)
+                );
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def checkpoint_step(
+        self,
+        workflow_id: str,
+        step_index: int,
+        tool_name: str,
+        status: str,
+        parameters: dict[str, Any],
+        result: Any,
+    ) -> None:
+        """Commit an executed step result to persistent storage."""
+        import json
+        import sqlite3
+
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO workflow_checkpoints
+                (workflow_id, step_index, tool_name, status, parameters_json, result_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    workflow_id,
+                    step_index,
+                    tool_name,
+                    status,
+                    json.dumps(parameters, default=str),
+                    json.dumps(result, default=str),
+                ),
+            )
+            conn.commit()
+            logger.info("workflow.checkpoint_saved", workflow_id=workflow_id, step=step_index, status=status)
+        finally:
+            conn.close()
+
+    def get_completed_steps(self, workflow_id: str) -> dict[int, dict[str, Any]]:
+        """Retrieve already executed step checkpoints for resuming."""
+        import json
+        import sqlite3
+
+        results: dict[int, dict[str, Any]] = {}
+        conn = sqlite3.connect(self._db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT step_index, tool_name, status, parameters_json, result_json
+                FROM workflow_checkpoints WHERE workflow_id = ? ORDER BY step_index ASC
+                """,
+                (workflow_id,),
+            )
+            for row in cursor.fetchall():
+                idx, tool, stat, p_json, r_json = row
+                results[idx] = {
+                    "tool": tool,
+                    "status": stat,
+                    "parameters": json.loads(p_json or "{}"),
+                    "result": json.loads(r_json or "{}"),
+                }
+        finally:
+            conn.close()
+        return results
+
+    def suggest_alternative_branch(
+        self,
+        failed_tool: str,
+        error_message: str,
+    ) -> tuple[str, dict[str, Any]]:
+        """Self-reflective ReAct logic: suggest alternative tool branch based on failure signature."""
+        err_lower = error_message.lower()
+
+        # File not found -> fallback to fast disk search
+        if any(w in err_lower for w in ("not found", "bulunamadı", "no such file")):
+            if failed_tool in ("os_read_file", "dev_grep_analyzer"):
+                return "es_fast_search", {"query": err_lower.split(":")[-1].strip()}
+
+        # Web blocked or failed -> fallback to headless fetch
+        if any(w in err_lower for w in ("timeout", "net::", "err_", "forbidden", "cloudflare")):
+            if failed_tool.startswith("web_"):
+                return "browser_fetch_page", {}
+
+        # Default recovery diagnostic
+        return "terminal_execute", {"command": "whoami"}
+
+
+# ─── Tree-of-Thought Planlayıcı ─────────────────────────────────────────────────
+
+
+class TreeOfThoughtPlanner:
+    """N aday plan üretir, sezgisel puanlama ile en iyisini seçer.
+
+    Karmaşık görevlerde (>3 adım) LLM'den birden fazla farklı yaklaşım ister,
+    her birini heuristic ile puanlar ve en iyisini seçer.
+    """
+
+    def __init__(self, llm: Any = None, n_candidates: int = 3) -> None:
+        self._llm = llm
+        self._n_candidates = n_candidates
+
+    def score_branch(self, branch: Any) -> float:
+        """Bir dalı sezgisel olarak puanlar (LLM gerektirmez).
+
+        Faktörler:
+        - Adım sayısı (az = iyi)
+        - Yıkıcı adım oranı (az = iyi)
+        - Risk dağılımı (düşük = iyi)
+        - Araç çeşitliliği (orta iyi — çok az kırılgan, çok fazla karmaşık)
+        """
+        steps = getattr(branch, "steps", [])
+        if not steps:
+            return 0.0
+
+        step_count = len(steps)
+        destructive_count = sum(1 for s in steps if getattr(s, "is_destructive", False))
+        destructive_ratio = destructive_count / step_count
+
+        risk_weights = {"LOW": 0.1, "MEDIUM": 0.3, "HIGH": 0.6, "CRITICAL": 0.9}
+        risk_sum = sum(
+            risk_weights.get(str(getattr(s, "risk_level", "MEDIUM")), 0.3)
+            for s in steps
+        )
+        avg_risk = risk_sum / step_count
+
+        unique_tools = len({getattr(s, "tool_name", "") for s in steps})
+        diversity_score = min(1.0, unique_tools / max(1, step_count * 0.5))
+
+        score = (
+            max(0, 1.0 - step_count / 15) * 0.3
+            + (1.0 - destructive_ratio) * 0.25
+            + (1.0 - avg_risk) * 0.25
+            + diversity_score * 0.2
+        )
+
+        branch.heuristic_score = round(score, 4)
+        branch.risk_score = round(avg_risk, 4)
+        return score
+
+    def select_best(self, branches: list[Any]) -> Any:
+        """En yüksek puanlı dalı seçer."""
+        if not branches:
+            return None
+        for b in branches:
+            self.score_branch(b)
+        best = max(branches, key=lambda b: b.heuristic_score)
+        best.selected = True
+        return best
+

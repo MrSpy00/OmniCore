@@ -1,4 +1,12 @@
-"""Web Dashboard — Modern FastAPI + HTML/CSS/JS frontend for OmniCore.
+"""Web Dashboard 2.0 — Modern FastAPI + HTML/CSS/JS frontend for OmniCore.
+
+Features:
+- Real-time token streaming typewriter effect via WebSocket (/ws/chat)
+- Interactive Cytoscape.js GraphRAG Knowledge Graph visualizer
+- Live Process Manager with PID, CPU/RAM telemetry, and single-click termination
+- Real brand logo (OmniCore-bounce.png) with neon glow animations for bot avatar and header
+- Smart plan card formatter in formatMarkdown() to eliminate raw JSON leaks
+- Memory statistics (ChromaDB + SQLite GraphMemory) in sidebar
 
 Launch with: uv run omnicore --mode web
 Serves on: http://localhost:8080
@@ -10,11 +18,12 @@ import asyncio
 import json
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from config.logging import get_logger
 from config.settings import get_settings
@@ -25,6 +34,7 @@ logger = get_logger(__name__)
 
 _router: CognitiveRouter | None = None
 _start_time: float = time.time()
+_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
 
 def set_router(router: CognitiveRouter) -> None:
@@ -33,7 +43,7 @@ def set_router(router: CognitiveRouter) -> None:
 
 
 def create_dashboard_app() -> FastAPI:
-    app = FastAPI(title="OmniCore Dashboard", docs_url="/api/docs")
+    app = FastAPI(title="OmniCore Dashboard 2.0", docs_url="/api/docs")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -47,7 +57,18 @@ def create_dashboard_app() -> FastAPI:
 
     @app.get("/favicon.ico")
     async def favicon():
+        fav_path = _ASSETS_DIR / "OmniCore-bounce.png"
+        if fav_path.exists():
+            return FileResponse(fav_path, media_type="image/png")
         return Response(content=b"", media_type="image/x-icon")
+
+    @app.get("/assets/{filename}")
+    async def get_asset(filename: str):
+        asset_file = _ASSETS_DIR / filename
+        if asset_file.exists() and asset_file.is_file():
+            media_type = "image/png" if filename.endswith(".png") else "application/octet-stream"
+            return FileResponse(asset_file, media_type=media_type)
+        return Response(status_code=404)
 
     @app.get("/api/status")
     async def api_status():
@@ -71,6 +92,36 @@ def create_dashboard_app() -> FastAPI:
             "uptime_seconds": uptime,
             "plan_mode": _router._guardian.plan_mode if hasattr(_router, "_guardian") else False,
             "approval_mode": _router._guardian.mode.value if hasattr(_router, "_guardian") else "ask",
+        }
+
+    @app.get("/api/memory/stats")
+    async def api_memory_stats():
+        """Return memory statistics (ChromaDB document count and GraphMemory stats)."""
+        doc_count = 0
+        nodes_count = 0
+        edges_count = 0
+        if _router and hasattr(_router, "_long_term"):
+            try:
+                doc_count = _router._long_term.count()
+            except Exception:
+                pass
+        try:
+            from memory.graph_memory import GraphMemory
+
+            gm = GraphMemory()
+            try:
+                await gm.initialize()
+                data = await gm.export_graph_data()
+                nodes_count = len(data.get("nodes", []))
+                edges_count = len(data.get("edges", []))
+            finally:
+                await gm.close()
+        except Exception:
+            pass
+        return {
+            "total_documents": doc_count,
+            "graph_nodes": nodes_count,
+            "graph_edges": edges_count,
         }
 
     @app.get("/api/chat/stream")
@@ -97,6 +148,12 @@ def create_dashboard_app() -> FastAPI:
             async def run_task():
                 try:
                     reply = await _router.handle_message(msg, "web_session", on_progress=on_progress)
+                    # Progressive token streaming for SSE
+                    words = reply.split(" ")
+                    for i, w in enumerate(words):
+                        chunk = w if i == 0 else " " + w
+                        await queue.put({"type": "token", "token": chunk})
+                        await asyncio.sleep(0.012)
                     await queue.put({"type": "done", "reply": reply})
                 except Exception as exc:
                     logger.error("dashboard.chat_stream_error", error=str(exc))
@@ -145,6 +202,111 @@ def create_dashboard_app() -> FastAPI:
             logger.error("dashboard.chat_error", error=str(exc))
             return {"reply": f"Hata: {type(exc).__name__}: {exc}", "status": "error"}
 
+    @app.get("/api/graph/data")
+    async def api_graph_data():
+        """Return full Knowledge Graph (GraphRAG) nodes and edges for Cytoscape.js."""
+        try:
+            from memory.graph_memory import GraphMemory
+
+            gm = GraphMemory()
+            try:
+                await gm.initialize()
+                data = await gm.export_graph_data()
+                return data
+            finally:
+                await gm.close()
+        except Exception as exc:
+            logger.error("dashboard.graph_data_error", error=str(exc))
+            return {"nodes": [], "edges": [], "count": 0, "error": str(exc)}
+
+    @app.get("/api/system/processes")
+    async def api_system_processes(limit: int = 25):
+        """Return top system processes sorted by CPU and memory consumption."""
+        import psutil
+
+        procs: list[dict[str, Any]] = []
+        for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
+            try:
+                info = p.info
+                if info.get("name"):
+                    procs.append({
+                        "pid": info["pid"],
+                        "name": info["name"],
+                        "cpu": round(info.get("cpu_percent") or 0.0, 1),
+                        "ram": round(info.get("memory_percent") or 0.0, 1),
+                    })
+            except Exception:
+                pass
+        procs.sort(key=lambda x: (x["cpu"], x["ram"]), reverse=True)
+        return procs[:limit]
+
+    @app.post("/api/system/kill-process")
+    async def api_system_kill_process(request: Request):
+        """Terminate a process by PID."""
+        import psutil
+
+        body = await request.json()
+        pid = body.get("pid")
+        if not pid:
+            return JSONResponse({"error": "Missing pid parameter"}, status_code=400)
+        try:
+            p = psutil.Process(int(pid))
+            name = p.name()
+            p.terminate()
+            return {"success": True, "message": f"Süreç '{name}' (PID: {pid}) sonlandırıldı."}
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+    @app.websocket("/ws/chat")
+    async def ws_chat(websocket: WebSocket):
+        """Bidirectional WebSocket for real-time streaming chat with typewriter effect."""
+        await websocket.accept()
+        try:
+            while True:
+                data = await websocket.receive_text()
+                try:
+                    payload = json.loads(data)
+                    user_text = payload.get("message", "").strip()
+                except Exception:
+                    user_text = data.strip()
+
+                if not user_text:
+                    continue
+
+                if not _router:
+                    await websocket.send_text(json.dumps({"type": "error", "error": "Router not ready"}))
+                    continue
+
+                msg = Message(
+                    role=MessageRole.USER,
+                    content=user_text,
+                    channel="websocket",
+                    user_id="ws_user",
+                )
+
+                async def ws_progress(event_type: str, evt_data: dict[str, Any]):
+                    try:
+                        await websocket.send_text(
+                            json.dumps({"type": event_type, "data": evt_data}, ensure_ascii=False)
+                        )
+                    except Exception:
+                        pass
+
+                try:
+                    reply = await _router.handle_message(msg, "ws_session", on_progress=ws_progress)
+                    # Progressive streaming typewriter tokens
+                    words = reply.split(" ")
+                    for i, w in enumerate(words):
+                        chunk = w if i == 0 else " " + w
+                        await websocket.send_text(json.dumps({"type": "token", "token": chunk}, ensure_ascii=False))
+                        await asyncio.sleep(0.015)
+                    await websocket.send_text(json.dumps({"type": "done", "reply": reply}, ensure_ascii=False))
+                except Exception as exc:
+                    logger.error("dashboard.ws_error", error=str(exc))
+                    await websocket.send_text(json.dumps({"type": "error", "error": str(exc)}))
+        except WebSocketDisconnect:
+            pass
+
     @app.get("/api/models")
     async def api_models():
         from config.settings import get_available_models
@@ -191,7 +353,7 @@ def create_dashboard_app() -> FastAPI:
     return app
 
 
-# Premium Cyber-Obsidian UI - Zero AI Slop, Inline SVGs, Bilingual TR/EN, Glassmorphism
+# Premium Cyber-Obsidian UI 2.0 - Zero AI Slop, Inline SVGs, Cytoscape GraphRAG, Process Manager
 DASHBOARD_HTML = r"""<!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -201,6 +363,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Cytoscape.js for GraphRAG Knowledge Graph Visualization -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
 <style>
 :root {
   --bg-base: #07090E;
@@ -237,7 +401,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Background Ambient Lighting */
+/* Ambient Lighting */
 .ambient-glow {
   position: fixed;
   top: -20%;
@@ -253,7 +417,7 @@ body {
 header {
   height: 64px;
   border-bottom: 1px solid var(--border);
-  background: rgba(7, 9, 14, 0.8);
+  background: rgba(7, 9, 14, 0.85);
   backdrop-filter: blur(20px);
   display: flex;
   align-items: center;
@@ -269,14 +433,25 @@ header {
   color: inherit;
 }
 .brand-logo {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(139, 92, 246, 0.2));
-  border: 1px solid rgba(0, 240, 255, 0.3);
+  border: 1px solid rgba(0, 240, 255, 0.4);
   border-radius: var(--radius-sm);
   display: grid;
   place-items: center;
-  color: var(--accent-cyan);
+  overflow: hidden;
+}
+.brand-logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), filter 0.3s ease;
+  filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.5));
+}
+.brand-logo-img:hover {
+  transform: scale(1.15) rotate(3deg);
+  filter: drop-shadow(0 0 12px rgba(0, 240, 255, 0.9));
 }
 .brand-title {
   font-weight: 800;
@@ -356,22 +531,22 @@ header {
 
 /* Sidebar */
 aside.nav-sidebar {
-  width: 250px;
-  background: rgba(11, 15, 24, 0.7);
+  width: 260px;
+  background: rgba(11, 15, 24, 0.75);
   backdrop-filter: blur(20px);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: 20px 14px;
-  gap: 8px;
+  padding: 16px 12px;
+  gap: 6px;
 }
 .nav-heading {
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
-  padding: 10px 12px 4px;
+  padding: 8px 12px 4px;
 }
 .nav-btn {
   display: flex;
@@ -387,6 +562,7 @@ aside.nav-sidebar {
   cursor: pointer;
   transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   text-align: left;
+  width: 100%;
 }
 .nav-btn:hover {
   color: var(--text-primary);
@@ -404,31 +580,63 @@ aside.nav-sidebar {
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 1rem;
 }
 
 .sidebar-spacer { flex: 1; }
+
+/* Memory Stats Card */
+.memory-stats-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.memory-stats-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent-purple);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.memory-stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+.memory-stat-val {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+}
 
 .privacy-badge {
   background: rgba(0, 255, 157, 0.05);
   border: 1px solid rgba(0, 255, 157, 0.2);
   border-radius: var(--radius-md);
-  padding: 12px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 .privacy-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 700;
   color: var(--accent-emerald);
 }
 .privacy-text {
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   color: var(--text-muted);
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 /* Main Content Area */
@@ -445,6 +653,7 @@ main.main-viewport {
   flex: 1;
   display: none;
   height: 100%;
+  overflow: hidden;
 }
 .view-section.active {
   display: flex;
@@ -477,7 +686,7 @@ main.main-viewport {
 .message-row {
   display: flex;
   gap: 12px;
-  max-width: 82%;
+  max-width: 85%;
   animation: fadeIn 0.2s ease-out;
 }
 @keyframes fadeIn {
@@ -492,23 +701,31 @@ main.main-viewport {
   align-self: flex-start;
 }
 .message-avatar {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 700;
+  overflow: hidden;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
 }
 .message-row.user .message-avatar {
-  background: linear-gradient(135deg, #6366F1, #8B5CF6);
+  background: linear-gradient(135deg, #4F46E5, #8B5CF6);
   color: #FFF;
 }
 .message-row.bot .message-avatar {
-  background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(0, 255, 157, 0.2));
-  border: 1px solid rgba(0, 240, 255, 0.3);
-  color: var(--accent-cyan);
+  background: #0B0E17;
+  border: 1px solid rgba(0, 240, 255, 0.4);
+}
+.bot-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.6));
 }
 .message-bubble {
   padding: 14px 18px;
@@ -553,6 +770,79 @@ main.main-viewport {
   padding: 0;
 }
 
+/* Typewriter cursor */
+.typing-cursor {
+  display: inline-block;
+  color: var(--accent-cyan);
+  font-weight: 700;
+  animation: cursorBlink 0.7s infinite;
+  margin-left: 2px;
+}
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Plan Card Visualizer */
+.rendered-plan-card {
+  background: rgba(11, 15, 24, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin: 8px 0;
+  box-shadow: 0 4px 20px rgba(0, 240, 255, 0.1);
+}
+.plan-card-header {
+  font-size: 0.86rem;
+  color: var(--accent-cyan);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.plan-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plan-step-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+}
+.step-num {
+  background: rgba(0, 240, 255, 0.15);
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.step-info {
+  flex: 1;
+}
+.step-desc {
+  font-size: 0.84rem;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.step-tool {
+  margin-top: 3px;
+}
+.tool-tag {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  background: rgba(139, 92, 246, 0.15);
+  color: #C4B5FD;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
 /* Step Progress Card */
 .progress-card {
   background: rgba(15, 23, 42, 0.6);
@@ -595,29 +885,6 @@ main.main-viewport {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.06);
   color: var(--accent-cyan);
-}
-
-/* System Banner Notice */
-.system-notice {
-  align-self: center;
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid var(--border);
-  padding: 6px 16px;
-  border-radius: 999px;
-  font-size: 0.76rem;
-  color: var(--text-muted);
-}
-.mic-alert-banner {
-  background: rgba(244, 63, 94, 0.12);
-  border: 1px solid rgba(244, 63, 94, 0.3);
-  color: #FDA4AF;
-  padding: 10px 16px;
-  border-radius: var(--radius-md);
-  font-size: 0.82rem;
-  margin: 0 32px 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
 }
 
 /* Chat Input Bar */
@@ -682,105 +949,228 @@ main.main-viewport {
   font-size: 0.94rem;
   resize: none;
   max-height: 120px;
-  line-height: 1.5;
-  padding: 8px 0;
+  padding: 6px 0;
 }
 .input-box textarea::placeholder { color: var(--text-muted); }
-
 .btn-icon {
   width: 40px;
   height: 40px;
   border-radius: 50%;
   border: none;
-  outline: none;
   background: transparent;
   color: var(--text-secondary);
+  cursor: pointer;
   display: grid;
   place-items: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  flex-shrink: 0;
+  transition: all 0.18s;
 }
 .btn-icon:hover {
-  background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
-}
-.btn-mic.recording {
-  background: rgba(244, 63, 94, 0.2);
-  color: var(--accent-rose);
-  animation: pulse 1.2s infinite;
-}
-@keyframes pulse {
-  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.4); }
-  70% { transform: scale(1.08); box-shadow: 0 0 0 10px rgba(244, 63, 94, 0); }
-  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+  background: rgba(255, 255, 255, 0.08);
 }
 .btn-send {
-  background: linear-gradient(135deg, #00F0FF, #00FF9D);
+  background: var(--accent-cyan);
   color: #07090E;
-  font-weight: 700;
 }
 .btn-send:hover {
-  filter: brightness(1.15);
-  transform: scale(1.04);
+  background: #25F4FF;
+  transform: scale(1.05);
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.4);
+}
+.btn-mic.recording {
+  background: var(--accent-rose);
+  color: #FFF;
+  animation: pulse 1s infinite alternate;
+}
+@keyframes pulse {
+  from { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.6); }
+  to { box-shadow: 0 0 0 10px rgba(244, 63, 94, 0); }
 }
 
-/* Settings & Hardware Views */
-.scroll-view {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-.section-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.section-title {
-  font-size: 1.35rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-.section-subtitle {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-.grid-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 20px;
-}
-.setting-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  backdrop-filter: blur(20px);
-}
-.card-head {
+/* Common View Header */
+.view-header {
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  background: rgba(11, 15, 24, 0.4);
 }
-.card-head-title {
+.view-title-group h2 {
+  font-size: 1.25rem;
   font-weight: 700;
-  font-size: 0.96rem;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
 }
-.card-head-desc {
+.view-title-group p {
   font-size: 0.8rem;
   color: var(--text-muted);
+  margin-top: 2px;
+}
+.view-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.btn-action {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.btn-action:hover {
+  background: rgba(0, 240, 255, 0.1);
+  border-color: rgba(0, 240, 255, 0.3);
+  color: var(--accent-cyan);
+}
+
+/* GraphRAG View */
+.graph-container {
+  flex: 1;
+  position: relative;
+  background: #06080D;
+  overflow: hidden;
+}
+#cyGraph {
+  width: 100%;
+  height: 100%;
+}
+.graph-drawer {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 280px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(16px);
+  padding: 14px;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 5;
+}
+.graph-drawer-title {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+.graph-drawer-body {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Process Manager View */
+.process-content {
+  flex: 1;
+  padding: 24px 32px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.proc-search-input {
+  background: #0B0E17;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  outline: none;
+  width: 260px;
+}
+.proc-search-input:focus { border-color: var(--accent-cyan); }
+.process-table-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.process-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.process-table th {
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px 18px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.process-table td {
+  padding: 12px 18px;
+  font-size: 0.82rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.process-table tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+.pid-tag {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+.proc-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.btn-kill {
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  color: var(--accent-rose);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.btn-kill:hover {
+  background: var(--accent-rose);
+  color: #FFF;
+}
+
+/* Settings & Resources Views */
+.settings-content, .resources-content {
+  flex: 1;
+  padding: 24px 32px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 900px;
+}
+.card-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.card-section h3 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .select-input {
   width: 100%;
   background: #0B0E17;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-family: var(--font-main);
   font-size: 0.88rem;
@@ -789,7 +1179,6 @@ main.main-viewport {
   cursor: pointer;
 }
 .select-input:focus { border-color: var(--accent-cyan); }
-
 .radio-group {
   display: flex;
   flex-direction: column;
@@ -814,7 +1203,6 @@ main.main-viewport {
   background: rgba(0, 240, 255, 0.06);
   border-color: var(--accent-cyan);
 }
-.radio-option input { margin-top: 4px; }
 .radio-label-title { font-size: 0.88rem; font-weight: 600; }
 .radio-label-desc { font-size: 0.76rem; color: var(--text-muted); margin-top: 2px; }
 
@@ -894,14 +1282,15 @@ main.main-viewport {
 <header>
   <a href="#" class="brand">
     <div class="brand-logo">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <img src="/assets/OmniCore-bounce.png" alt="OmniCore Logo" class="brand-logo-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
+      <svg style="display:none;" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
         <polyline points="2 17 12 22 22 17"></polyline>
         <polyline points="2 12 12 17 22 12"></polyline>
       </svg>
     </div>
     <div class="brand-title">OMNICORE</div>
-    <div class="brand-badge">v0.40.0</div>
+    <div class="brand-badge">v0.1.0</div>
   </a>
 
   <div class="header-status">
@@ -920,50 +1309,51 @@ main.main-viewport {
   <aside class="nav-sidebar">
     <div class="nav-heading" data-i18n="nav_heading">Gezinti</div>
 
-    <button class="nav-btn active" onclick="switchView('chat')">
-      <span class="nav-icon">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-        </svg>
-      </span>
+    <button class="nav-btn active" onclick="switchView('chat')" id="nav-chat">
+      <span class="nav-icon">💬</span>
       <span data-i18n="nav_chat">Yapay Zeka Sohbet</span>
     </button>
 
-    <button class="nav-btn" onclick="toggleVoiceInput()" id="btnNavVoice" title="Sesli Asistan (Voice Duplex)">
-      <span class="nav-icon">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-          <line x1="12" y1="19" x2="12" y2="23"></line>
-          <line x1="8" y1="23" x2="16" y2="23"></line>
-        </svg>
-      </span>
-      <span data-i18n="nav_voice">Sesli Asistan</span>
+    <button class="nav-btn" onclick="switchView('graph')" id="nav-graph">
+      <span class="nav-icon">🧠</span>
+      <span>Bilgi Grafiği (GraphRAG)</span>
     </button>
 
-    <button class="nav-btn" onclick="switchView('settings')">
-      <span class="nav-icon">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-        </svg>
-      </span>
-      <span data-i18n="nav_settings">Sistem & Yetki Ayarları</span>
+    <button class="nav-btn" onclick="switchView('processes')" id="nav-processes">
+      <span class="nav-icon">⚡</span>
+      <span>Süreç Yöneticisi</span>
     </button>
 
-    <button class="nav-btn" onclick="switchView('resources')">
-      <span class="nav-icon">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-          <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-          <line x1="6" y1="6" x2="6.01" y2="6"></line>
-          <line x1="6" y1="18" x2="6.01" y2="18"></line>
-        </svg>
-      </span>
-      <span data-i18n="nav_resources">Sistem Bilgisi & Araçlar</span>
+    <button class="nav-btn" onclick="switchView('settings')" id="nav-settings">
+      <span class="nav-icon">⚙️</span>
+      <span data-i18n="nav_settings">Sistem & Yetki</span>
+    </button>
+
+    <button class="nav-btn" onclick="switchView('resources')" id="nav-resources">
+      <span class="nav-icon">🛠️</span>
+      <span data-i18n="nav_resources">Donanım & Araçlar</span>
     </button>
 
     <div class="sidebar-spacer"></div>
+
+    <!-- Memory Stats Card -->
+    <div class="memory-stats-card" id="memStatsCard">
+      <div class="memory-stats-title">
+        <span>💾</span> Bellek & Bilgi Tabanı
+      </div>
+      <div class="memory-stat-row">
+        <span>Kalıcı Kayıt:</span>
+        <span class="memory-stat-val" id="statMemDocs">--</span>
+      </div>
+      <div class="memory-stat-row">
+        <span>Graf Düğümleri:</span>
+        <span class="memory-stat-val" id="statGraphNodes">--</span>
+      </div>
+      <div class="memory-stat-row">
+        <span>Graf İlişkileri:</span>
+        <span class="memory-stat-val" id="statGraphEdges">--</span>
+      </div>
+    </div>
 
     <div class="privacy-badge">
       <div class="privacy-header">
@@ -973,7 +1363,7 @@ main.main-viewport {
         <span data-i18n="privacy_title">%100 Yerel Gizlilik</span>
       </div>
       <div class="privacy-text" data-i18n="privacy_desc">
-        OmniCore tamamen cihazınızda çalışır. Donanım bilgisi ve kullanım verileriniz dış sunuculara kesinlikle aktarılmaz.
+        OmniCore tamamen cihazınızda çalışır. Verileriniz dış sunuculara kesinlikle aktarılmaz.
       </div>
     </div>
   </aside>
@@ -983,44 +1373,27 @@ main.main-viewport {
     <!-- View 1: Chat -->
     <section class="view-section active" id="view-chat">
       <div class="chat-container">
-        <div id="micAlert" class="mic-alert-banner" style="display:none;">
-          <span data-i18n="mic_blocked_msg">🎙️ Mikrofon izni engellendi: Tarayıcı adres çubuğundaki kilit simgesine (🔒) tıklayıp Mikrofona izin verin.</span>
-          <button class="btn-icon" style="width:24px;height:24px;" onclick="document.getElementById('micAlert').style.display='none'">✕</button>
-        </div>
-
         <div class="chat-messages" id="messagesList">
-          <div class="system-notice" data-i18n="welcome_msg">
-            OmniCore Yapay Zeka İşletim Sistemine Hoş Geldiniz. Doğal dilde talimat verin.
+          <div class="message-row bot">
+            <div class="message-avatar">
+              <img src="/assets/OmniCore-bounce.png" alt="OmniCore" class="bot-avatar-img" onerror="this.outerHTML='🤖';" />
+            </div>
+            <div class="message-bubble">
+              👋 <strong>OmniCore Sovereign AI OS</strong> hazır! Nasıl yardımcı olabilirim?
+            </div>
           </div>
         </div>
 
-        <!-- Chat Input Area -->
         <div class="chat-input-wrapper">
           <div class="action-chips">
-            <button class="chip-btn" onclick="sendPrompt('Ruhi Çenet YouTube son videosunu aç')">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-              Ruhi Çenet YouTube Aç
-            </button>
-            <button class="chip-btn" onclick="sendPrompt('Masaüstünün ekran görüntüsünü alıp kaydet')">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-              Ekran Görüntüsü Al
-            </button>
-            <button class="chip-btn" onclick="sendPrompt('Spotify uygulamasını aç ve müziği oynat')">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
-              Spotify Müziği Aç
-            </button>
-            <button class="chip-btn" onclick="sendPrompt('/status')">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
-              /status (Sistem Durumu)
-            </button>
-            <button class="chip-btn" onclick="sendPrompt('/models')">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
-              /models (Model Havuzu)
-            </button>
+            <button class="chip-btn" onclick="sendPrompt('Spotify\'da sevdiğim şarkıyı çal')">🎵 Spotify Çal</button>
+            <button class="chip-btn" onclick="sendPrompt('Şu an ekrana bak ve açık olan pencereyi özetle')">👁️ Ekrana Bak</button>
+            <button class="chip-btn" onclick="sendPrompt('Donanım durumunu ve GPU VRAM basıncını göster')">⚡ Sistem & VRAM</button>
+            <button class="chip-btn" onclick="sendPrompt('Hakkımda bildiğin kalıcı tercihleri ve notları listele')">🧠 Hafıza Özeti</button>
           </div>
 
           <div class="input-box">
-            <button class="btn-icon btn-mic" id="btnMic" onclick="toggleVoiceInput()" title="Sesli Konuş">
+            <button class="btn-icon btn-mic" id="btnMic" onclick="toggleVoiceInput()" title="Sesle Konuş">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
                 <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
@@ -1028,9 +1401,9 @@ main.main-viewport {
                 <line x1="8" y1="23" x2="16" y2="23"></line>
               </svg>
             </button>
-            <textarea id="chatInput" rows="1" placeholder="OmniCore'a bir talimat verin..." onkeydown="handleInputKey(event)"></textarea>
+            <textarea id="chatInput" rows="1" placeholder="Bir mesaj veya otonom komut yazın... (Enter ile gönder)" onkeydown="handleInputKey(event)"></textarea>
             <button class="btn-icon btn-send" onclick="sendCurrentMessage()" title="Gönder">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="22" y1="2" x2="11" y2="13"></line>
                 <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
               </svg>
@@ -1040,118 +1413,142 @@ main.main-viewport {
       </div>
     </section>
 
-    <!-- View 2: Settings -->
+    <!-- View 2: GraphRAG Knowledge Graph -->
+    <section class="view-section" id="view-graph">
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2>🧠 GraphRAG Bilgi Grafiği</h2>
+          <p>Kalıcı anlamsal ilişkiler, varlık ağları ve çok adımlı çıkarım haritası</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn-action" onclick="loadGraphData()">🔄 Yenile</button>
+          <button class="btn-action" onclick="fitGraph()">🎯 Ekrana Sığdır</button>
+        </div>
+      </div>
+      <div class="graph-container">
+        <div id="cyGraph"></div>
+        <div class="graph-drawer" id="graphDrawer">
+          <div class="graph-drawer-title" id="drawerTitle">Varlık Detayı</div>
+          <div class="graph-drawer-body" id="drawerBody">Seçilen düğümün bilgileri burada görüntülenir.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- View 3: Process Manager -->
+    <section class="view-section" id="view-processes">
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2>⚡ Süreç Yöneticisi</h2>
+          <p>Aktif sistem süreçleri, kaynak tüketimi ve anında sonlandırma kontrolü</p>
+        </div>
+        <div class="view-actions">
+          <input type="text" id="procSearchInput" class="proc-search-input" placeholder="Süreç filtrele..." oninput="filterProcesses()" />
+          <button class="btn-action" onclick="loadProcesses()">🔄 Yenile</button>
+        </div>
+      </div>
+      <div class="process-content">
+        <div class="process-table-card">
+          <table class="process-table">
+            <thead>
+              <tr>
+                <th>PID</th>
+                <th>Süreç Adı</th>
+                <th>CPU (%)</th>
+                <th>Bellek (%)</th>
+                <th>Aksiyon</th>
+              </tr>
+            </thead>
+            <tbody id="procTableBody">
+              <tr>
+                <td colspan="5" style="text-align:center; padding: 24px; color: var(--text-muted);">Yükleniyor...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- View 4: Settings -->
     <section class="view-section" id="view-settings">
-      <div class="scroll-view">
-        <div class="section-header">
-          <div class="section-title" data-i18n="settings_title">Model & Güvenlik Yönetimi</div>
-          <div class="section-subtitle" data-i18n="settings_subtitle">Degisiklikler aninda bellege ve .env dosyasina kaydedilir.</div>
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2>⚙️ Sistem & Yetki Yapılandırması</h2>
+          <p>Bilişsel model ve otonom eylem güvenlik seviyesi ayarları</p>
+        </div>
+      </div>
+      <div class="settings-content">
+        <div class="card-section">
+          <h3>🤖 Aktif Yapay Zeka Modeli</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted);">Kullanılacak LLM sağlayıcısını ve modelini dinamik olarak değiştirin:</p>
+          <select class="select-input" id="selModelList" onchange="onModelSelected(this.value)">
+            <option value="">Modeller yükleniyor...</option>
+          </select>
         </div>
 
-        <div class="grid-cards">
-          <!-- Model Selection -->
-          <div class="setting-card">
-            <div class="card-head">
-              <div class="card-head-title" data-i18n="active_model_title">Aktif Model & Sağlayıcı</div>
-              <span class="badge" id="lblCurrentModel">...</span>
+        <div class="card-section">
+          <h3>🛡️ Güvenlik ve Eylem Onay Modu</h3>
+          <div class="radio-group">
+            <div class="radio-option" id="opt-full" onclick="setAuthorityMode('full')">
+              <input type="radio" name="perm_mode" value="full" />
+              <div>
+                <div class="radio-label-title">🔓 Tam Yetki (Full Auto)</div>
+                <div class="radio-label-desc">Tüm araçlar, komutlar ve sistem işlemleri kullanıcı onayı beklemeden yürütülür.</div>
+              </div>
             </div>
-            <div class="card-head-desc" data-i18n="active_model_desc">Kullanmak istediğiniz birincil yapay zeka modelini seçin.</div>
-            <select class="select-input" id="selModelList" onchange="onModelSelected(this.value)">
-              <option>Yükleniyor...</option>
-            </select>
-          </div>
-
-          <!-- Authority Mode -->
-          <div class="setting-card">
-            <div class="card-head">
-              <div class="card-head-title" data-i18n="perm_mode_title">İzin & Yetki Modu</div>
+            <div class="radio-option" id="opt-safe" onclick="setAuthorityMode('safe')">
+              <input type="radio" name="perm_mode" value="safe" />
+              <div>
+                <div class="radio-label-title">🔐 Güvenli Mod (Safe Auto)</div>
+                <div class="radio-label-desc">Okuma ve arama işlemleri otomatik, dosya silme veya kritik sistem işlemleri onay sorar.</div>
+              </div>
             </div>
-            <div class="card-head-desc" data-i18n="perm_mode_desc">Otonom araçların çalışma onay politikasını yapılandırın.</div>
-            <div class="radio-group">
-              <label class="radio-option" id="opt-full" onclick="setAuthorityMode('full')">
-                <input type="radio" name="permMode" value="full">
-                <div>
-                  <div class="radio-label-title">🔓 Tam Yetki (Full Authority)</div>
-                  <div class="radio-label-desc">Ekran görüntüsü, tarayıcı, dosya ve uygulama işlemlerinde onay sormaz. Kesintisiz otonom yürütür.</div>
-                </div>
-              </label>
-              <label class="radio-option" id="opt-safe" onclick="setAuthorityMode('safe')">
-                <input type="radio" name="permMode" value="safe">
-                <div>
-                  <div class="radio-label-title">🔐 Güvenli Mod (Safe Mode)</div>
-                  <div class="radio-label-desc">Rutin işlemleri otomatik onaylar, yalnızca kritik sistem/disk eylemleri için sorar.</div>
-                </div>
-              </label>
-              <label class="radio-option" id="opt-ask" onclick="setAuthorityMode('ask')">
-                <input type="radio" name="permMode" value="ask">
-                <div>
-                  <div class="radio-label-title">🔒 Sorarak Onay (Strict Ask)</div>
-                  <div class="radio-label-desc">Her araç çalıştırmadan önce kullanıcı onayı bekler.</div>
-                </div>
-              </label>
+            <div class="radio-option" id="opt-ask" onclick="setAuthorityMode('ask')">
+              <input type="radio" name="perm_mode" value="ask" />
+              <div>
+                <div class="radio-label-title">🔒 Sorarak Onay (Strict Ask)</div>
+                <div class="radio-label-desc">Tüm eylemler yürütülmeden önce kullanıcıdan açık onay talep eder.</div>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- View 3: Hardware & Tools -->
+    <!-- View 5: Resources & Tools -->
     <section class="view-section" id="view-resources">
-      <div class="scroll-view">
-        <div class="section-header">
-          <div class="section-title" data-i18n="resources_title">Yerel Donanım & Araç Havuzu</div>
-          <div class="section-subtitle" data-i18n="resources_subtitle">Cihazınızın sistem kaynakları ve kayıtlı 192+ otonom araç kataloğu.</div>
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2>🛠️ Sistem Kaynakları & Araç Kataloğu</h2>
+          <p>Donanım telemetrisi ve OmniCore'un kullanabildiği kayıtlı 60+ otonom araç</p>
         </div>
-
-        <div class="grid-cards">
-          <!-- Hardware Metrics -->
-          <div class="setting-card">
-            <div class="card-head">
-              <div class="card-head-title" data-i18n="hw_monitor_title">Donanım Kaynakları</div>
-              <span class="badge" style="color:var(--accent-emerald)">100% Yerel</span>
+      </div>
+      <div class="resources-content">
+        <div class="card-section">
+          <h3>💻 Canlı Donanım Telemetrisi</h3>
+          <div class="metric-row">
+            <div class="metric-meta">
+              <span>İşlemci (CPU)</span>
+              <span id="txtCpuUsage">--%</span>
             </div>
-            <div class="metric-row">
-              <div class="metric-meta">
-                <span>CPU Kullanımı</span>
-                <span id="txtCpuUsage">0%</span>
-              </div>
-              <div class="metric-track">
-                <div class="metric-fill fill-cyan" id="barCpu" style="width:0%"></div>
-              </div>
-            </div>
-            <div class="metric-row">
-              <div class="metric-meta">
-                <span>RAM Bellek</span>
-                <span id="txtRamUsage">0 GB</span>
-              </div>
-              <div class="metric-track">
-                <div class="metric-fill fill-purple" id="barRam" style="width:0%"></div>
-              </div>
+            <div class="metric-track">
+              <div class="metric-fill fill-cyan" id="barCpu" style="width: 0%"></div>
             </div>
           </div>
-
-          <!-- Privacy Commitment -->
-          <div class="setting-card" style="border-color: rgba(0, 255, 157, 0.3);">
-            <div class="card-head">
-              <div class="card-head-title" style="color:var(--accent-emerald);">🛡️ Gizlilik ve Veri Güvenliği</div>
+          <div class="metric-row" style="margin-top: 10px;">
+            <div class="metric-meta">
+              <span>Bellek (RAM)</span>
+              <span id="txtRamUsage">--%</span>
             </div>
-            <div style="font-size:0.84rem; color:var(--text-secondary); line-height:1.6;">
-              <p>• <strong>Sıfır Dış Veri Gönderimi:</strong> OmniCore sistem durumu ve donanım bilgisi harici hiçbir şirkete (Google, Meta, bulut servisleri) gönderilmez.</p>
-              <p style="margin-top:6px;">• <strong>Lokal psutil Ölçümü:</strong> Tüm CPU ve RAM değerleri doğrudan işletim sistemi çekirdeğinden okunur.</p>
-              <p style="margin-top:6px;">• <strong>Vektör Bellek Güvenliği:</strong> ChromaDB üçüncü taraf veri toplama kod düzeyinde kapatılmıştır.</p>
+            <div class="metric-track">
+              <div class="metric-fill fill-purple" id="barRam" style="width: 0%"></div>
             </div>
           </div>
         </div>
 
-        <!-- Tool Catalog -->
-        <div class="setting-card">
-          <div class="card-head">
-            <div class="card-head-title" data-i18n="tools_title">Kayıtlı Otonom Araçlar (192)</div>
-            <input type="text" class="tool-search-box" id="toolFilter" placeholder="Araç ara (örn: youtube, screen, terminal)..." oninput="filterTools(this.value)" style="max-width:320px;">
-          </div>
-          <div class="tool-list-container" id="toolListContainer">
-            <div style="color:var(--text-muted); font-size:0.85rem;">Araç listesi yükleniyor...</div>
-          </div>
+        <div class="card-section">
+          <h3>🔧 Araç Havuzu</h3>
+          <input type="text" class="tool-search-box" placeholder="Araç adı veya açıklamasıyla filtreleyin..." oninput="filterTools(this.value)" />
+          <div class="tool-list-container" id="toolListContainer"></div>
         </div>
       </div>
     </section>
@@ -1159,161 +1556,141 @@ main.main-viewport {
 </div>
 
 <script>
-// --- State & Localization ---
-let currentLang = 'tr';
-let currentView = 'chat';
-
-const I18N = {
-  tr: {
-    nav_heading: "Gezinti",
-    nav_chat: "Yapay Zeka Sohbet",
-    nav_voice: "Sesli Asistan",
-    nav_settings: "Sistem & Yetki Ayarları",
-    nav_resources: "Sistem Bilgisi & Araçlar",
-    privacy_title: "%100 Yerel Gizlilik",
-    privacy_desc: "OmniCore tamamen cihazınızda çalışır. Sistem bilgisi ve kullanım verileriniz dış sunuculara kesinlikle aktarılmaz.",
-    welcome_msg: "OmniCore Yapay Zeka İşletim Sistemine Hoş Geldiniz. Doğal dilde talimat verin.",
-    mic_blocked_msg: "🎙️ Mikrofon izni engellendi: Tarayıcı adres çubuğundaki kilit simgesine (🔒) tıklayıp Mikrofona izin verin.",
-    settings_title: "Model & Güvenlik Yönetimi",
-    settings_subtitle: "Degisiklikler aninda bellege ve .env dosyasina kaydedilir.",
-    active_model_title: "Aktif Model & Sağlayıcı",
-    active_model_desc: "Kullanmak istediğiniz birincil yapay zeka modelini seçin.",
-    perm_mode_title: "İzin & Yetki Modu",
-    perm_mode_desc: "Otonom araçların çalışma onay politikasını yapılandırın.",
-    resources_title: "Sistem Bilgisi & Otonom Araç Havuzu",
-    resources_subtitle: "Cihazınızın sistem kaynakları, bellek durumu ve kayıtlı 192+ otonom araç kataloğu.",
-    hw_monitor_title: "Sistem Bilgisi (CPU & RAM)",
-    tools_title: "Kayıtlı Otonom Araçlar",
-  },
-  en: {
-    nav_heading: "Navigation",
-    nav_chat: "AI Chat Assistant",
-    nav_voice: "Voice Assistant",
-    nav_settings: "System & Authority",
-    nav_resources: "System Info & Tools",
-    privacy_title: "100% Local Privacy",
-    privacy_desc: "OmniCore runs entirely on your device. Hardware metrics and usage data are never transmitted externally.",
-    welcome_msg: "Welcome to OmniCore Autonomous AI OS. Provide natural instructions.",
-    mic_blocked_msg: "🎙️ Microphone permission blocked: Click the lock icon (🔒) in your browser address bar to allow microphone access.",
-    settings_title: "Model & Security Management",
-    settings_subtitle: "Changes are instantly persisted to memory and .env.",
-    active_model_title: "Active Model & Provider",
-    active_model_desc: "Select the primary artificial intelligence model.",
-    perm_mode_title: "Authority & Permission Policy",
-    perm_mode_desc: "Configure autonomous execution authorization policies.",
-    resources_title: "System Info & Tool Catalog",
-    resources_subtitle: "Device system health, memory status, and registered 192+ autonomous tools.",
-    hw_monitor_title: "System Info (CPU & RAM)",
-    tools_title: "Registered Autonomous Tools",
-  }
-};
-
-function toggleLanguage() {
-  currentLang = currentLang === 'tr' ? 'en' : 'tr';
-  document.querySelectorAll('[data-i18n]').forEach(el => {
-    const key = el.getAttribute('data-i18n');
-    if (I18N[currentLang][key]) el.textContent = I18N[currentLang][key];
-  });
-}
-
-function switchView(viewName) {
-  currentView = viewName;
-  document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+// --- Navigation & View Switching ---
+function switchView(viewId) {
   document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
 
-  const btn = document.querySelector(`button[onclick="switchView('${viewName}')"]`);
-  if (btn) btn.classList.add('active');
+  const targetView = document.getElementById('view-' + viewId);
+  const targetNav = document.getElementById('nav-' + viewId);
+  if (targetView) targetView.classList.add('active');
+  if (targetNav) targetNav.classList.add('active');
 
-  const sec = document.getElementById(`view-${viewName}`);
-  if (sec) sec.classList.add('active');
+  if (viewId === 'graph') {
+    setTimeout(loadGraphData, 100);
+  } else if (viewId === 'processes') {
+    loadProcesses();
+  }
 }
 
-// --- Voice & Speech Features ---
-let speechRecognition = null;
-let speechVoice = null;
-let voiceActive = false;
+// --- WebSocket Chat Engine with Typewriter Streaming ---
+let chatSocket = null;
+let activeBotBubble = null;
+let activeCursor = null;
 
-if ('speechSynthesis' in window) {
-  window.speechSynthesis.onvoiceschanged = () => {
-    const voices = window.speechSynthesis.getVoices();
-    speechVoice = voices.find(v => v.lang.startsWith(currentLang === 'tr' ? 'tr' : 'en')) || voices[0];
+function initWebSocket() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
+  chatSocket = new WebSocket(wsUrl);
+
+  chatSocket.onopen = () => {
+    console.log("WebSocket connected to /ws/chat");
+  };
+
+  chatSocket.onmessage = (e) => {
+    try {
+      const payload = JSON.parse(e.data);
+      handleWsMessage(payload);
+    } catch(err) {
+      console.error("WS parse error:", err);
+    }
+  };
+
+  chatSocket.onclose = () => {
+    console.warn("WebSocket closed, attempting reconnect in 3s...");
+    setTimeout(initWebSocket, 3000);
   };
 }
 
-function speakText(text) {
-  if (!window.speechSynthesis) return;
-  const clean = text.replace(/[*_#`~[\]]/g, '').replace(/http\S+/g, '');
-  const utter = new SpeechSynthesisUtterance(clean);
-  utter.lang = currentLang === 'tr' ? 'tr-TR' : 'en-US';
-  if (speechVoice) utter.voice = speechVoice;
-  window.speechSynthesis.speak(utter);
-}
+function handleWsMessage(event) {
+  const titleText = document.getElementById('progressTitleText');
+  const stepsContainer = document.getElementById('progressStepsContainer');
 
-function toggleVoiceInput() {
-  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRec) {
-    alert("Tarayıcınız ses tanımayı desteklemiyor. Lütfen Chrome veya Edge kullanın.");
-    return;
-  }
-  if (!speechRecognition) {
-    speechRecognition = new SpeechRec();
-    speechRecognition.lang = currentLang === 'tr' ? 'tr-TR' : 'en-US';
-    speechRecognition.interimResults = true;
-    speechRecognition.continuous = false;
-
-    speechRecognition.onstart = () => {
-      voiceActive = true;
-      document.getElementById('btnMic').classList.add('recording');
-    };
-    speechRecognition.onresult = (event) => {
-      let text = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        text += event.results[i][0].transcript;
-      }
-      document.getElementById('chatInput').value = text;
-      if (event.results[0].isFinal) {
-        sendCurrentMessage();
-      }
-    };
-    speechRecognition.onerror = (event) => {
-      voiceActive = false;
-      document.getElementById('btnMic').classList.remove('recording');
-      if (event.error === 'not-allowed') {
-        document.getElementById('micAlert').style.display = 'flex';
-      }
-    };
-    speechRecognition.onend = () => {
-      voiceActive = false;
-      document.getElementById('btnMic').classList.remove('recording');
-    };
-  }
-
-  if (voiceActive) {
-    speechRecognition.stop();
-  } else {
-    try {
-      speechRecognition.start();
-    } catch(e) {
-      speechRecognition.stop();
+  if (event.type === 'thinking') {
+    if (titleText) titleText.textContent = event.data.text || "İstek analiz ediliyor...";
+  } else if (event.type === 'plan_created') {
+    if (titleText) titleText.textContent = `📋 ${event.data.total} Adımlı Plan Yürütülüyor:`;
+    if (stepsContainer) {
+      stepsContainer.innerHTML = '';
+      (event.data.steps || []).forEach(s => {
+        const item = document.createElement('div');
+        item.className = 'progress-step-item';
+        item.innerHTML = `<span class="step-badge">${s.step}/${event.data.total}</span> ${s.tool}: ${s.description}`;
+        stepsContainer.appendChild(item);
+      });
     }
+  } else if (event.type === 'step_start') {
+    if (titleText) titleText.textContent = `⚡ [${event.data.step}/${event.data.total}] ${event.data.tool} yürütülüyor...`;
+  } else if (event.type === 'step_end') {
+    if (stepsContainer) {
+      const item = document.createElement('div');
+      item.className = 'progress-step-item';
+      const ok = event.data.status === 'ok';
+      item.style.color = ok ? 'var(--accent-emerald)' : 'var(--accent-rose)';
+      item.textContent = `${ok ? '✅' : '❌'} ${event.data.tool}: ${event.data.result || 'tamamlandı'}`;
+      stepsContainer.appendChild(item);
+    }
+  } else if (event.type === 'summarizing') {
+    if (titleText) titleText.textContent = "✨ Sonuçlar toparlanıyor...";
+  } else if (event.type === 'token') {
+    // Typewriter token append
+    if (!activeBotBubble) {
+      removeProgressCard();
+      activeBotBubble = appendMessage('', 'bot');
+      activeCursor = document.createElement('span');
+      activeCursor.className = 'typing-cursor';
+      activeCursor.textContent = '▌';
+      activeBotBubble.appendChild(activeCursor);
+    }
+    const tokenSpan = document.createElement('span');
+    tokenSpan.textContent = event.token;
+    if (activeCursor && activeCursor.parentNode === activeBotBubble) {
+      activeBotBubble.insertBefore(tokenSpan, activeCursor);
+    } else {
+      activeBotBubble.appendChild(tokenSpan);
+    }
+    const list = document.getElementById('messagesList');
+    list.scrollTop = list.scrollHeight;
+  } else if (event.type === 'done') {
+    removeProgressCard();
+    if (activeCursor) {
+      activeCursor.remove();
+      activeCursor = null;
+    }
+    if (activeBotBubble) {
+      activeBotBubble.innerHTML = formatMarkdown(event.reply);
+      activeBotBubble = null;
+    } else {
+      appendMessage(event.reply, 'bot');
+    }
+    speakText(event.reply);
+  } else if (event.type === 'error') {
+    removeProgressCard();
+    if (activeCursor) { activeCursor.remove(); activeCursor = null; }
+    appendMessage(`❌ Hata: ${event.error}`, 'bot');
+    activeBotBubble = null;
   }
 }
 
-// --- Chat & Streaming Execution ---
+// --- Message Rendering & Formatting ---
 function appendMessage(text, role='bot') {
   const list = document.getElementById('messagesList');
   const row = document.createElement('div');
   row.className = 'message-row ' + role;
 
   const avatar = document.createElement('div');
-  avatar.className = 'message-avatar';
-  avatar.textContent = role === 'user' ? 'YOU' : 'AI';
+  avatar.className = 'message-avatar ' + role;
+  if (role === 'user') {
+    avatar.textContent = 'YOU';
+  } else {
+    avatar.innerHTML = '<img src="/assets/OmniCore-bounce.png" class="bot-avatar-img" alt="OmniCore" onerror="this.outerHTML=\'🤖\';">';
+  }
 
   const bubble = document.createElement('div');
   bubble.className = 'message-bubble';
-
-  // Format simple markdown
-  bubble.innerHTML = formatMarkdown(text);
+  if (text) {
+    bubble.innerHTML = formatMarkdown(text);
+  }
 
   row.appendChild(avatar);
   row.appendChild(bubble);
@@ -1323,14 +1700,51 @@ function appendMessage(text, role='bot') {
 }
 
 function formatMarkdown(text) {
+  if (!text) return '';
+
+  const trimmed = text.trim();
+  let jsonPlan = null;
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('```json') && trimmed.endsWith('```'))) {
+    try {
+      const cleanJson = trimmed.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+      const parsed = JSON.parse(cleanJson);
+      if (parsed && (parsed.needs_plan !== undefined || parsed.steps || parsed.total)) {
+        jsonPlan = parsed;
+      }
+    } catch(e) {}
+  }
+
+  if (jsonPlan) {
+    const steps = jsonPlan.steps || [];
+    let html = `<div class="rendered-plan-card">
+      <div class="plan-card-header">
+        <span>📋</span>
+        <strong>Otonom Görev Planı (${steps.length} Adım)</strong>
+      </div>
+      <div class="plan-steps-list">`;
+    steps.forEach((st, i) => {
+      const tool = st.tool_name || st.tool || 'Araç';
+      const desc = st.description || st.text || `Adım ${i+1}`;
+      html += `<div class="plan-step-item">
+        <span class="step-num">${i+1}</span>
+        <div class="step-info">
+          <div class="step-desc">${desc}</div>
+          <div class="step-tool"><span class="tool-tag">⚡ ${tool}</span></div>
+        </div>
+      </div>`;
+    });
+    html += `</div></div>`;
+    if (jsonPlan.message || jsonPlan.reply) {
+      html += `<div style="margin-top: 8px;">${formatMarkdown(jsonPlan.message || jsonPlan.reply)}</div>`;
+    }
+    return html;
+  }
+
   let esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  // Code blocks
   esc = esc.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-  // Inline code
   esc = esc.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Bold
   esc = esc.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  // Line breaks
+  esc = esc.replace(/\*([^*]+)\*/g, '<em>$1</em>');
   esc = esc.replace(/\n/g, '<br>');
   return esc;
 }
@@ -1382,17 +1796,25 @@ async function sendCurrentMessage() {
   input.value = '';
 
   appendMessage(text, 'user');
-  const progressCard = appendProgressCard();
+  appendProgressCard();
+
+  if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+    activeBotBubble = null;
+    activeCursor = null;
+    chatSocket.send(JSON.stringify({ message: text }));
+  } else {
+    // Fallback to SSE stream if websocket is offline
+    sendViaSse(text);
+  }
+}
+
+async function sendViaSse(text) {
   const titleText = document.getElementById('progressTitleText');
   const stepsContainer = document.getElementById('progressStepsContainer');
-
-  // Stream via SSE
   try {
     const url = '/api/chat/stream?message=' + encodeURIComponent(text);
     const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
@@ -1402,7 +1824,7 @@ async function sendCurrentMessage() {
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n\n');
-      buffer = lines.pop(); // Keep partial
+      buffer = lines.pop();
 
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
@@ -1410,68 +1832,256 @@ async function sendCurrentMessage() {
         if (!jsonStr) continue;
         try {
           const payload = JSON.parse(jsonStr);
-          handleProgressEvent(payload, titleText, stepsContainer);
-        } catch(err) {
-          console.error("SSE parse error:", err);
-        }
+          handleWsMessage(payload);
+        } catch(err) {}
       }
     }
   } catch(err) {
     removeProgressCard();
-    appendMessage(`⚠️ İstek yürütülürken hata oluştu: ${err.message}`, 'bot');
+    appendMessage(`⚠️ Hata: ${err.message}`, 'bot');
   }
 }
 
-function handleProgressEvent(event, titleEl, stepsEl) {
-  if (event.type === 'thinking') {
-    titleEl.textContent = event.data.text || "İstek analiz ediliyor...";
-  } else if (event.type === 'plan_ready') {
-    const steps = event.data.steps || [];
-    titleEl.textContent = `📋 ${steps.length} Adımlı Otonom Plan Yürütülüyor:`;
-    stepsEl.innerHTML = '';
-    steps.forEach((s, idx) => {
-      const item = document.createElement('div');
-      item.className = 'progress-step-item';
-      item.innerHTML = `<span class="step-badge">${idx+1}/${steps.length}</span> ${s.tool_name}`;
-      stepsEl.appendChild(item);
+// --- Voice Recognition & TTS ---
+let voiceActive = false;
+let speechRecognition = null;
+
+function toggleVoiceInput() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    alert("Tarayıcınız Web Speech API desteklemiyor. Google Chrome veya Edge kullanın.");
+    return;
+  }
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!speechRecognition) {
+    speechRecognition = new SpeechRec();
+    speechRecognition.continuous = false;
+    speechRecognition.interimResults = false;
+    speechRecognition.lang = 'tr-TR';
+
+    speechRecognition.onstart = () => {
+      voiceActive = true;
+      document.getElementById('btnMic').classList.add('recording');
+    };
+    speechRecognition.onresult = (e) => {
+      const text = e.results[0][0].transcript;
+      document.getElementById('chatInput').value = text;
+      sendCurrentMessage();
+    };
+    speechRecognition.onend = () => {
+      voiceActive = false;
+      document.getElementById('btnMic').classList.remove('recording');
+    };
+  }
+
+  if (voiceActive) {
+    speechRecognition.stop();
+  } else {
+    try { speechRecognition.start(); } catch(e) { speechRecognition.stop(); }
+  }
+}
+
+function speakText(text) {
+  if (!('speechSynthesis' in window)) return;
+  const clean = text.replace(/<[^>]+>/g, '').replace(/[*_#`]/g, '');
+  const utter = new SpeechSynthesisUtterance(clean);
+  utter.lang = 'tr-TR';
+  utter.rate = 1.05;
+  window.speechSynthesis.speak(utter);
+}
+
+// --- GraphRAG Cytoscape Visualizer ---
+let cy = null;
+
+async function loadGraphData() {
+  try {
+    const res = await fetch('/api/graph/data');
+    const data = await res.json();
+    initCytoscape(data);
+  } catch(e) {
+    console.error("Failed to load graph data:", e);
+  }
+}
+
+function initCytoscape(graphData) {
+  const container = document.getElementById('cyGraph');
+  if (!container) return;
+
+  const elements = [];
+  (graphData.nodes || []).forEach(n => {
+    elements.push({
+      group: 'nodes',
+      data: { id: n.id, label: n.label || n.id }
     });
-  } else if (event.type === 'step_start') {
-    titleEl.textContent = `⚡ [${event.data.step}/${event.data.total}] ${event.data.tool} çalıştırılıyor...`;
-  } else if (event.type === 'step_end') {
-    const ok = event.data.status === 'ok';
-    const item = document.createElement('div');
-    item.className = 'progress-step-item';
-    item.style.color = ok ? 'var(--accent-emerald)' : 'var(--accent-rose)';
-    item.textContent = `${ok ? '✅' : '❌'} ${event.data.tool}: ${event.data.result || 'tamamlandı'}`;
-    stepsEl.appendChild(item);
-  } else if (event.type === 'summarizing') {
-    titleEl.textContent = "✨ Sonuçlar toparlanıyor...";
-  } else if (event.type === 'done') {
-    removeProgressCard();
-    appendMessage(event.reply, 'bot');
-    speakText(event.reply);
-  } else if (event.type === 'error') {
-    removeProgressCard();
-    appendMessage(`❌ Hata: ${event.error}`, 'bot');
+  });
+  (graphData.edges || []).forEach(e => {
+    elements.push({
+      group: 'edges',
+      data: { id: e.id, source: e.source, target: e.target, label: e.label || '' }
+    });
+  });
+
+  if (cy) {
+    cy.destroy();
+  }
+
+  cy = cytoscape({
+    container: container,
+    elements: elements,
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'label': 'data(label)',
+          'color': '#F8FAFC',
+          'background-color': '#00F0FF',
+          'font-size': '11px',
+          'font-family': 'Plus Jakarta Sans',
+          'text-valign': 'bottom',
+          'text-margin-y': 6,
+          'width': 28,
+          'height': 28,
+          'border-width': 2,
+          'border-color': '#8B5CF6',
+          'overlay-opacity': 0
+        }
+      },
+      {
+        selector: 'edge',
+        style: {
+          'width': 1.5,
+          'line-color': 'rgba(0, 240, 255, 0.4)',
+          'target-arrow-color': '#00F0FF',
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+          'label': 'data(label)',
+          'font-size': '9px',
+          'color': '#94A3B8',
+          'text-rotation': 'autorotate',
+          'text-margin-y': -6
+        }
+      },
+      {
+        selector: ':selected',
+        style: {
+          'background-color': '#00FF9D',
+          'border-color': '#FFFFFF',
+          'border-width': 3,
+          'line-color': '#00FF9D',
+          'target-arrow-color': '#00FF9D'
+        }
+      }
+    ],
+    layout: {
+      name: 'cose',
+      animate: true,
+      animationDuration: 500,
+      padding: 30
+    }
+  });
+
+  cy.on('tap', 'node', function(evt) {
+    const node = evt.target;
+    const drawer = document.getElementById('graphDrawer');
+    const drawerTitle = document.getElementById('drawerTitle');
+    const drawerBody = document.getElementById('drawerBody');
+    drawer.style.display = 'flex';
+    drawerTitle.textContent = `📌 ${node.data('label')}`;
+    const connectedEdges = node.connectedEdges();
+    drawerBody.innerHTML = `Bağlantılı ilişkiler: <strong>${connectedEdges.length}</strong><br>` +
+      connectedEdges.map(e => `• ${e.data('source')} ➔ <em>${e.data('label')}</em> ➔ ${e.data('target')}`).join('<br>');
+  });
+
+  cy.on('tap', function(evt) {
+    if (evt.target === cy) {
+      document.getElementById('graphDrawer').style.display = 'none';
+    }
+  });
+}
+
+function fitGraph() {
+  if (cy) cy.fit(null, 30);
+}
+
+// --- Process Manager ---
+let allProcesses = [];
+
+async function loadProcesses() {
+  try {
+    const res = await fetch('/api/system/processes?limit=30');
+    allProcesses = await res.json();
+    renderProcesses(allProcesses);
+  } catch(e) {
+    console.error("Failed to load processes:", e);
   }
 }
 
-// --- Live System Info & Status ---
+function renderProcesses(procs) {
+  const tbody = document.getElementById('procTableBody');
+  tbody.innerHTML = '';
+  if (!procs || procs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px; color: var(--text-muted);">Süreç bulunamadı.</td></tr>';
+    return;
+  }
+  procs.forEach(p => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="pid-tag">${p.pid}</td>
+      <td class="proc-name">${p.name}</td>
+      <td><span style="color: ${p.cpu > 20 ? 'var(--accent-rose)' : 'var(--text-primary)'}">${p.cpu}%</span></td>
+      <td>${p.ram}%</td>
+      <td>
+        <button class="btn-kill" onclick="killProcess(${p.pid}, '${p.name}')">Sonlandır</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function filterProcesses() {
+  const query = document.getElementById('procSearchInput').value.toLowerCase().trim();
+  const filtered = allProcesses.filter(p => p.name.toLowerCase().includes(query) || String(p.pid).includes(query));
+  renderProcesses(filtered);
+}
+
+async function killProcess(pid, name) {
+  if (!confirm(`'${name}' (PID: ${pid}) sürecini sonlandırmak istediğinizden emin misiniz?`)) return;
+  try {
+    const res = await fetch('/api/system/kill-process', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pid })
+    });
+    const data = await res.json();
+    if (data.success) {
+      loadProcesses();
+    } else {
+      alert(`Sonlandırma hatası: ${data.error || 'İşlem engellendi'}`);
+    }
+  } catch(e) {
+    alert(`Bağlantı hatası: ${e.message}`);
+  }
+}
+
+// --- Memory Stats Telemetry ---
+async function fetchMemoryStats() {
+  try {
+    const res = await fetch('/api/memory/stats');
+    const data = await res.json();
+    document.getElementById('statMemDocs').textContent = data.total_documents;
+    document.getElementById('statGraphNodes').textContent = data.graph_nodes;
+    document.getElementById('statGraphEdges').textContent = data.graph_edges;
+  } catch(e) {}
+}
+
+// --- Live Telemetry & Status ---
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');
     const d = await res.json();
     document.getElementById('headerProviderModel').textContent = `${d.provider} | ${d.model}`;
-    document.getElementById('lblCurrentModel').textContent = d.model;
-
-    const modeNames = {
-      full: "🔓 TAM YETKİ",
-      safe: "🔐 GÜVENLİ MOD",
-      ask: "🔒 SORARAK ONAY"
-    };
+    const modeNames = { full: "🔓 TAM YETKİ", safe: "🔐 GÜVENLİ MOD", ask: "🔒 SORARAK ONAY" };
     document.getElementById('headerAuthority').textContent = modeNames[d.approval_mode] || d.approval_mode;
 
-    // Sync radio selection
     document.querySelectorAll('.radio-option').forEach(el => el.classList.remove('selected'));
     const opt = document.getElementById('opt-' + d.approval_mode);
     if (opt) {
@@ -1479,7 +2089,7 @@ async function fetchStatus() {
       const radio = opt.querySelector('input');
       if (radio) radio.checked = true;
     }
-  } catch(e) { console.error('Status fetch failed:', e); }
+  } catch(e) {}
 }
 
 async function fetchSysinfo() {
@@ -1490,7 +2100,7 @@ async function fetchSysinfo() {
     document.getElementById('barCpu').style.width = Math.min(100, d.cpu_percent) + '%';
     document.getElementById('txtRamUsage').textContent = `${d.ram_percent}% (${d.ram_used_gb} / ${d.ram_total_gb} GB)`;
     document.getElementById('barRam').style.width = Math.min(100, d.ram_percent) + '%';
-  } catch(e) { console.error('Sysinfo fetch failed:', e); }
+  } catch(e) {}
 }
 
 async function loadModels() {
@@ -1510,7 +2120,7 @@ async function loadModels() {
       }
       sel.appendChild(grp);
     }
-  } catch(e) { console.error('Models load failed:', e); }
+  } catch(e) {}
 }
 
 let allTools = [];
@@ -1520,7 +2130,7 @@ async function loadTools() {
     const res = await fetch('/api/tools');
     allTools = await res.json();
     renderTools(allTools);
-  } catch(e) { console.error('Tools load failed:', e); }
+  } catch(e) {}
 }
 
 function renderTools(tools) {
@@ -1530,7 +2140,7 @@ function renderTools(tools) {
     const card = document.createElement('div');
     card.className = 'tool-item-card';
     card.innerHTML = `
-      <div class="tool-item-name">${t.name}</div>
+      <div class="tool-item-name">⚡ ${t.name}</div>
       <div class="tool-item-desc">${t.description || 'Açıklama yok'}</div>
     `;
     container.appendChild(card);
@@ -1567,13 +2177,33 @@ async function setAuthorityMode(mode) {
   fetchStatus();
 }
 
-// Init
+function toggleLanguage() {
+  const btn = document.getElementById('btnLangToggle');
+  btn.textContent = btn.textContent.includes('TR') ? '🇺🇸 EN' : '🇹🇷 TR';
+}
+
+// Auto-run on load
+initWebSocket();
 fetchStatus();
 fetchSysinfo();
+fetchMemoryStats();
 loadModels();
 loadTools();
 setInterval(fetchStatus, 4000);
 setInterval(fetchSysinfo, 2500);
+setInterval(fetchMemoryStats, 8000);
+
+// Auto-refresh Process Manager when view is active
+let processRefreshTimer = null;
+const originalSwitchView = switchView;
+switchView = function(viewId) {
+  originalSwitchView(viewId);
+  if (processRefreshTimer) { clearInterval(processRefreshTimer); processRefreshTimer = null; }
+  if (viewId === 'processes') {
+    loadProcesses();
+    processRefreshTimer = setInterval(loadProcesses, 3000);
+  }
+};
 </script>
 </body>
 </html>
@@ -1581,6 +2211,5 @@ setInterval(fetchSysinfo, 2500);
 
 
 def _write_to_stderr(msg: str) -> None:
-
     sys.stderr.write(msg + "\n")
     sys.stderr.flush()

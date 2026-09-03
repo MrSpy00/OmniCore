@@ -1,17 +1,31 @@
-# OmniCore — Otonom Bilişsel İşletim Sistemi Asistanı Mimarisi
+<p align="center">
+  <img src="assets/OmniCore-bounce.png" alt="OmniCore Sovereign AI OS Logo" width="320"/>
+</p>
 
-![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
-![Build Status](https://img.shields.io/badge/Tests-128%20Passed-brightgreen.svg)
-![Async Hygiene](https://img.shields.io/badge/Async%20Audit-0%20Issues-brightgreen.svg)
-![License](https://img.shields.io/badge/License-MIT-black.svg)
+<h1 align="center">OmniCore — Otonom Bilişsel İşletim Sistemi Asistanı Mimarisi</h1>
+<p align="center"><strong>Sovereign Autonomous Cognitive AI Operating System Architecture</strong></p>
 
-![OmniCore Cyberpunk Telemetry HUD](assets/omnicore_hud_preview.jpg)
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.12+-3776AB.svg?style=flat&logo=python&logoColor=white" alt="Python 3.12+"/>
+  <img src="https://img.shields.io/badge/Tests-161%20Passed-00C853.svg?style=flat" alt="Tests Passed"/>
+  <img src="https://img.shields.io/badge/Providers-30+%20LLMs-7C4DFF.svg?style=flat" alt="LLM Providers"/>
+  <img src="https://img.shields.io/badge/Async%20Hygiene-0%20Blocking-00B0FF.svg?style=flat" alt="Async Hygiene"/>
+  <img src="https://img.shields.io/badge/License-MIT-gray.svg?style=flat" alt="License MIT"/>
+</p>
 
-**OmniCore**, işletim sistemi düzeyinde mutlak kontrol, otonom süreç otomasyonu ve yapay zeka tabanlı yönetim sağlayan kurumsal düzeyde bilişsel bir işletim sistemi (OS) asistanı mimarisidir. Sistem yöneticiliği, Model Context Protocol (MCP) sunucu entegrasyonu, kendi kendini iyileştiren kod refaktörü, evrensel veritabanı inceleme, arkaplan web otomasyonu, donanım telemetrisi, çoklu ajan (swarm) protokolleri, siberpunk terminal telemetri ekranı (HUD), gerçek zamanlı ses akışı, güvenlik denetim araçları, runtime skill (yetenek) sentezleme ve iki aşamalı grafik hafıza (GraphRAG) teknolojilerini tek bir çatı altında birleştirir.
+<p align="center">
+  <img src="assets/OmniCore-bounce.png" alt="OmniCore Logo" width="600"/>
+</p>
+
+**OmniCore**, işletim sistemi düzeyinde mutlak kontrol, otonom süreç otomasyonu ve yapay zeka tabanlı yönetim sağlayan kurumsal düzeyde bilişsel bir işletim sistemi (OS) asistanı mimarisidir. Sistem yöneticiliği, Model Context Protocol (MCP) sunucu entegrasyonu, kendi kendini iyileştiren kod refaktörü, evrensel veritabanı inceleme, tekil kalıcı tarayıcı ve akıllı YouTube otomasyonu, donanım telemetrisi, çoklu ajan (swarm) protokolleri, siberpunk terminal telemetri ekranı (HUD), gerçek zamanlı ses akışı, güvenlik denetim araçları, kendi kendini eğiten kullanıcı Persona Sistemi, runtime skill (yetenek) sentezleme ve iki aşamalı grafik hafıza (GraphRAG) teknolojilerini tek bir çatı altında birleştirir.
 
 ---
 
 ## 🇹🇷 Türkçe Detaylı Açıklama
+
+<p align="left">
+  <img src="assets/flag_tr.svg" alt="Türkçe" width="24" height="16"/>
+</p>
 
 ### 💡 Mimari ve Öne Çıkan Yetenekler
 
@@ -20,21 +34,24 @@ OmniCore, **Kullanıcı Katmanı Yetenekleri** (gerçek zamanlı ses döngüsü,
 #### 🌟 Ana Özellikler Matrisi
 
 - 🔌 **Kurumsal MCP Sunucu Gateway**: OmniCore'un 40'tan fazla araç kiti kurumsal IDE'lere (Claude Desktop, VS Code, Cursor, Zed) standart JSON-RPC 2.0 protokolü ile dışa aktarılır (`interfaces/mcp_gateway.py`).
+- 🌐 **Tekil Kalıcı Tarayıcı & YouTube Otomasyonu**: Singleton oturum yöneticisi (`_GlobalBrowserSession`) ile çift pencere açılmasını kesin olarak önler. Gerçek kullanıcı tarayıcısında yeni sekme açma, CDP (`127.0.0.1:9222`) bağlantısı, YouTube reklam ve Premium modal atlatma, kanalın son videosunu bulma, yayın tarihi (`days_ago`) çıkarma, abone olup bildirimleri (zil) açma ve bağıl seek ("orta", "baş", "son", "%50") desteği (`tools/browser_helpers.py`, `tools/advanced_os_toolkit.py`).
+- 🧠 **Kendi Kendini Eğiten OmniCore Persona Sistemi**: Kullanıcının dilini (Türkçe/İngilizce), tercih ettiği tarayıcıyı (Brave, Chrome, Edge, Firefox), arama motorunu, izin modunu (`full_auto`, `ask_on_risk`, `always_ask`) ve YouTube oynatma alışkanlıklarını etkileşimlerden otomatik olarak öğrenir, güven skoruyla pekiştirir ve `.omnicore/persona.json` üzerinde kalıcı hale getirir (`config/persona_system.py`).
+- ⚡ **30+ LLM Sağlayıcısı & Kesintisiz Devretme (Failover)**: Gemini, Groq, OpenAI, Anthropic, DeepSeek, xAI (Grok 3, Grok 4), Cohere, Perplexity Sonar, Mistral, Ollama, Fireworks, Together, DeepInfra, Cerebras, SambaNova, Moonshot/Kimi, Zhipu GLM, Qwen vb. sağlayıcıları dinamik yük dengeleme ve 429/413 hata devretmesi ile yönetir (`core/router.py`, `config/settings.py`).
 - 🛠️ **Kendi Kendini İyileştiren Kod Refaktörü**: Python AST karmaşıklık analizi (`refactor_analyze_file`) ve otomatik birleşik diff yama oluşturma (`refactor_generate_patch`) yeteneği.
 - 🗄️ **Evrensel Veritabanı Tarayıcı**: SQLite veritabanı şemalarını, sütunlarını ve veri tiplerini inceleme (`db_inspect_schema`) ve güvenli SQL sorguları çalıştırma (`db_query_execute`).
-- 🌐 **Arkaplan Web Otomasyonu**: Playwright ile web sayfalarından içerik çekme (`browser_fetch_page`) ve ekran görüntüsü alma (`browser_take_screenshot`).
 - 💻 **Donanım Telemetri İnceleyici**: Anlık CPU, GPU VRAM kullanımı, pil durumu, termal sensörler ve disk I/O metriklerinin takibi (`hardware_inspect_telemetry`).
 - 🐝 **Çoklu Ajan Sürü Protokolü**: Paralel arka plan alt-ajanları başlatma (`swarm_spawn_agent`, `swarm_list_agents`, `swarm_collect_results`) ve sonuçları merkezi olarak birleştirme.
-- 🎛️ **Siberpunk Terminal Telemetri HUD**: Canlı LLM rotalarını, grafik düğüm metriklerini, aktif daemon'ları, CPU/RAM barlarını gösteren etkileşimli arayüz (`interfaces/hud.py`).
+- 🎛️ **Siberpunk Terminal Telemetri HUD & Web Dashboard**: Canlı LLM rotalarını, grafik düğüm metriklerini, aktif daemon'ları, CPU/RAM barlarını gösteren etkileşimli terminal HUD (`interfaces/hud.py`) ve animasyonlu logolu modern Web Arayüzü (`interfaces/dashboard.py`).
 - 🎙️ **Gerçek Zamanlı Çift Yönlü Ses Motoru**: Anlık sesli etkileşimler için düşük gecikmeli PCM ses arabelleği ve EdgeTTS entegrasyonlu akış motoru (`interfaces/voice_duplex.py`).
 - 🛡️ **Güvenlik Denetim Araçları**: Asenkron port tarama (`security_port_scan`), sistem güvenlik duruşu denetimi (`security_audit_system`) ve CVE zafiyet sorgulama (`security_cve_lookup`).
 - 🌐 **Birleşik İşletim Sistemi Adaptörü**: Windows PowerShell/Win32 API'leri, Linux Bash/systemd ve macOS launchd altyapılarını tek tip soyutlama katmanında buluşturur (`core/platform_adapter.py`).
-- 🧠 **Bilişsel Yönlendirici (Cognitive Router)**: Otomatik çoklu sağlayıcı devretme (Gemini 2.0 Flash / Pro, Groq Llama 3.3 70B ve Çevrimdışı Ollama desteği) ve anlamsal araç budama mekanizması.
-- ⚡ **Kendi Kendini Geliştiren Skill Oluşturucu**: Çalışma zamanında yeni Python araç sınıflarını dinamik olarak sentezler (`skill_create`, `skill_list`, `skill_execute`).
 - 🕸️ **Grafik Hafıza Motoru (GraphRAG)**: Varlıklar arasındaki ilişkileri bağlayarak çok adımlı mantıksal çıkarım sağlayan GraphRAG bellek yapısı (`memory/graph_memory.py`).
 - 🔄 **Sürekli Arka Plan Daemon Motoru**: Dizin izleyicileri, kaynak sınırı uyarıları (CPU/RAM > %90) ve arka planda çalışan olay reaktörleri.
 - 🎮 **Steam & Epic Oyun Yönetimi**: Windows Registry (`winreg`) taraması, multi-drive `libraryfolders.vdf` ve `appmanifest_*.acf` regex ayrıştırma, Epic Games manifest tespiti ve otomatik güncelleme.
 - 🛡️ **4 Seviyeli Risk Yönetimi Politikası**: `DÜŞÜK`, `ORTA`, `YÜKSEK` ve `KRİTİK` risk seviyelerinde simülasyon (dry-run), kullanıcı onayı ve hassas veri gizleme kuralları uygular.
+- 🔊 **Çevrimdışı Ses Tanıma (STT)**: `faster-whisper` (CTranslate2) tabanlı %100 yerel ses tanıma. İnternet bağlantısı olmadan veya `OMNICORE_OFFLINE_STT=1` ile otomatik devreye girer (`tools/faster_whisper_toolkit.py`).
+- 👁️ **Anlık Ekran Görüş (Vision)**: Aktif pencerenin ekran görüntüsünü Vision LLM'e göndererek ekrandaki içeriği analiz eder (`tools/instant_vision_toolkit.py`).
+- 📋 **Akıllı Pano İzleyici**: Panodaki içeriği otomatik sınıflandırır (traceback, JSON, SQL, URL, kod) veRouter'a öneri bildirimi gönderir (`tools/clipboard_watcher.py`).
 
 ---
 
@@ -70,12 +87,15 @@ flowchart TD
 | Kategori | Araç Kitleri | Açıklama |
 | :--- | :--- | :--- |
 | **İşletim Sistemi & Çekirdek** | `os_toolkit`, `advanced_os_toolkit`, `system_kernel_toolkit` | Dosya CRUD işlemleri, süreç yönetimi, NTFS $MFT hızlı arama (`es_fast_search`), yetki denetimi (`sys_privilege_triage`), registry düzenleme. |
+| **Tarayıcı & YouTube Otomasyonu** | `browser_helpers`, `advanced_os_toolkit`, `browser_automation_toolkit` | Tekil kalıcı oturum (`_GlobalBrowserSession`), YouTube reklam ve pop-up atlatma, metadata & kaç gün önce çıkarma, abone olup bildirimleri (zil) açma, akıllı seek ("orta", "baş", "1:29"). |
+| **Kişiselleştirme & Persona** | `persona_system`, `taste` | Otomatik öğrenen persona motoru (`learn_from_interaction`), güven skoru pekiştirme, dil, tarayıcı ve izin tercihi yönetimi. |
 | **Oyun Motoru Yönetimi** | `game_updater_toolkit` | Windows Registry ile Steam/Epic bulma, VDF/ACF regex ayrıştırma, otomatik oyun güncelleme ve indirme takibi. |
-| **Ses & Medya** | `audio_toolkit`, `audio_record_toolkit`, `media_studio_toolkit` | EdgeTTS ses sentezleme, mikrofon dinleme, medya oynatma kontrolü. |
+| **Ses & Medya** | `audio_toolkit`, `audio_record_toolkit`, `media_studio_toolkit`, `faster_whisper_toolkit` | EdgeTTS ses sentezleme, mikrofon dinleme, yerel Spotify ve medya yürütme denetimi, çevrimdışı STT. |
 | **DevOps & Kod** | `developer_toolkit`, `devops_engineering_toolkit`, `terminal_toolkit` | Çapraz platform kabuk adaptörü (PowerShell/Bash), git iş akışları, kod analiz araçları (`dev_grep_analyzer`, `dev_glob_search`). |
-| **Web & Görsel** | `web_toolkit`, `advanced_web_toolkit`, `vision_toolkit`, `computer_use_toolkit` | Playwright tarayıcı otomasyonu, ekran görüntüsü alma, nesne tespiti, web araştırması. |
+| **Web & Görsel** | `web_toolkit`, `advanced_web_toolkit`, `vision_toolkit`, `computer_use_toolkit`, `instant_vision_toolkit` | Playwright tarayıcı otomasyonu, ekran görüntüsü alma, nesne tespiti, web araştırması, aktif pencere vision analizi. |
 | **Güvenlik & Koruma**| `security_toolkit`, `omega_directive_toolkit`, `resilience_toolkit` | Kriptografi, LOLBins denetimi, EDR tespiti, politika doğrulama. |
 | **Hafıza & Zamanlayıcı**| `reminder_toolkit`, `scheduler_toolkit`, `insight_toolkit` | Görev zamanlayıcı hatırlatıcıları, cron otomasyonu, 2 aşamalı hafıza kategorizasyonu. |
+| **Pano & Bilgi** | `clipboard_watcher`, `smart_clipboard_toolkit` | Otomatik pano izleme, içerik tipi tespiti, Windows toast bildirimleri. |
 
 ---
 
@@ -171,26 +191,27 @@ uv run python build.py --windowed
 | `/reset` | Konusma gecmisini temizle |
 | `/hud` | Cyberpunk HUD paneli |
 | `/commit` | Git commit yardimcisi |
+| `/taste` | Ogrenilmis tercihleri goruntule |
 
 ---
 
 ### 🧪 Test ve Doğrulama
 
 ```bash
-# Tam unit ve entegrasyon test paketini çalıştırın (128 test)
-.\.venv\Scripts\python.exe -m pytest
-
-# Statik AST asenkron bloklama denetimini çalıştırın
-.\.venv\Scripts\python.exe scripts/ast_async_audit.py
+# Tam unit ve entegrasyon test paketini çalıştırın (161 test)
+uv run pytest --tb=short -q
 
 # Ruff kod linter denetimini çalıştırın
-.\.venv\Scripts\ruff.exe check core tools memory models config interfaces scheduler scripts tests
+uv run ruff check .
 ```
 
 ---
----
 
 ## 🇬🇧 English Detailed Overview
+
+<p align="left">
+  <img src="assets/flag_gb.svg" alt="English" width="24" height="16"/>
+</p>
 
 ### 💡 Architecture and Core Capabilities
 
@@ -199,21 +220,23 @@ OmniCore seamlessly unifies **User-Facing Capabilities** (real-time streaming vo
 #### 🌟 Key Feature Matrix
 
 - 🔌 **Enterprise MCP Gateway**: Exposes OmniCore's 40+ toolkits to external tools and IDEs (Claude Desktop, VS Code, Cursor, Zed) via standard JSON-RPC 2.0 protocol (`interfaces/mcp_gateway.py`).
+- 🌐 **Persistent Browser & YouTube Automation**: Guaranteed single-window architecture via `_GlobalBrowserSession`. Supports real user browser launching, CDP attaching (`127.0.0.1:9222`), auto-skipping of pre-roll/mid-roll ads and YouTube Premium upsell modals, latest channel video discovery, upload date extraction (`days_ago`), channel subscription with bell notification toggling, and smart relative seeking.
+- 🧠 **Self-Learning OmniCore Persona System**: Autonomously observes user preferences (language, preferred browser, search engine, permission level, YouTube habits) through natural interactions, reinforces weights based on confidence scoring, and persists settings in `.omnicore/persona.json` with full manual override capabilities (`config/persona_system.py`).
+- ⚡ **30+ LLM Provider Matrix & Resilient Failover**: Supports Gemini, Groq, OpenAI, Anthropic, DeepSeek, xAI (Grok 3, Grok 4), Cohere, Perplexity Sonar, Mistral, Ollama, Fireworks, Together, DeepInfra, Cerebras, SambaNova, Moonshot/Kimi, Zhipu GLM, Qwen, and more with automatic 429/413 rate-limit failover routing (`core/router.py`, `config/settings.py`).
 - 🛠️ **Self-Healing Code Refactorer**: AST Python complexity analysis (`refactor_analyze_file`) and automated unified diff patch generation (`refactor_generate_patch`).
 - 🗄️ **Universal Database Explorer**: Introspect SQLite database schemas, columns, and data types (`db_inspect_schema`) and execute safe SQL queries (`db_query_execute`).
-- 🌐 **Headless Browser Automation**: Fetch web page content with clean text extraction (`browser_fetch_page`) and capture screen shots (`browser_take_screenshot`) via Playwright.
 - 💻 **Hardware Telemetry Inspector**: Real-time inspection of CPU, GPU VRAM utilization, battery status, thermal sensors, and disk I/O metrics (`hardware_inspect_telemetry`).
 - 🐝 **Multi-Agent Swarm Protocol**: Spawn specialized, parallel background subagents (`swarm_spawn_agent`, `swarm_list_agents`, `swarm_collect_results`) that execute tasks concurrently and aggregate findings.
-- 🎛️ **Cyberpunk Terminal Telemetry HUD**: Interactive CLI dashboard (`interfaces/hud.py`) displaying live LLM routes, graph node metrics, active daemons, CPU/RAM bars, and tool usage.
-- 🎙️ **Real-Time Duplex Voice Engine**: Low-latency PCM audio buffer streaming engine (`interfaces/voice_duplex.py`) with EdgeTTS integration for voice interactions.
+- 🎛️ **Cyberpunk Terminal Telemetry HUD & Web Dashboard**: Interactive CLI dashboard (`interfaces/hud.py`) and modern Cyberpunk Web GUI (`interfaces/dashboard.py`) featuring the animated OmniCore bounce logo with WebSocket typewriter streaming.
+- 🎙️ **Real-Time Duplex Voice Engine**: Low-latency PCM audio buffer streaming engine (`interfaces/voice_duplex.py`) with EdgeTTS integration for voice interactions and VAD-based barge-in interruption.
 - 🛡️ **Security Audit Toolkit**: Asynchronous port scanning (`security_port_scan`), system security posture audit (`security_audit_system`), and CVE advisory lookups (`security_cve_lookup`).
 - 🌐 **Unified OS Platform Adapter**: Cross-platform system abstraction layer (`core/platform_adapter.py`) unifying Windows PowerShell/Win32 APIs, Linux Bash/systemd, and macOS launchd.
-- 🧠 **Cognitive Router & Failover**: Automatic multi-provider failover (Gemini 2.0 Flash / Pro, Groq Llama 3.3 70B & Local Ollama offline fallback) with count-based circuit breaker and semantic tool pruning.
-- ⚡ **Self-Improving Skill Curator**: Synthesize new Python tool classes dynamically at runtime (`skill_create`, `skill_list`, `skill_execute`).
-- 🕸️ **Knowledge Graph Memory Engine**: GraphRAG entity-relation memory store (`memory/graph_memory.py`) connecting entities for multi-hop reasoning.
-- 🔄 **Continuous Background Daemon**: Asynchronous directory watchers, resource limit alerts (CPU/RAM > 90%), and event reactors running in the background.
+- 🕸️ **Knowledge Graph Memory Engine**: GraphRAG entity-relation memory store (`memory/graph_memory.py`) connecting entities for multi-hop reasoning with interactive Cytoscape.js visualization.
 - 🎮 **Steam & Epic Game Engine Updater**: Windows Registry (`winreg`) scanning, multi-drive `libraryfolders.vdf` and `appmanifest_*.acf` regex parsing for Steam, Epic manifest discovery, and automated updates.
-- 🛡️ **4-Tier Risk Governance**: Enforces `LOW`, `MEDIUM`, `HIGH`, and `CRITICAL` risk tiers with pre-action dry-run simulations, double confirmation for destructive actions, and sensitive data redaction.
+- 🛡️ **4-Tier Risk Governance**: Enforces `LOW`, `MEDIUM`, `HIGH`, and `CRITICAL` risk tiers with pre-action dry-run simulations, confirmation gates, and sensitive data redaction.
+- 🔊 **Offline Speech Recognition (STT)**: `faster-whisper` (CTranslate2) based 100% local speech-to-text. Activates automatically without internet or when `OMNICORE_OFFLINE_STT=1` (`tools/faster_whisper_toolkit.py`).
+- 👁️ **Instant Screen Vision**: Captures active window screenshot and analyzes it via Vision LLM (`tools/instant_vision_toolkit.py`).
+- 📋 **Smart Clipboard Watcher**: Auto-classifies clipboard content (traceback, JSON, SQL, URL, code) and notifies the router (`tools/clipboard_watcher.py`).
 
 ---
 
@@ -221,25 +244,26 @@ OmniCore seamlessly unifies **User-Facing Capabilities** (real-time streaming vo
 
 ```mermaid
 flowchart TD
-    User["User Request / Voice Input"] --> Router["Cognitive Router"]
+    User["User Request / Voice / Web / CLI"] --> Persona["OmniCore Persona & Learning Engine"]
+    Persona --> Router["Cognitive Router (30+ LLMs)"]
     Router --> Policy{"Guardian & 4-Tier Policy"}
-    Policy -- Safe --> Memory["2-Stage Memory Pipeline"]
+    Policy -- Safe --> Memory["2-Stage Memory Pipeline & GraphRAG"]
     Policy -- Approvals --> HITL["Human-In-The-Loop Approval"]
     HITL -- Approved --> Memory
     Memory --> ToolReg["Central Tool Registry"]
     
-    subgraph Toolkits ["OmniCore Toolkits (40+ Toolkits)"]
-        T1["OS & System Kernel"]
-        T2["Fast Disk Search"]
+    subgraph Toolkits ["OmniCore Toolkits (40+ Modules)"]
+        T1["OS & Kernel Dominance"]
+        T2["Persistent Browser & YouTube"]
         T3["Steam & Epic Game Updater"]
         T4["Voice Loop & EdgeTTS"]
-        T5["Developer & Web Automation"]
+        T5["DevOps, Refactoring & Security"]
     end
     
     ToolReg --> Toolkits
-    Toolkits --> Exec["Host OS Execution"]
+    Toolkits --> Exec["Host OS Execution Layer"]
     Exec --> Recovery["Self-Healing Recovery Engine"]
-    Recovery --> Res["Final Response"]
+    Recovery --> Res["Final User Response"]
 ```
 
 ---
@@ -249,12 +273,15 @@ flowchart TD
 | Category | Toolkits | Description |
 | :--- | :--- | :--- |
 | **OS & Kernel** | `os_toolkit`, `advanced_os_toolkit`, `system_kernel_toolkit` | File CRUD, process management, $MFT fast search (`es_fast_search`), privilege triage (`sys_privilege_triage`), registry editing. |
+| **Browser & YouTube** | `browser_helpers`, `advanced_os_toolkit`, `browser_automation_toolkit` | Persistent singleton session (`_GlobalBrowserSession`), YouTube ad & popup dismissal, metadata/relative date extraction, bell notifications, smart seek. |
+| **Personalization & Persona** | `persona_system`, `taste` | Self-learning persona engine (`learn_from_interaction`), confidence weighting, language, browser, and permission tracking. |
 | **Game Engine** | `game_updater_toolkit` | Windows Registry lookup for Steam/Epic, VDF/ACF regex parsing, force update, and download status tracking. |
-| **Voice & Audio** | `audio_toolkit`, `audio_record_toolkit`, `media_studio_toolkit` | EdgeTTS audio synthesis, SpeechRecognition microphone listener, media playback control. |
+| **Voice & Audio** | `audio_toolkit`, `audio_record_toolkit`, `media_studio_toolkit`, `faster_whisper_toolkit` | EdgeTTS audio synthesis, SpeechRecognition microphone listener, native media playback control, offline STT. |
 | **DevOps & Code** | `developer_toolkit`, `devops_engineering_toolkit`, `terminal_toolkit` | Cross-platform shell adapter (PowerShell/Bash), git workflows, code analysis (`dev_grep_analyzer`, `dev_glob_search`). |
-| **Web & Vision** | `web_toolkit`, `advanced_web_toolkit`, `vision_toolkit`, `computer_use_toolkit` | Playwright browser automation, screenshot OCR, visual element detection, web research. |
+| **Web & Vision** | `web_toolkit`, `advanced_web_toolkit`, `vision_toolkit`, `computer_use_toolkit`, `instant_vision_toolkit` | Playwright browser automation, screenshot OCR, visual element detection, web research, active window vision analysis. |
 | **Security & Safety**| `security_toolkit`, `omega_directive_toolkit`, `resilience_toolkit` | Cryptography, LOLBins audit, EDR bypass detection, policy verification. |
 | **Memory & Scheduler**| `reminder_toolkit`, `scheduler_toolkit`, `insight_toolkit` | Task Scheduler reminders, cron job automation, 2-stage persistent memory categorization. |
+| **Clipboard & Info** | `clipboard_watcher`, `smart_clipboard_toolkit` | Automatic clipboard monitoring, content type detection, Windows toast notifications. |
 
 ---
 
@@ -330,20 +357,18 @@ uv run omnicore --mode voice
 | `/setmodel <id>` | Dynamically switch LLM model (e.g. `/setmodel gemini-2.5-pro`). |
 | `/reset` | Clear current short-term conversation context. |
 | `/hud` | Display Cyberpunk Telemetry HUD status panel. |
+| `/taste` | View and manage learned user preferences. |
 
 ---
 
 ### 🧪 Testing & Verification
 
 ```bash
-# Run full unit and integration test suite (128 tests)
-.\.venv\Scripts\python.exe -m pytest
-
-# Run static AST async blocking IO audit
-.\.venv\Scripts\python.exe scripts/ast_async_audit.py
+# Run full unit and integration test suite (161 tests)
+uv run pytest --tb=short -q
 
 # Run ruff code linter
-.\.venv\Scripts\ruff.exe check core tools memory models config interfaces scheduler scripts tests
+uv run ruff check .
 ```
 
 ---

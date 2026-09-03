@@ -134,6 +134,28 @@ async def _run(mode: str, debug: bool = False) -> None:
     pulse = AutonomousPulse(router, state_tracker)
     await pulse.start()
 
+    # Start background daemons (VRAM monitor, clipboard watcher, active context observer)
+    try:
+        from core.vram_monitor import get_vram_monitor
+        vram = get_vram_monitor()
+        vram.start()
+    except Exception:
+        pass
+
+    try:
+        from tools.clipboard_watcher import get_clipboard_watcher
+        cw = get_clipboard_watcher()
+        cw.start()
+    except Exception:
+        pass
+
+    try:
+        from tools.windows_uia_context import get_active_context_observer
+        ctx_obs = get_active_context_observer()
+        ctx_obs.start()
+    except Exception:
+        pass
+
     try:
         # Select gateway.
         if mode == "telegram":
@@ -201,7 +223,7 @@ async def _run(mode: str, debug: bool = False) -> None:
 
             gateway = MCPServerGateway()
             logger.info("omnicore.gateway", type="mcp")
-            print("[OmniCore MCP Gateway v0.40.0] Listening on stdio JSON-RPC 2.0...", flush=True)
+            print("[OmniCore MCP Gateway v0.1.0] Listening on stdio JSON-RPC 2.0...", flush=True)
             while True:
                 line = await asyncio.to_thread(sys.stdin.readline)
                 if not line:
@@ -279,6 +301,19 @@ async def _run(mode: str, debug: bool = False) -> None:
             except (KeyboardInterrupt, asyncio.CancelledError):
                 print("\n[OmniCore Voice] Session ended.")
 
+        elif mode == "spotlight":
+            from interfaces.spotlight import run_spotlight_interactive
+
+            logger.info("omnicore.gateway", type="spotlight")
+            await run_spotlight_interactive(router)
+
+        elif mode == "tray":
+            from interfaces.tray_companion import SystemTrayCompanion
+
+            logger.info("omnicore.gateway", type="tray")
+            tray = SystemTrayCompanion(router)
+            await asyncio.to_thread(tray.run)
+
         else:
             print(f"Unknown mode: {mode}")
             sys.exit(1)
@@ -295,10 +330,10 @@ def main() -> None:
     is_frozen = getattr(sys, "frozen", False)
     default_mode = "web" if is_frozen else "cli"
 
-    parser = argparse.ArgumentParser(description="OmniCore AI OS Assistant v0.40.0")
+    parser = argparse.ArgumentParser(description="OmniCore AI OS Assistant v0.1.0")
     parser.add_argument(
         "--mode",
-        choices=["cli", "telegram", "rest", "web", "mcp", "hud", "voice"],
+        choices=["cli", "telegram", "rest", "web", "mcp", "hud", "voice", "spotlight", "tray"],
         default=default_mode,
         help=f"Which gateway interface to launch (default: {default_mode})",
     )

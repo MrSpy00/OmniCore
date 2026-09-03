@@ -146,17 +146,29 @@ _SUPPORTED_PROVIDERS: tuple[str, ...] = (
     "deepseek",
     "mistral",
     "ollama",
-)
-
-
-_SUPPORTED_PROVIDERS: tuple[str, ...] = (
-    "groq",
-    "gemini",
-    "openai",
-    "anthropic",
-    "deepseek",
-    "mistral",
-    "ollama",
+    "xai",
+    "cohere",
+    "ai21",
+    "perplexity",
+    "reka",
+    "writer",
+    "fireworks",
+    "together",
+    "deepinfra",
+    "novita",
+    "cerebras",
+    "sambanova",
+    "hyperbolic",
+    "nebius",
+    "siliconflow",
+    "nvidia",
+    "lepton",
+    "openrouter",
+    "moonshot",
+    "zhipu",
+    "minimax",
+    "qwen",
+    "stepfun",
 )
 
 
@@ -203,14 +215,39 @@ _QUERY_TOOL_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ocr", ("vision", "gui_", "screen")),
     ("resim", ("gui_take_screenshot", "media_", "image", "vision")),
     ("ses", ("media_", "audio")),
-    ("spotify", ("media_control_spotify_native", "os_launch_application", "media_control_native")),
-    ("muzik", ("media_control_spotify_native", "media_control_native", "web_play_youtube_video_visible")),
-    ("music", ("media_control_spotify_native", "media_control_native", "web_play_youtube_video_visible")),
-    ("oynat", ("web_play_youtube_video_visible", "media_control_spotify_native", "media_control_native")),
+    ("spotify", ("spotify_control", "media_control_spotify_native", "os_launch_application", "media_control_native")),
+    ("muzik", (
+        "spotify_control", "media_control_spotify_native",
+        "media_control_native", "web_play_youtube_video_visible",
+    )),
+    ("music", (
+        "spotify_control", "media_control_spotify_native",
+        "media_control_native", "web_play_youtube_video_visible",
+    )),
+    ("oynat", (
+        "web_play_youtube_video_visible", "spotify_control",
+        "media_control_spotify_native", "media_control_native",
+    )),
     ("uygulama", ("os_launch_application", "os_list_processes", "sys_")),
     ("program", ("os_launch_application", "os_list_processes", "sys_")),
     ("guvenlik", ("security", "encrypt", "decrypt", "audit")),
     ("security", ("security", "encrypt", "decrypt", "audit")),
+    ("bildirim", ("web_play_youtube_video_visible", "sys_")),
+    ("zil", ("web_play_youtube_video_visible",)),
+    ("abone", ("web_play_youtube_video_visible",)),
+    ("begen", ("web_play_youtube_video_visible",)),
+    ("beğen", ("web_play_youtube_video_visible",)),
+    ("seek", ("web_play_youtube_video_visible",)),
+    ("sarma", ("web_play_youtube_video_visible",)),
+    ("tarih", ("web_play_youtube_video_visible", "sys_info")),
+    ("duraklat", ("web_play_youtube_video_visible", "media_control_native")),
+    ("orta", ("web_play_youtube_video_visible",)),
+    ("ortaya", ("web_play_youtube_video_visible",)),
+    ("kaç gün", ("web_play_youtube_video_visible",)),
+    ("kac gun", ("web_play_youtube_video_visible",)),
+    ("son video", ("web_play_youtube_video_visible",)),
+    ("reklam", ("web_play_youtube_video_visible",)),
+    ("atla", ("web_play_youtube_video_visible",)),
 )
 
 # Turkish word → English tool-name/description hint mapping.
@@ -230,10 +267,10 @@ _TR_SYNONYMS: dict[str, tuple[str, ...]] = {
     "ekran": ("screenshot", "screen", "gui", "display", "vision"),
     "goruntu": ("screenshot", "image", "vision", "screen"),
     "ses": ("audio", "volume", "music", "sound", "spotify"),
-    "youtube": ("youtube", "video", "play", "browser"),
+    "youtube": ("youtube", "video", "play", "browser", "notifications"),
     "spotify": ("spotify", "media", "music", "launch"),
     "uygulama": ("launch", "application", "process", "app"),
-    "video": ("video", "youtube", "media", "play"),
+    "video": ("video", "youtube", "media", "play", "seek"),
     "pil": ("battery", "power", "system"),
     "sistem": ("system", "info", "process", "os"),
     "ag": ("net", "network", "ping", "dns", "socket"),
@@ -243,7 +280,14 @@ _TR_SYNONYMS: dict[str, tuple[str, ...]] = {
     "kodla": ("dev", "code", "python", "execute"),
     "hatirla": ("memory", "recall", "chroma", "long_term"),
     "zamanla": ("schedule", "timer", "cron", "reminder"),
-    "bildirim": ("notification", "alert", "notify", "desktop"),
+    "bildirim": ("notification", "alert", "notify", "desktop", "bell", "youtube"),
+    "zil": ("bell", "notification", "youtube"),
+    "abone": ("subscribe", "channel", "youtube"),
+    "begen": ("like", "favorite", "youtube"),
+    "beğen": ("like", "favorite", "youtube"),
+    "duraklat": ("pause", "stop", "media", "youtube"),
+    "sar": ("seek", "forward", "rewind", "youtube"),
+    "sarma": ("seek", "forward", "rewind", "youtube"),
     "pano": ("clipboard", "copy", "paste"),
     "parca": ("process", "task", "split", "chunk"),
     "sifrele": ("encrypt", "crypto", "security"),
@@ -710,7 +754,61 @@ class CognitiveRouter:
             return "gemini"
         return self._runtime_provider
 
+    def _power_and_hardware_adaptive_route(self) -> str | None:
+        """Adaptive hardware routing based on battery state, running games, and GPU VRAM pressure."""
+        try:
+            import psutil
+
+            # 1. Active game / game engine detection
+            from core.vram_monitor import detect_running_games
+
+            active_games = detect_running_games()
+            if active_games and self._runtime_provider == "ollama":
+                logger.warning("router.game_active_switching_to_cloud", games=active_games)
+                return "groq" if self._provider_has_credentials("groq") else "gemini"
+
+            # 2. Battery power state (< 30% and not plugged -> force fast lightweight cloud)
+            battery = psutil.sensors_battery()
+            if battery and not battery.power_plugged and battery.percent < 30:
+                if self._runtime_provider == "ollama":
+                    logger.info("router.battery_low_switching_to_cloud", percent=battery.percent)
+                    return "groq" if self._provider_has_credentials("groq") else "gemini"
+
+            # If plugged or battery > 70% and user configured ollama as default, allow local
+            preferred = getattr(self._settings, "llm_provider", "")
+            if (
+                preferred == "ollama"
+                and self._runtime_provider != "ollama"
+                and not active_games
+                and (battery is None or battery.power_plugged or battery.percent >= 70)
+            ):
+                return "ollama"
+
+            # 3. GPU VRAM > 85% -> route away from local Ollama to cloud
+            from tools.hardware_telemetry_toolkit import _get_nvidia_gpu_info
+
+            gpu = _get_nvidia_gpu_info()
+            if gpu.get("available") is not False:
+                v_total = float(gpu.get("vram_total_mb") or 0)
+                v_used = float(gpu.get("vram_used_mb") or 0)
+                if v_total > 0 and (v_used / v_total) > 0.85:
+                    if self._runtime_provider == "ollama":
+                        return "gemini" if self._provider_has_credentials("gemini") else "groq"
+        except Exception:
+            pass
+        return None
+
     def _route_provider_if_needed(self, user_text: str) -> None:
+        hw_target = self._power_and_hardware_adaptive_route()
+        if hw_target and hw_target != self._runtime_provider:
+            logger.info(
+                "router.hardware_adaptive_route",
+                from_provider=self._runtime_provider,
+                to_provider=hw_target,
+            )
+            self._switch_provider(hw_target, reason="hardware_adaptive_routing")
+            return
+
         target = self._semantic_target_provider(user_text)
         if target != self._runtime_provider:
             logger.info(
@@ -768,7 +866,7 @@ class CognitiveRouter:
 
             media_markers = ("spotify", "muzik", "music", "oynat")
             if any(marker in lowered_query for marker in media_markers):
-                if name_l in {"media_control_native", "media_control_spotify_native"}:
+                if name_l in {"media_control_native", "media_control_spotify_native", "spotify_control"}:
                     score += 500
                 if name_l.startswith("gui_"):
                     score -= 160
@@ -845,22 +943,26 @@ class CognitiveRouter:
             "KURAL 9: ASLA C:\\Users\\Kullanıcı gibi yer tutucu/uydurma mutlak yol üretme. "
             "Her zaman Desktop/dosya.txt gibi göreli yol kullan. "
             "Yerel çözümlemeyi sisteme bırak. "
-            "KURAL 10: Dogrudan arac calistir. agent_spawn_subtask sadece dosya sistemi "
-            "taramasi icin kullanilir. Web, tarayici, youtube, gui islerinde ASLA "
-            "delegasyon yapma, dogrudan ilgili araci cagir. "
-            "KURAL 11: Ekran goruntusu alirken ASLA agent_spawn_subtask KULLANMA! "
-            "DOGHRUDAN gui_take_screenshot aracini cagir. "
-            "output_path parametresine masaustu dosya adi ver (orn: 'Desktop/screenshot.png'). "
-            "ASLA terminalde mv/move/kopyalama komutu calistirma! "
-            "Dosya otomatik olarak masaustune kaydedilir. "
-            "Eger belirli bir uygulamanin goruntusu istenirse once uygulamayi baslat, "
+            "KURAL 10: Doğrudan aracı çalıştır. agent_spawn_subtask sadece dosya sistemi "
+            "taraması için kullanılır. Web, tarayıcı, youtube, gui işlerinde ASLA "
+            "delegasyon yapma, doğrudan ilgili aracı çağır. "
+            "KURAL 11: Ekran görüntüsü alırken ASLA agent_spawn_subtask KULLANMA! "
+            "DOĞRUDAN gui_take_screenshot aracını çağır. "
+            "output_path parametresine masaüstü dosya adı ver (orn: 'Desktop/screenshot.png'). "
+            "ASLA terminalde mv/move/kopyalama komutu çalıştırma! "
+            "Dosya otomatik olarak masaüstüne kaydedilir. "
+            "Eğer belirli bir uygulamanın görüntüsü istenirse önce uygulamayı başlat, "
             "sonra gui_take_screenshot'a app_name parametresi ver (orn: app_name='Spotify'). "
-            "KURAL 12: YouTube'da video acmak icin ASLA agent_spawn_subtask KULLANMA! "
-            "DOGHRUDAN web_play_youtube_video_visible aracini cagir (query='video adi veya kanal'). "
-            "Tarayici otomatik acilir ve video oynatilir. "
-            "KURAL 13: Tarayici acmak icin ASLA agent_spawn_subtask KULLANMA! "
-            "DOGHRUDAN os_open_browser_visible veya browser_launch aracini cagir. "
-            "Asla dev_glob_search ile tarayici acmaya calisma - bu dosya arama aracidir!"
+            "KURAL 12: YouTube'da video açmak, oynatmak, seek/zaman atlamak, duraklatmak, "
+            "bildirim açmak, abone olmak veya video tarihi/metadata öğrenmek için ASLA agent_spawn_subtask KULLANMA! "
+            "DOĞRUDAN web_play_youtube_video_visible aracını çağır "
+            "(query='...', action='play|channel|notifications|seek|metadata|pause|like|subscribe', "
+            "time='1:30|orta|%50'). Tarayıcı otomatik açılır ve video oynatılır. "
+            "Spotify'dan şarkı açmak isterse: os_launch_application ile Spotify'ı aç, "
+            "sonra media_control_native ile oynat/duraklat kontrolü yap. "
+            "KURAL 13: Tarayıcı açmak için ASLA agent_spawn_subtask KULLANMA! "
+            "DOĞRUDAN os_open_browser_visible veya browser_launch aracını çağır. "
+            "Asla dev_glob_search ile tarayıcı açmaya çalışma - bu dosya arama aracıdır!"
         )
         # Taste context ekle
         taste_context = ""
@@ -868,6 +970,42 @@ class CognitiveRouter:
             from memory.taste import get_taste_engine
 
             taste_context = get_taste_engine().format_for_system_prompt()
+        except Exception:
+            pass
+
+        # OmniCore Öğrenen Persona context ekle
+        persona_context = ""
+        try:
+            from config.persona_system import get_persona_manager
+
+            persona_context = get_persona_manager().get_system_prompt_context()
+        except Exception:
+            pass
+
+        # Aktif pencere bağlamı (ActiveContextObserver)
+        active_context = ""
+        try:
+            from tools.windows_uia_context import get_active_context
+
+            ctx = get_active_context()
+            if ctx:
+                proc = ctx.get("process_name", "")
+                title = ctx.get("title", "")
+                active_context = f"AKTİF PENCERE: {title}"
+                if proc:
+                    active_context += f" (İşlem: {proc})"
+        except Exception:
+            pass
+
+        # Clipboard bağlamı (hata izi algılandıysa)
+        clipboard_context = ""
+        try:
+            from tools.clipboard_watcher import get_clipboard_watcher
+            latest = get_clipboard_watcher().get_latest()
+            if latest and latest.get("content_type", {}).get("category") == "error":
+                clipboard_context = (
+                    f"PANO HATASI ALGILANDI: {latest['content_type'].get('error_summary', 'bilinmeyen hata')}"
+                )
         except Exception:
             pass
 
@@ -879,6 +1017,9 @@ class CognitiveRouter:
             "## İlgili Hatıralar\n"
             f"{memory_context or '(yok)'}\n\n"
             f"{taste_context}\n\n"
+            f"{persona_context}\n\n"
+            f"{active_context}\n\n"
+            f"{clipboard_context}\n\n"
             "## Talimatlar\n"
             "Kullanıcı sistem verisi veya eylem istediğinde JSON plan üret.\n"
             "Araç çıktısındaki ham veriyi eksiksiz aktar.\n"
@@ -1103,6 +1244,23 @@ class CognitiveRouter:
         self._short_term.add_message(conversation_id, user_message)
         self._route_provider_if_needed(user_message.content)
 
+        # Auto-learn from user language and interaction into PersonaManager
+        try:
+            from config.persona_system import get_persona_manager
+
+            pm = get_persona_manager()
+            u_text = user_message.content or ""
+            turkish_chars = ("ç", "ğ", "ı", "ö", "ş", "ü", "Ç", "Ğ", "İ", "Ö", "Ş", "Ü")
+            tr_sample = ("ve", "bir", "bu", "ile", "için", "ne", "nasıl", "aç", "bul", "oynat", "bak")
+            if any(tc in u_text for tc in turkish_chars) or any(w in u_text.lower().split() for w in tr_sample):
+                pm.learn_from_interaction("language", "tr", confidence=0.9, context="user_text_turkish")
+            elif len(u_text.split()) >= 3 and all(ord(c) < 128 for c in u_text) and any(
+                w in u_text.lower().split() for w in ("the", "and", "is", "for", "open", "play", "find", "show")
+            ):
+                pm.learn_from_interaction("language", "en", confidence=0.85, context="user_text_english")
+        except Exception:
+            pass
+
         await self._emit_progress(on_progress, "thinking", {"text": "İstek analiz ediliyor..."})
 
         # 2. Retrieve relevant long-term memories.
@@ -1136,6 +1294,8 @@ class CognitiveRouter:
             response = await self._ainvoke_with_retry(lc_messages)
             reply = response.content
 
+        reply = _clean_raw_json_plan_reply(str(reply))
+
         # 6. Store assistant reply in short-term memory.
         assistant_msg = Message(
             role=MessageRole.ASSISTANT,
@@ -1151,6 +1311,17 @@ class CognitiveRouter:
             metadata={"user_id": user_message.user_id, "channel": user_message.channel},
         )
         await self._persist_operational_memory(user_message, reply)
+
+        # 7.5. Otomatik varlık çıkarma → GraphMemory (交谈daki bilgileri bilgi grafa aktar)
+        try:
+            from memory.graph_memory import GraphMemory
+
+            gm = GraphMemory()
+            await gm.initialize()
+            await gm.extract_and_store_from_text(f"{user_message.content}\n{reply}")
+            await gm.close()
+        except Exception:
+            pass
 
         # 8. Auto-learn from interaction (taste engine)
         try:
@@ -1350,8 +1521,8 @@ class CognitiveRouter:
                 return (
                     f"Mevcut provider: {current}{pinned}\n"
                     "Durum:\n" + "\n".join(status_lines) + "\n\n"
-                    "Degistirmek icin: /provider <gemini|groq|ollama>\n"
-                    "Otomatik gecisi acmak icin: /provider auto"
+                    "Değiştirmek için: /provider <gemini|groq|ollama>\n"
+                    "Otomatik geçişi açmak için: /provider auto"
                 )
             new_prov = parts[1].strip().lower()
             if new_prov == "auto":
@@ -1551,11 +1722,11 @@ class CognitiveRouter:
                             conf_bar = "█" * int(p["confidence"] * 5) + "░" * (5 - int(p["confidence"] * 5))
                             lines.append(f"  {p['key']}: {p['value']} [{conf_bar}] {p['confidence']:.0%}")
                         return "\n".join(lines)
-                    return f"bilinmeyen kategori: {cat}. /taste help icin yardima bak."
+                    return f"bilinmeyen kategori: {cat}. /taste help için yardıma bak."
 
-                return "Kullanim: /taste veya /taste <kategori>"
+                return "Kullanım: /taste veya /taste <kategori>"
             except Exception as exc:
-                return f"Taste hatasi: {exc}"
+                return f"Taste hatası: {exc}"
 
         return None
 
@@ -1567,6 +1738,105 @@ class CognitiveRouter:
 
     async def _classify_intent(self, user_text: str, lc_messages: list) -> dict[str, Any]:
         """Ask the LLM to decide: plan or direct answer."""
+        lowered = user_text.lower().strip()
+        spotify_triggers = (
+            "çal", "cal", "aç", "ac", "oynat", "dinle",
+            "başlat", "baslat", "play", "seek", "atla",
+        )
+        if "spotify" in lowered and any(k in lowered for k in spotify_triggers):
+            seek_sec = 0
+            seek_match = re.search(
+                r"(\d+)\s*(?:\.|\s)*(?:sn|saniye|sec|second)", lowered,
+            )
+            if seek_match:
+                try:
+                    seek_sec = int(seek_match.group(1))
+                except Exception:
+                    seek_sec = 0
+
+            cleaned_query = re.sub(
+                r"\bspotify(?:'?(?:dan|den|da|de|ta|te|ten|tan))?\b",
+                "", user_text, flags=re.IGNORECASE,
+            )
+            cleaned_query = re.sub(
+                r"\b\d+\.?\s*(?:sn|saniye|sec|second)(?:'?(?:sini|sine|sinde))?\b",
+                "", cleaned_query, flags=re.IGNORECASE,
+            )
+            turkish_music_words = (
+                r"şarkısının|sarkisinin|şarkısını|sarkisini|şarkısı"
+                r"|sarkisi|parçasının|parcasinin|parçasını|parcasini"
+                r"|parçası|parcasi|müziğini|muzigini|müziği|muzigi"
+                r"|aç|ac|çal|cal|oynat|dinle|başlat|baslat|play|dan|den|sini|sine"
+            )
+            cleaned_query = re.sub(
+                rf"\b(?:{turkish_music_words})\b",
+                "", cleaned_query, flags=re.IGNORECASE,
+            )
+            cleaned_query = cleaned_query.strip(" '\".,:-")
+            if not cleaned_query:
+                cleaned_query = "top tracks"
+
+            tool_name = (
+                "spotify_control"
+                if self._registry.get("spotify_control")
+                else "media_control_spotify_native"
+            )
+            seek_desc = (
+                f" ve {seek_sec}. saniyeye atla" if seek_sec > 0 else ""
+            )
+            return {
+                "needs_plan": True,
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool_name": tool_name,
+                        "description": (
+                            f"Spotify'da '{cleaned_query}' arat, çal"
+                            f"{seek_desc}"
+                        ),
+                        "parameters": {
+                            "action": "search_and_play",
+                            "query": cleaned_query,
+                            "seek_seconds": seek_sec,
+                        },
+                    }
+                ],
+            }
+
+        # Fast deterministic path for Screen / Vision ("ekrana bak", "şu an neye bakıyorum", etc.)
+        screen_vision_patterns = (
+            "ekrana bak",
+            "ekranda ne var",
+            "su an neye bakiyorum",
+            "şu an neye bakıyorum",
+            "su an baktigim",
+            "şu an baktığım",
+            "aktif pencereyi oku",
+            "aktif pencereyi analiz et",
+            "ekrani analiz et",
+            "ekranı analiz et",
+            "ekran goruntusunu analiz et",
+            "ekran görüntüsünü analiz et",
+            "pencereye bak",
+        )
+        if any(p in lowered for p in screen_vision_patterns):
+            tool_name = "instant_screen_context"
+            if not self._registry.get("instant_screen_context"):
+                tool_name = "gui_analyze_screen"
+            return {
+                "needs_plan": True,
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool_name": tool_name,
+                        "description": "Aktif ekran görüntüsünü al ve görsel analiz yap",
+                        "parameters": {
+                            "prompt": user_text,
+                        },
+                    }
+                ],
+            }
+
         classification_prompt = (
             "Asagidaki istegin arac calistirmayi gerektirip gerektirmedigine karar ver.\n"
             f"Istek: {user_text}\n\n"
@@ -1880,9 +2150,9 @@ class CognitiveRouter:
             f"Kullanıcı şunu sordu: {user_message.content}\n\n"
             f"Aşağıdaki adımları yürüttüm:\n"
             + "\n".join(results_summary)
-            + "\n\nLutfen kullanici icin kisa bir TURKCE ozet yaz "
-            "ve arac ciktilarindan somut ham degerleri dahil et. "
-            "Herhangi bir arac basarisiz olduysa, tam hatayi belirt."
+            + "\n\nLütfen kullanıcı için kısa bir TÜRKÇE özet yaz "
+            "ve araç çıktılarından somut ham değerleri dahil et. "
+            "Herhangi bir araç başarısız olduysa, tam hatayı belirt."
         )
         summary_response = await self._ainvoke_with_retry([HumanMessage(content=summary_prompt)])
         summary_text = str(summary_response.content)
@@ -2302,6 +2572,36 @@ class CognitiveRouter:
                 error=str(exc),
             )
             return None
+
+
+def _clean_raw_json_plan_reply(reply: str) -> str:
+    """Detect and convert raw leaked plan JSON into human-friendly Turkish text."""
+    stripped = reply.strip()
+    if not stripped:
+        return reply
+
+    if '"needs_plan"' in stripped or ('"steps"' in stripped and stripped.startswith("{")):
+        try:
+            clean_text = re.sub(r"^```(?:json)?\s*", "", stripped)
+            clean_text = re.sub(r"\s*```$", "", clean_text).strip()
+            data = json.loads(clean_text)
+            if isinstance(data, dict) and ("needs_plan" in data or "steps" in data):
+                steps = data.get("steps", [])
+                if steps:
+                    lines = ["📋 **Yürütülen Otonom Plan:**\n"]
+                    for idx, s in enumerate(steps, 1):
+                        desc = s.get("description") or s.get("tool_name") or f"Adım {idx}"
+                        lines.append(f"  {idx}. {desc}")
+                    return "\n".join(lines)
+                elif "message" in data:
+                    return str(data["message"])
+                elif "reply" in data:
+                    return str(data["reply"])
+                else:
+                    return "İsteğiniz başarıyla analiz edilip yürütüldü."
+        except Exception:
+            pass
+    return reply
 
 
 def _looks_like_json_plan(text: str) -> bool:

@@ -14,42 +14,22 @@ from tools.base import BaseTool, force_window_foreground, resolve_user_path
 
 logger = get_logger(__name__)
 
-# Shared browser instance management
-_browser_context: dict = {}
-
-
+# Shared browser instance management (unified with browser_helpers._GlobalBrowserSession)
 async def _get_browser():
-    """Lazily launch a visible Chromium browser and return a context."""
-    from playwright.async_api import async_playwright
+    """Lazily return the shared browser context from the global browser session."""
+    from tools.browser_helpers import get_browser_session
 
-    if "playwright" not in _browser_context:
-        pw = await async_playwright().start()
-        browser = await pw.chromium.launch(
-            headless=False,
-            args=["--start-maximized"],
-        )
-        context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1280, "height": 800},
-            ignore_https_errors=True,
-        )
-        _browser_context["playwright"] = pw
-        _browser_context["browser"] = browser
-        _browser_context["context"] = context
-    return _browser_context["context"]
+    session = await get_browser_session()
+    _pw, _browser, context = await session.get_or_create_session(headless=False)
+    return context
 
 
 async def shutdown_browser() -> None:
     """Gracefully close the browser (call at application shutdown)."""
-    if "browser" in _browser_context:
-        await _browser_context["browser"].close()
-    if "playwright" in _browser_context:
-        await _browser_context["playwright"].stop()
-    _browser_context.clear()
+    from tools.browser_helpers import get_browser_session
+
+    session = await get_browser_session()
+    await session.shutdown()
 
 
 # ---------------------------------------------------------------------------

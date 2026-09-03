@@ -106,7 +106,7 @@ class TelegramGateway:
             await update.message.reply_text("Unauthorized.", parse_mode="HTML")
             return
         await update.message.reply_text(
-            "<b>OmniCore v36 — Aktif ✅</b>\n\n"
+            "<b>OmniCore v0.1.0 — Aktif ✅</b>\n\n"
             "Türkçe veya İngilizce mesaj gönderebilirsiniz.\n\n"
             "<b>Yetenekler:</b>\n"
             "• Dosya yönetimi ve OS işlemleri\n"

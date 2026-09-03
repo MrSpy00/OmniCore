@@ -26,12 +26,16 @@ _COLLECTION_NAME = "omnicore_memory"
 class FastLightweightEmbedding(EmbeddingFunction[Documents]):
     """Deterministic, fast on-device embedding function.
 
-    Provides 64-dimensional normalized word-hash vectors. Requires zero C++
-    compilers or heavy ONNX runtimes. Never fails or raises onnxruntime errors.
+    Provides 384-dimensional normalized word-hash vectors. Requires zero C++
+    compilers or heavy ONNX runtimes. Never fails or raises onnxruntime/tokenizers errors.
     """
 
     def __init__(self) -> None:
         pass
+
+    @staticmethod
+    def name() -> str:
+        return "fast_lightweight_embedding"
 
     def __call__(self, input: Documents) -> Embeddings:
         return self._embed(input)
@@ -42,11 +46,11 @@ class FastLightweightEmbedding(EmbeddingFunction[Documents]):
     def _embed(self, input: Documents) -> Embeddings:
         embeddings = []
         for text in input:
-            vec = [0.0] * 64
+            vec = [0.0] * 384
             words = text.lower().split()
             for w in words:
                 h = int(hashlib.md5(w.encode()).hexdigest(), 16)
-                idx = h % 64
+                idx = h % 384
                 vec[idx] += 1.0
             norm = math.sqrt(sum(x * x for x in vec)) or 1.0
             embeddings.append([x / norm for x in vec])
@@ -65,37 +69,42 @@ class LongTermMemory:
     def __init__(self, persist_dir: str | None = None) -> None:
         settings = get_settings()
         self._persist_dir = persist_dir or str(settings.chroma_persist_dir)
-
-        # Always use lightweight embedding to avoid onnxruntime dependency issues
-        embedding_fn = FastLightweightEmbedding()
+        self._embedding_fn = FastLightweightEmbedding()
 
         try:
             self._client = chromadb.PersistentClient(
                 path=self._persist_dir,
                 settings=ChromaSettings(anonymized_telemetry=False, is_persistent=True),
             )
-            col_kwargs: dict[str, Any] = {
-                "name": _COLLECTION_NAME,
-                "metadata": {"hnsw:space": "cosine"},
-            }
-            if embedding_fn:
-                col_kwargs["embedding_function"] = embedding_fn
-            self._collection = self._client.get_or_create_collection(**col_kwargs)
         except Exception as exc:
             logger.warning("long_term.persistent_failed_fallback_ephemeral", error=str(exc))
             self._client = chromadb.EphemeralClient(settings=ChromaSettings(anonymized_telemetry=False))
-            col_kwargs = {
-                "name": _COLLECTION_NAME,
-                "metadata": {"hnsw:space": "cosine"},
-            }
-            if embedding_fn:
-                col_kwargs["embedding_function"] = embedding_fn
-            self._collection = self._client.get_or_create_collection(**col_kwargs)
+
+        self._collection = self._get_or_create_collection()
         logger.info(
             "long_term.initialized",
             persist_dir=self._persist_dir,
             doc_count=self._collection.count(),
         )
+
+    def _get_or_create_collection(self):
+        """Get existing collection or create one. Never passes embedding_function
+        to avoid ChromaDB conflict errors when the collection already exists
+        with a different (or no) embedding configuration."""
+        try:
+            return self._client.get_collection(name=_COLLECTION_NAME)
+        except Exception:
+            return self._client.create_collection(
+                name=_COLLECTION_NAME,
+                metadata={"hnsw:space": "cosine"},
+            )
+
+    def _recover_collection(self) -> None:
+        """Attempt to recover the collection reference after an error."""
+        try:
+            self._collection = self._get_or_create_collection()
+        except Exception as exc:
+            logger.error("long_term.collection_recovery_failed", error=str(exc))
 
     # -- write ----------------------------------------------------------------
 
@@ -108,9 +117,11 @@ class LongTermMemory:
     ) -> str:
         """Embed and store a piece of text. Returns the document ID."""
         doc_id = doc_id or hashlib.sha256(text.encode()).hexdigest()[:16]
+        emb = self._embedding_fn._embed([text])
         upsert_kwargs: dict[str, Any] = {
             "ids": [doc_id],
             "documents": [text],
+            "embeddings": emb,
         }
         if metadata:
             upsert_kwargs["metadatas"] = [metadata]
@@ -120,10 +131,7 @@ class LongTermMemory:
         except Exception as exc:
             logger.warning("long_term.store_fallback_lightweight", error=str(exc))
             try:
-                self._collection = self._client.get_or_create_collection(
-                    name=_COLLECTION_NAME,
-                    metadata={"hnsw:space": "cosine"},
-                )
+                self._recover_collection()
                 self._collection.upsert(**upsert_kwargs)
             except Exception as e2:
                 logger.error("long_term.store_fatal", error=str(e2))
@@ -143,8 +151,9 @@ class LongTermMemory:
         ``distance``.
         """
         try:
+            q_emb = self._embedding_fn._embed([query])
             kwargs: dict[str, Any] = {
-                "query_texts": [query],
+                "query_embeddings": q_emb,
                 "n_results": min(n_results, self._collection.count() or 1),
             }
             if where:
@@ -153,13 +162,10 @@ class LongTermMemory:
         except Exception as exc:
             logger.warning("long_term.recall_fallback_lightweight", error=str(exc))
             try:
-                self._collection = self._client.get_or_create_collection(
-                    name=_COLLECTION_NAME,
-                    metadata={"hnsw:space": "cosine"},
-                    embedding_function=FastLightweightEmbedding(),
-                )
+                self._recover_collection()
+                q_emb = self._embedding_fn._embed([query])
                 results = self._collection.query(
-                    query_texts=[query],
+                    query_embeddings=q_emb,
                     n_results=min(n_results, self._collection.count() or 1),
                 )
             except Exception as e2:
@@ -259,7 +265,7 @@ class LongTermMemory:
     def reset(self) -> None:
         """Drop and recreate the collection. Destructive."""
         self._client.delete_collection(_COLLECTION_NAME)
-        self._collection = self._client.get_or_create_collection(
+        self._collection = self._client.create_collection(
             name=_COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
         )

@@ -79,8 +79,6 @@ class WebExtractAllLinks(BaseTool):
             )
         except Exception as exc:
             return self._failure(f"Failed to extract links: {exc}")
-        except Exception as exc:
-            return self._failure(str(exc))
 
 
 class WebReadMainArticle(BaseTool):

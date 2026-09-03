@@ -51,7 +51,7 @@ class MCPServerGateway:
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "OmniCore-MCP-Gateway", "version": "0.40.0"},
+                    "serverInfo": {"name": "OmniCore-MCP-Gateway", "version": "0.1.0"},
                 },
             }
 

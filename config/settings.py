@@ -60,9 +60,12 @@ AVAILABLE_ANTHROPIC_MODELS: list[dict[str, str]] = [
 ]
 
 AVAILABLE_XAI_MODELS: list[dict[str, str]] = [
+    {"id": "grok-4", "name": "Grok 4", "context": "256k", "speed": "fast"},
     {"id": "grok-3", "name": "Grok 3", "context": "128k", "speed": "medium"},
     {"id": "grok-3-mini", "name": "Grok 3 Mini", "context": "128k", "speed": "fast"},
-    {"id": "grok-2", "name": "Grok 2", "context": "128k", "speed": "medium"},
+    {"id": "grok-2-1212", "name": "Grok 2 (1212)", "context": "128k", "speed": "medium"},
+    {"id": "grok-2-vision-1212", "name": "Grok 2 Vision", "context": "32k", "speed": "medium"},
+    {"id": "grok-beta", "name": "Grok Beta", "context": "128k", "speed": "fast"},
 ]
 
 AVAILABLE_DEEPSEEK_MODELS: list[dict[str, str]] = [
@@ -78,6 +81,8 @@ AVAILABLE_MISTRAL_MODELS: list[dict[str, str]] = [
 ]
 
 AVAILABLE_COHERE_MODELS: list[dict[str, str]] = [
+    {"id": "command-r-plus-08-2024", "name": "Command R+ (Aug 2024)", "context": "128k", "speed": "medium"},
+    {"id": "command-r-08-2024", "name": "Command R (Aug 2024)", "context": "128k", "speed": "fast"},
     {"id": "command-r-plus", "name": "Command R+", "context": "128k", "speed": "medium"},
     {"id": "command-r", "name": "Command R", "context": "128k", "speed": "fast"},
     {"id": "command-light", "name": "Command Light", "context": "4k", "speed": "fastest"},
@@ -86,6 +91,23 @@ AVAILABLE_COHERE_MODELS: list[dict[str, str]] = [
 AVAILABLE_AI21_MODELS: list[dict[str, str]] = [
     {"id": "jamba-1.5-large", "name": "Jamba 1.5 Large", "context": "256k", "speed": "medium"},
     {"id": "jamba-1.5-mini", "name": "Jamba 1.5 Mini", "context": "256k", "speed": "fast"},
+]
+
+AVAILABLE_PERPLEXITY_MODELS: list[dict[str, str]] = [
+    {"id": "sonar", "name": "Perplexity Sonar", "context": "128k", "speed": "fast"},
+    {"id": "sonar-pro", "name": "Perplexity Sonar Pro", "context": "200k", "speed": "medium"},
+    {"id": "sonar-reasoning", "name": "Perplexity Sonar Reasoning", "context": "128k", "speed": "medium"},
+]
+
+AVAILABLE_REKA_MODELS: list[dict[str, str]] = [
+    {"id": "reka-core", "name": "Reka Core", "context": "128k", "speed": "medium"},
+    {"id": "reka-flash", "name": "Reka Flash", "context": "128k", "speed": "fast"},
+    {"id": "reka-edge", "name": "Reka Edge", "context": "64k", "speed": "fastest"},
+]
+
+AVAILABLE_WRITER_MODELS: list[dict[str, str]] = [
+    {"id": "palmyra-x-004", "name": "Palmyra X 004", "context": "128k", "speed": "fast"},
+    {"id": "palmyra-med-70b", "name": "Palmyra Med 70B", "context": "32k", "speed": "medium"},
 ]
 
 AVAILABLE_GROQ_MODELS: list[dict[str, str]] = [
@@ -205,15 +227,20 @@ AVAILABLE_OPENROUTER_MODELS: list[dict[str, str]] = [
 
 # --- Çin providerları ---
 AVAILABLE_MOONSHOT_MODELS: list[dict[str, str]] = [
+    {"id": "kimi-latest", "name": "Kimi Latest", "context": "128k", "speed": "fast"},
     {"id": "moonshot-v1-128k", "name": "Moonshot 128K", "context": "128k", "speed": "medium"},
     {"id": "moonshot-v1-32k", "name": "Moonshot 32K", "context": "32k", "speed": "fast"},
     {"id": "moonshot-v1-8k", "name": "Moonshot 8K", "context": "8k", "speed": "fastest"},
 ]
 
 AVAILABLE_ZHIPU_MODELS: list[dict[str, str]] = [
+    {"id": "glm-5", "name": "GLM-5", "context": "256k", "speed": "fast"},
     {"id": "glm-4-plus", "name": "GLM-4 Plus", "context": "128k", "speed": "medium"},
-    {"id": "glm-4-flash", "name": "GLM-4 Flash", "context": "128k", "speed": "fast"},
-    {"id": "glm-4-long", "name": "GLM-4 Long", "context": "1M", "speed": "medium"},
+    {"id": "glm-4-0520", "name": "GLM-4 (0520)", "context": "128k", "speed": "medium"},
+    {"id": "glm-4", "name": "GLM-4", "context": "128k", "speed": "medium"},
+    {"id": "glm-4-air", "name": "GLM-4 Air", "context": "128k", "speed": "fastest"},
+    {"id": "glm-4-flash", "name": "GLM-4 Flash", "context": "128k", "speed": "fastest"},
+    {"id": "glm-zero-preview", "name": "GLM Zero Preview", "context": "128k", "speed": "medium"},
 ]
 
 AVAILABLE_MINIMAX_MODELS: list[dict[str, str]] = [
@@ -254,6 +281,9 @@ AVAILABLE_PROVIDERS: dict[str, list[dict[str, str]]] = {
     "cohere": AVAILABLE_COHERE_MODELS,
     "ai21": AVAILABLE_AI21_MODELS,
     "groq": AVAILABLE_GROQ_MODELS,
+    "perplexity": AVAILABLE_PERPLEXITY_MODELS,
+    "reka": AVAILABLE_REKA_MODELS,
+    "writer": AVAILABLE_WRITER_MODELS,
     "fireworks": AVAILABLE_FIREWORKS_MODELS,
     "together": AVAILABLE_TOGETHER_MODELS,
     "deepinfra": AVAILABLE_DEEPINFRA_MODELS,
@@ -276,6 +306,12 @@ AVAILABLE_PROVIDERS: dict[str, list[dict[str, str]]] = {
 
 # OpenAI-uyumlu provider'larin base URL'leri
 OPENAI_COMPATIBLE_PROVIDERS: dict[str, str] = {
+    "xai": "https://api.x.ai/v1",
+    "cohere": "https://api.cohere.com/v2",
+    "ai21": "https://api.ai21.com/studio/v1",
+    "perplexity": "https://api.perplexity.ai",
+    "reka": "https://api.reka.ai/v1",
+    "writer": "https://api.writer.com/v1",
     "fireworks": "https://api.fireworks.ai/inference/v1",
     "together": "https://api.together.xyz/v1",
     "deepinfra": "https://api.deepinfra.com/v1/openai",
@@ -308,7 +344,7 @@ class Settings(BaseSettings):
 
     # --- LLM ---
     llm_provider: str = "gemini"
-    llm_fallback_order: str = "groq,gemini"
+    llm_fallback_order: str = "groq,gemini,openai,deepseek"
 
     # Google Gemini
     google_api_key: str = ""
@@ -368,6 +404,18 @@ class Settings(BaseSettings):
     # AI21
     ai21_api_key: str = ""
     ai21_model: str = "jamba-1.5-mini"
+
+    # Perplexity
+    perplexity_api_key: str = ""
+    perplexity_model: str = "sonar"
+
+    # Reka
+    reka_api_key: str = ""
+    reka_model: str = "reka-flash"
+
+    # Writer
+    writer_api_key: str = ""
+    writer_model: str = "palmyra-x-004"
 
     # OpenAI-uyumlu hızlı inference
     fireworks_api_key: str = ""
@@ -500,6 +548,9 @@ class Settings(BaseSettings):
             "minimax": bool(self.minimax_api_key.strip()),
             "qwen": bool(self.qwen_api_key.strip()),
             "stepfun": bool(self.stepfun_api_key.strip()),
+            "perplexity": bool(self.perplexity_api_key.strip()),
+            "reka": bool(self.reka_api_key.strip()),
+            "writer": bool(self.writer_api_key.strip()),
             "ollama": self.ollama_enabled,
         }
 

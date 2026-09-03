@@ -101,9 +101,9 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/doctor", "Sistem tanılaması"),
     ("/memory", "Uzun süreli bellek önizleme"),
     ("/reset", "Konuşma geçmişini temizle"),
-    ("/hud", "Cyberpunk HUD goster"),
-    ("/commit", "Git commit yardimcisi"),
-    ("/taste", "Ogrenilmis tercihleri goruntule/yonet"),
+    ("/hud", "Cyberpunk HUD göster"),
+    ("/commit", "Git commit yardımcısı"),
+    ("/taste", "Öğrenilmiş tercihleri görüntüle/yönet"),
 ]
 SLASH_COMMAND_NAMES = [c[0] for c in SLASH_COMMANDS]
 
@@ -229,6 +229,9 @@ def _enable_ansi_windows() -> None:
     """Enable ANSI/VT escape code processing and UTF-8 encoding on Windows terminals."""
     import os
 
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    os.environ["PYTHONUTF8"] = "1"
+
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -248,6 +251,14 @@ def _enable_ansi_windows() -> None:
 
     if os.name != "nt":
         return
+
+    try:
+        import subprocess
+
+        subprocess.run(["chcp", "65001"], capture_output=True, shell=True, timeout=2)
+    except Exception:
+        pass
+
     try:
         import ctypes
 
@@ -292,6 +303,28 @@ def _enable_ansi_windows() -> None:
 
 
 _enable_ansi_windows()
+
+_original_print = print
+
+
+def _safe_print(*args: Any, **kwargs: Any) -> None:
+    """UTF-8 safe print wrapper that prevents Windows console encoding crashes."""
+    try:
+        _original_print(*args, **kwargs)
+    except (UnicodeEncodeError, OSError):
+        try:
+            sep = kwargs.get("sep", " ")
+            end = kwargs.get("end", "\n")
+            text = sep.join(str(a) for a in args) + end
+            sys.stdout.buffer.write(text.encode("utf-8", errors="replace"))
+            sys.stdout.buffer.flush()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+print = _safe_print
 
 
 def _setup_autocomplete() -> None:
@@ -598,8 +631,17 @@ def _get_banner() -> str:
     lines.append(_bl("SOVEREIGN AUTONOMOUS AI OPERATING SYSTEM"))
     lines.append(_bb())
     username = _get_display_name()
-    lines.append(_bl(f"{username} | {provider.upper()} | {model} | {perm_icon} | {sched_icon}"))
-    lines.append(_bl("/ yaz -> komut menu  |  quit -> cikis"))
+    persona_tag = ""
+    try:
+        from config.persona_system import get_persona_manager
+
+        p = get_persona_manager().get_profile()
+        persona_tag = f" | {p.preferred_browser.upper()} | {p.language.upper()}"
+    except Exception:
+        pass
+
+    lines.append(_bl(f"{username} | {provider.upper()} | {model} | {perm_icon} | {sched_icon}{persona_tag}"))
+    lines.append(_bl("/ yaz -> komut menüsü  |  quit -> çıkış"))
     lines.append(_bb())
 
     return "\n".join(lines)
@@ -795,7 +837,7 @@ class CLIGateway:
         _enable_ansi_windows()
         _setup_autocomplete()
         print(_get_banner())
-        print("  Bir mesaj yaz veya / ile komutlari gor\n")
+        print("  Bir mesaj yaz veya / ile komutları gör\n")
         conversation_id = "cli_session"
 
         while True:

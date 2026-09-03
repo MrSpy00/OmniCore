@@ -6,12 +6,13 @@ import asyncio
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
 import webbrowser
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import psutil
 import pyperclip
@@ -376,10 +377,11 @@ class WebPlayYoutubeVideoVisible(BaseTool):
     name = "web_play_youtube_video_visible"
     description = (
         "Full YouTube control: search, play, seek, pause, volume, fullscreen, "
-        "subscribe, like. Uses user's default browser. Auto-skips ads. "
+        "subscribe, like, notifications, metadata. Uses user's default browser with "
+        "persistent session (never opens duplicate windows). Auto-skips ads. "
         "Parameters: query (search term/URL), action (play|seek|pause|resume|"
         "mute|unmute|volume_up|volume_down|fullscreen|next|previous|"
-        "speed_up|speed_down|normal_speed|pip|like|subscribe|channel), "
+        "speed_up|speed_down|normal_speed|pip|like|subscribe|notifications|metadata|channel), "
         "time (for seek: '1:30', 'orta', '%50'), channel_name (for channel action)."
     )
     is_destructive = False
@@ -387,7 +389,7 @@ class WebPlayYoutubeVideoVisible(BaseTool):
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
         query = str(self._first_param(params, "query", "search", "video", "song", "url", "value", default=""))
-        action = str(self._first_param(params, "action", default="play") or "play").lower()
+        action = str(self._first_param(params, "action", default="play") or "play").lower().strip()
         time_str = str(self._first_param(params, "time", "timestamp", "seek_to", default="") or "")
         channel_name = str(self._first_param(params, "channel_name", "channel", "kanal", default="") or "")
 
@@ -405,88 +407,170 @@ class WebPlayYoutubeVideoVisible(BaseTool):
             "pip",
             "like",
             "subscribe",
+            "toggle",
+            "volume_up",
+            "volume_down",
+            "notifications",
+            "bildirim",
+            "bildirimleri_ac",
+            "bildirimleri_aç",
+            "bell",
+            "metadata",
+            "bilgi",
+            "info",
+            "seek",
         )
-        if not query and action not in no_query_actions:
-            return self._failure("query is required")
+        if not query and not channel_name and action not in no_query_actions:
+            return self._failure("query veya channel_name parametresi gereklidir")
 
         try:
             from tools.browser_helpers import (
-                launch_user_browser,
+                get_browser_session,
                 smart_youtube_channel_and_play,
                 smart_youtube_play,
                 youtube_control,
+                youtube_enable_notifications,
+                youtube_get_video_metadata,
                 youtube_seek,
             )
         except ImportError:
-            return self._failure("browser_helpers modulu bulunamadi")
+            return self._failure("browser_helpers modülü bulunamadı")
 
         try:
-            pw, browser, page = await launch_user_browser(headless=False)
-            try:
-                # Control actions (don't need to search)
-                control_actions = (
-                    "pause",
-                    "resume",
-                    "mute",
-                    "unmute",
-                    "fullscreen",
-                    "next",
-                    "previous",
-                    "speed_up",
-                    "speed_down",
-                    "normal_speed",
-                    "pip",
-                    "like",
-                    "subscribe",
-                    "toggle",
-                    "volume_up",
-                    "volume_down",
-                )
-                if action in control_actions:
-                    result = await youtube_control(page, action)
+            session = await get_browser_session()
+            # Reuse active YouTube tab if open, otherwise get/create page in persistent window
+            page = await session.get_or_create_page(url_pattern="youtube.com", headless=False)
+
+            # Intelligent intent parsing for Turkish conversational commands
+            lower_q = query.lower().strip()
+
+            # 1. Metadata / Upload date inquiry
+            meta_triggers = (
+                "kaç gün",
+                "kac gun",
+                "ne zaman yüklendi",
+                "ne zaman yuklendi",
+                "yayın tarihi",
+                "yayin tarihi",
+                "video bilgisi",
+            )
+            is_metadata_query = (
+                action in ("metadata", "bilgi", "info", "tarih", "kac_gun_once", "kaç_gün_önce")
+                or (lower_q and any(kw in lower_q for kw in meta_triggers))
+            )
+            if is_metadata_query:
+                meta = await youtube_get_video_metadata(page)
+                if not meta.get("success"):
+                    return self._failure(meta.get("error", "Video bilgisi alınamadı"))
+                msg = f"Video: '{meta.get('title')}' | Kanal: {meta.get('channel')} | Tarih: {meta.get('upload_date')}"
+                if meta.get("days_ago") is not None:
+                    msg += f" ({meta.get('days_ago')} gün önce)"
+                return self._success(msg, data=meta)
+
+            # 2. Notifications action
+            notif_triggers = ("bildirimleri aç", "bildirimleri ac", "zili aç", "zili ac", "tüm bildirimler")
+            is_notifications_query = (
+                action in ("notifications", "bildirim", "bildirimleri_ac", "bildirimleri_aç", "bell")
+                or (lower_q and any(kw in lower_q for kw in notif_triggers))
+            )
+            if is_notifications_query:
+                bell_result = await youtube_enable_notifications(page)
+                if bell_result.get("success"):
+                    return self._success(bell_result.get("message", "Bildirimler açıldı"), data=bell_result)
+                return self._failure(bell_result.get("error", "Bildirimler açılamadı"))
+
+            # 3. Playback controls (pause, resume, volume, like, subscribe, etc.)
+            control_actions = (
+                "pause",
+                "resume",
+                "mute",
+                "unmute",
+                "fullscreen",
+                "next",
+                "previous",
+                "speed_up",
+                "speed_down",
+                "normal_speed",
+                "pip",
+                "like",
+                "subscribe",
+                "toggle",
+                "volume_up",
+                "volume_down",
+            )
+            if action in control_actions:
+                result = await youtube_control(page, action)
+                if result.get("success"):
                     return self._success(result.get("message", action), data=result)
+                return self._failure(result.get("error", f"{action} eylemi başarısız oldu"))
 
-                if action == "seek" and time_str:
-                    result = await youtube_seek(page, time_str)
-                    return self._success(f"Video {time_str} konumuna atlandi", data=result)
+            # 4. Seek action (exact timestamp or relative position: '1:29', 'orta', '%50', 'başa al')
+            seek_pat = (
+                r"(\d{1,2}:\d{2}(?::\d{2})?|\d+\s*(?:sn|saniye|dk|dakika)|"
+                r"orta|ortaya|baş|bas|başa|son|sona|çeyrek|ceyrek|%\d+|\b\d+\s*%)"
+            )
+            seek_match = re.search(seek_pat, lower_q)
+            is_seek = (
+                action == "seek"
+                or bool(time_str)
+                or (seek_match and any(w in lower_q for w in ("al", "sar", "geç", "atla", "git", "konum")))
+            )
+            if is_seek:
+                target_time = time_str or (seek_match.group(1) if seek_match else query)
+                result = await youtube_seek(page, target_time)
+                if result.get("success"):
+                    time_pos = result.get("time", target_time)
+                    dur = result.get("total_duration")
+                    return self._success(
+                        f"Video {time_pos} konumuna atlandı (Toplam: {dur})",
+                        data=result,
+                    )
+                return self._failure(result.get("error", "Seek başarısız"))
 
-                if action == "channel" and channel_name:
-                    result = await smart_youtube_channel_and_play(page, channel_name)
-                    if result.get("success"):
-                        return self._success(
-                            f"Kanal '{channel_name}' son video: '{result['title']}'",
-                            data=result,
-                        )
-                    return self._failure(result.get("error", "Kanal hatasi"))
+            # 5. Channel latest video navigation
+            channel_triggers = ("son video", "son videosu", "kanalının son", "kanalinin son")
+            is_channel_latest = any(kw in lower_q for kw in channel_triggers)
+            if action == "channel" or channel_name or is_channel_latest:
+                ch_target = channel_name
+                if not ch_target:
+                    # Strip trigger keywords to extract channel name
+                    ch_target = re.sub(
+                        r"\b(son\s+videosunu\s+aç|son\s+videosunu\s+ac|son\s+videosu|son\s+video|kanalının\s+son|kanalinin\s+son|videosunu\s+aç|aç|ac|oynat|başlat|baslat)\b",
+                        "",
+                        query,
+                        flags=re.IGNORECASE,
+                    ).strip()
+                ch_target = ch_target or query
+                enable_bell = "bildirim" in lower_q or "bildirim" in action.lower()
+                result = await smart_youtube_channel_and_play(page, ch_target, enable_bell=enable_bell)
+                if result.get("success"):
+                    msg = f"Kanal '{ch_target}' son videosu başlatıldı: '{result.get('title')}'"
+                    if result.get("upload_date"):
+                        msg += f" (Yayın: {result.get('upload_date')}"
+                        if result.get("days_ago") is not None:
+                            msg += f", {result.get('days_ago')} gün önce"
+                        msg += ")"
+                    return self._success(msg, data=result)
+                return self._failure(result.get("error", "Kanal hatası"))
 
-                # Default: search and play
-                if query:
-                    if "youtube.com/" in query or "youtu.be/" in query:
-                        url = query if query.startswith("http") else f"https://{query}"
-                        await page.goto(url, timeout=30000)
-                        return self._success(f"YouTube acildi: {url}", data={"url": url})
+            # 6. Default: Search and play video
+            if query:
+                result = await smart_youtube_play(page, query, time_str=time_str)
+                if result.get("success"):
+                    msg = f"YouTube videosu başlatıldı: '{result.get('title')}'"
+                    if result.get("upload_date"):
+                        msg += f" (Yayın: {result.get('upload_date')}"
+                        if result.get("days_ago") is not None:
+                            msg += f", {result.get('days_ago')} gün önce"
+                        msg += ")"
+                    if time_str:
+                        msg += f" [{time_str} konumuna atlandı]"
+                    return self._success(msg, data=result)
+                return self._failure(result.get("error", "YouTube arama/oynatma hatası"))
 
-                    result = await smart_youtube_play(page, query)
-                    if result.get("success"):
-                        # If seek time specified, seek after play
-                        if time_str:
-                            await asyncio.sleep(1)
-                            seek_result = await youtube_seek(page, time_str)
-                            return self._success(
-                                f"Video: '{result['title']}' ({time_str} konumuna atlandi)",
-                                data={**result, "seek": seek_result},
-                            )
-                        return self._success(
-                            f"YouTube video baslatildi: '{result['title']}'",
-                            data=result,
-                        )
-                    return self._failure(result.get("error", "YouTube hatasi"))
-
-                return self._failure(f"Bilinmeyen eylem: {action}")
-            finally:
-                pass  # Keep browser open
+            return self._failure(f"Bilinmeyen eylem: {action}")
         except Exception as exc:
-            return self._failure(f"YouTube hatasi: {exc}")
+            return self._failure(f"YouTube hatası: {exc}")
 
 
 class SysForceForeground(BaseTool):
@@ -539,15 +623,46 @@ class MediaControlNative(BaseTool):
             return self._failure(str(exc))
 
 
-class MediaControlSpotifyNative(MediaControlNative):
-    """Backward-compatible alias for legacy callers.
-
-    Kept for older orchestrations and tests that still invoke
-    `media_control_spotify_native`.
-    """
+class MediaControlSpotifyNative(BaseTool):
+    """Backward-compatible Spotify media control tool."""
 
     name = "media_control_spotify_native"
-    description = "Legacy alias for media control. Prefer media_control_native for universal control."
+    description = (
+        "Control Spotify on Windows: play, pause, next, prev, "
+        "search_and_play, seek. Parameter: action, optional: "
+        "query, seek_seconds."
+    )
+    is_destructive = True
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        action = str(self._first_param(params, "action", "command", default="play")).lower()
+        query = str(self._first_param(params, "query", "song", "track", "title", default="")).strip()
+        seek_sec_raw = self._first_param(params, "seek_seconds", "seek", "seconds", "position", default=0)
+        try:
+            seek_seconds = int(seek_sec_raw or 0)
+        except (ValueError, TypeError):
+            seek_seconds = 0
+
+        try:
+            result = await asyncio.to_thread(_spotify_control, action, query, seek_seconds)
+            return self._success(f"Spotify operation completed: {action}", data=result)
+        except Exception as exc:
+            return self._failure(str(exc))
+
+
+class SpotifyControl(MediaControlSpotifyNative):
+    """Full Spotify automation tool via URI scheme, UIA, and media transport."""
+
+    name = "spotify_control"
+    description = (
+        "Control Spotify on Windows: search, play, pause, next, "
+        "previous, toggle, and seek to specific timestamp. "
+        "Parameters: action (search_and_play/play/pause/next/"
+        "previous/toggle/seek), query (song name), "
+        "seek_seconds (int)."
+    )
+
 
 
 class SysReadNotifications(BaseTool):
@@ -718,6 +833,74 @@ def _media_control_native(action: str) -> dict[str, str]:
         "stdout": (completed.stdout or "").strip(),
         "stderr": (completed.stderr or "").strip(),
     }
+
+
+def _spotify_seek(seconds: int) -> dict[str, Any]:
+    """Seek in Spotify using keyboard shortcuts and UIA."""
+    try:
+        force_window_foreground("Spotify")
+    except Exception:
+        pass
+    steps = max(1, seconds // 5)
+    ps = (
+        "$ws = New-Object -ComObject WScript.Shell; "
+        f"for ($i=0; $i -lt {steps}; $i++) {{ "
+        "$ws.SendKeys('+{RIGHT}'); "
+        "Start-Sleep -Milliseconds 80 }}; 'ok'"
+    )
+    subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, timeout=10)
+    return {"action": "seek", "seconds": seconds, "steps": steps, "status": "ok"}
+
+
+def _spotify_control(
+    action: str,
+    query: str = "",
+    seek_seconds: int = 0,
+) -> dict[str, Any]:
+    """Control Spotify on Windows via URI scheme, UIA, and media transport."""
+    import time
+    import urllib.parse
+
+    action_norm = action.strip().lower()
+
+    if action_norm in ("search", "play_track", "search_and_play") or (
+        query and action_norm in ("play", "open", "launch")
+    ):
+        clean_q = urllib.parse.quote(query)
+        uri = f"spotify:search:{clean_q}"
+        subprocess.run(["cmd", "/c", "start", uri], shell=True, capture_output=True, timeout=10)
+        time.sleep(1.2)
+
+        try:
+            force_window_foreground("Spotify")
+        except Exception:
+            pass
+        time.sleep(0.4)
+
+        ps_enter = (
+            "$ws = New-Object -ComObject WScript.Shell; "
+            "Start-Sleep -Milliseconds 300; "
+            "$ws.SendKeys('{ENTER}'); "
+            "Start-Sleep -Milliseconds 300; "
+            "$ws.SendKeys(' '); 'ok'"
+        )
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_enter], capture_output=True, timeout=5)
+
+        if seek_seconds > 0:
+            time.sleep(0.8)
+            _spotify_seek(seek_seconds)
+
+        return {
+            "action": "search_and_play",
+            "query": query,
+            "seek_seconds": seek_seconds,
+            "status": "playing",
+        }
+
+    if action_norm == "seek" or seek_seconds > 0:
+        return _spotify_seek(seek_seconds)
+
+    return _media_control_native(action_norm)
 
 
 def _clipboard_history_file() -> Path:

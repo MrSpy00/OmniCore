@@ -325,3 +325,128 @@ def pathlib_temp_dir() -> str:
     import tempfile
 
     return tempfile.gettempdir()
+
+
+class VisionInstantScreenContext(BaseTool):
+    """'Ekrana Bak' (Instant Visual Screen Context) — captures active screen/window and explains the content."""
+
+    name = "vision_instant_screen_context"
+    description = (
+        "Capture the active desktop or window screen and analyze its contents, error messages, "
+        "code, or layout using multimodal Vision AI."
+    )
+    is_destructive = False
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        default_prompt = "Bu ekranda ne görünüyor? Herhangi bir hata veya önemli içeriği detaylı açıkla."
+        prompt = self._first_param(params, "prompt", "question", "query") or default_prompt
+        window_title = self._first_param(params, "window_title", "window") or ""
+
+        if window_title:
+            await asyncio.to_thread(_focus_window_by_title, str(window_title))
+            await asyncio.sleep(0.3)
+
+        def _worker() -> dict[str, Any]:
+            temp_img = Path(pathlib_temp_dir()) / "omnicore_instant_screen.png"
+            _capture_screen(temp_img, None)
+
+            analysis = analyze_image_with_gemini(temp_img, str(prompt))
+            return {
+                "screenshot_path": str(temp_img),
+                "analysis": analysis,
+                "window": window_title or "Active Desktop",
+            }
+
+        res = await asyncio.to_thread(_worker)
+        return self._success(
+            f"Ekran Analizi ({res['window']}):\n\n{res['analysis']}",
+            data=res,
+        )
+
+
+def _compute_dynamic_grid(screen_width: int, screen_height: int) -> tuple[int, int]:
+    """Çözünürlüğe göre dinamik grid boyutu hesaplar.
+
+    Minimum hücre alanı ~25000px² — vision model'lerin okuyabileceği kadar büyük.
+    1920x1080 → (5, 9) = 45 hücre
+    2560x1440 → (6, 12) = 72 hücre
+    3840x2160 → (8, 16) = 128 hücre
+    """
+    min_cell_area = 25000
+    total_area = screen_width * screen_height
+
+    rows = max(3, min(10, int((total_area / min_cell_area / (screen_width / screen_height)) ** 0.5)))
+    cols = max(4, min(20, int(rows * (screen_width / screen_height))))
+    return rows, cols
+
+
+class VisionSetOfMarkAnnotate(BaseTool):
+    """Çözünürlüğe göre dinamik boyutlu Set-of-Mark ekran işaretlemesi oluşturur."""
+
+    name = "vision_som_annotate"
+    description = (
+        "Capture screen and overlay numbered visual marker badges (Set-of-Mark) on interactive elements. "
+        "Grid size adapts dynamically to screen resolution for optimal vision model consumption."
+    )
+    is_destructive = False
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        out_param = self._first_param(params, "output_path", "path")
+        default_som = Path(pathlib_temp_dir()) / "som_annotated.png"
+        output_file = _resolve_sandboxed(str(out_param)) if out_param else default_som
+
+        def _worker() -> dict[str, Any]:
+            from PIL import ImageDraw
+
+            temp_raw = Path(pathlib_temp_dir()) / "som_raw.png"
+            _capture_screen(temp_raw, None)
+
+            with Image.open(temp_raw) as img:
+                w, h = img.size
+                draw = ImageDraw.Draw(img)
+
+                rows, cols = _compute_dynamic_grid(w, h)
+                cell_w = w // cols
+                cell_h = h // rows
+
+                marks: list[dict[str, Any]] = []
+                mark_id = 1
+
+                for r in range(rows):
+                    for c in range(cols):
+                        bx1 = c * cell_w + 4
+                        by1 = r * cell_h + 4
+                        bx2 = (c + 1) * cell_w - 4
+                        by2 = (r + 1) * cell_h - 4
+                        cx = (bx1 + bx2) // 2
+                        cy = (by1 + by2) // 2
+
+                        draw.rectangle([bx1, by1, bx2, by2], outline="#00FFCC", width=2)
+                        draw.rectangle([bx1, by1, bx1 + 36, by1 + 24], fill="#000000", outline="#FF007F", width=2)
+                        draw.text((bx1 + 8, by1 + 4), f"#{mark_id}", fill="#FFFFFF")
+
+                        marks.append({
+                            "id": mark_id,
+                            "box": [bx1, by1, bx2, by2],
+                            "center": (cx, cy),
+                        })
+                        mark_id += 1
+
+                img.save(output_file)
+
+            return {
+                "output_path": str(output_file),
+                "marks_count": len(marks),
+                "grid": {"rows": rows, "cols": cols},
+                "marks": marks,
+            }
+
+        res = await asyncio.to_thread(_worker)
+        return self._success(
+            f"Dinamik Set-of-Mark oluşturuldu ({res['grid']['rows']}×{res['grid']['cols']} grid, "
+            f"{res['marks_count']} bölge). Dosya: {res['output_path']}",
+            data=res,
+        )
+

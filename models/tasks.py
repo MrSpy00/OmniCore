@@ -96,3 +96,15 @@ class TaskPlan(BaseModel):
         self.status = TaskStatus.FAILED
         self.error_summary = error
         self.completed_at = datetime.now(UTC)
+
+
+class ThoughtBranch(BaseModel):
+    """Tree-of-Thought'ta bir aday plan dalı."""
+
+    branch_id: str = Field(default_factory=lambda: uuid.uuid4().hex[:8])
+    description: str
+    steps: list[TaskStep] = Field(default_factory=list)
+    heuristic_score: float = 0.0  # 0.0 - 1.0, yüksek = iyi
+    estimated_cost: float = 0.0   # Token/zaman maliyet tahmini
+    risk_score: float = 0.0       # Adımların toplam riski
+    selected: bool = False

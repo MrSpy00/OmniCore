@@ -127,6 +127,7 @@ def _launch_browser_process(url: str, browser_name: str = "default") -> dict:
     import sys
 
     from tools.base import force_window_foreground
+    from tools.browser_helpers import _BROWSER_PATHS, _detect_user_browser
 
     if sys.platform != "win32":
         import webbrowser
@@ -134,34 +135,33 @@ def _launch_browser_process(url: str, browser_name: str = "default") -> dict:
         webbrowser.open_new(url)
         return {"success": True, "method": "webbrowser.open_new"}
 
-    # Common Windows executable paths
-    chrome_paths = [
-        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
-        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
-        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
-    ]
-    edge_paths = [
-        os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
-        os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
-    ]
-    brave_paths = [
-        os.path.expandvars(r"%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe"),
-        os.path.expandvars(r"%LocalAppData%\BraveSoftware\Brave-Browser\Application\brave.exe"),
-    ]
-
     exe_path = None
-    if browser_name in ("chrome", "google-chrome"):
-        exe_path = next((p for p in chrome_paths if os.path.exists(p)), None)
-    elif browser_name in ("edge", "msedge"):
-        exe_path = next((p for p in edge_paths if os.path.exists(p)), None)
-    elif browser_name == "brave":
-        exe_path = next((p for p in brave_paths if os.path.exists(p)), None)
+    target_name = browser_name.lower().strip()
 
-    # Fallback to any installed modern browser if default
-    if not exe_path and browser_name == "default":
-        for candidate in chrome_paths + edge_paths + brave_paths:
-            if os.path.exists(candidate):
-                exe_path = candidate
+    if target_name in ("default", "varsayilan", "varsayılan"):
+        b_info = _detect_user_browser()
+        exe_path = b_info.executable_path
+
+    if not exe_path and target_name != "default":
+        for b_name, _b_engine, _b_channel, paths, _prio in _BROWSER_PATHS:
+            if target_name in (b_name, f"google-{b_name}", f"ms{b_name}"):
+                for p in paths:
+                    expanded = os.path.expandvars(p)
+                    if os.path.exists(expanded):
+                        exe_path = expanded
+                        break
+            if exe_path:
+                break
+
+    # Fallback: scan all installed browsers
+    if not exe_path:
+        for _name, _engine, _channel, paths, _prio in sorted(_BROWSER_PATHS, key=lambda x: x[4]):
+            for p in paths:
+                expanded = os.path.expandvars(p)
+                if os.path.exists(expanded):
+                    exe_path = expanded
+                    break
+            if exe_path:
                 break
 
     try:
@@ -170,7 +170,7 @@ def _launch_browser_process(url: str, browser_name: str = "default") -> dict:
             import time
 
             time.sleep(1.0)
-            for title in ("Chrome", "Edge", "Brave", "Browser"):
+            for title in ("Chrome", "Edge", "Brave", "Firefox", "LibreWolf", "Zen", "Opera", "Vivaldi", "Browser"):
                 force_window_foreground(title, timeout_seconds=1.5)
             return {"success": True, "method": "subprocess", "exe": exe_path, "pid": proc.pid}
 
@@ -179,7 +179,7 @@ def _launch_browser_process(url: str, browser_name: str = "default") -> dict:
         import time
 
         time.sleep(1.0)
-        for title in ("Chrome", "Edge", "Brave", "Browser"):
+        for title in ("Chrome", "Edge", "Brave", "Firefox", "Browser"):
             force_window_foreground(title, timeout_seconds=1.5)
         return {"success": True, "method": "os.startfile"}
     except Exception as exc:
@@ -195,7 +195,7 @@ def _launch_browser_process(url: str, browser_name: str = "default") -> dict:
 def _fetch_url_html(url: str) -> str:
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) OmniCore/0.40.0"},
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) OmniCore/0.1.0"},
     )
     with urllib.request.urlopen(req, timeout=10) as resp:
         return resp.read().decode("utf-8", errors="ignore")
@@ -218,7 +218,7 @@ class BrowserPlaywrightInteract(BaseTool):
 
     name = "browser_interact"
     description = (
-        "Interact with web pages using user's default browser. "
+        "Interact with web pages using user's default browser with persistent session. "
         "Actions: navigate, click, fill, scroll, screenshot, get_text, "
         "youtube_search, open_and_play, wait_for, scroll_up, scroll_down, "
         "go_back, go_forward, refresh, get_url, get_title, new_tab, "
@@ -230,7 +230,7 @@ class BrowserPlaywrightInteract(BaseTool):
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
         url = str(self._first_param(params, "url", "target", default="") or "").strip()
-        action = str(self._first_param(params, "action", default="navigate") or "navigate").lower()
+        action = str(self._first_param(params, "action", default="navigate") or "navigate").lower().strip()
         selector = str(self._first_param(params, "selector", "css", "xpath", default="") or "")
         value = str(self._first_param(params, "value", "text", default="") or "")
         save_path = str(self._first_param(params, "save_path", "path", default="Desktop/browser_screenshot.png") or "")
@@ -239,109 +239,89 @@ class BrowserPlaywrightInteract(BaseTool):
         try:
             from tools.browser_helpers import (
                 browser_action,
-                launch_user_browser,
+                get_browser_session,
                 smart_youtube_play,
             )
         except ImportError:
-            return self._failure("browser_helpers modulu bulunamadi")
-
-        # General browser actions (don't need URL)
-        general_actions = (
-            "scroll_up",
-            "scroll_down",
-            "go_back",
-            "go_forward",
-            "refresh",
-            "get_url",
-            "get_title",
-            "new_tab",
-            "close_tab",
-            "select",
-            "hover",
-            "focus",
-            "wait",
-        )
-        if action in general_actions:
-            try:
-                pw, browser, page = await launch_user_browser(headless=False)
-                try:
-                    result = await browser_action(
-                        page,
-                        action,
-                        selector=selector,
-                        value=value,
-                        delta=int(value) if value.isdigit() else 500,
-                        seconds=int(value) if value.isdigit() else 2,
-                        url=url,
-                    )
-                    if result.get("success"):
-                        return self._success(
-                            result.get("message", action),
-                            data=result,
-                        )
-                    return self._failure(result.get("error", "Hata"))
-                finally:
-                    pass
-            except Exception as exc:
-                return self._failure(f"Tarayici hatasi: {exc}")
+            return self._failure("browser_helpers modülü bulunamadı")
 
         try:
-            pw, browser, page = await launch_user_browser(headless=False)
-            try:
-                if action == "youtube_search" and value:
-                    result = await smart_youtube_play(page, value)
-                    if result.get("success"):
-                        return self._success(
-                            f"YouTube video: '{result['title']}'",
-                            data=result,
-                        )
-                    return self._failure(result.get("error", "YouTube hatasi"))
+            session = await get_browser_session()
+            page = await session.get_or_create_page(url_pattern=url if url else None, headless=False)
 
-                if action == "open_and_play" and value:
-                    result = await smart_youtube_play(page, value)
-                    if result.get("success"):
-                        return self._success(
-                            f"YouTube baslatildi: '{result['title']}'",
-                            data=result,
-                        )
-                    return self._failure(result.get("error", "YouTube hatasi"))
+            # General browser actions (scroll, navigation, tab controls)
+            general_actions = (
+                "scroll_up",
+                "scroll_down",
+                "go_back",
+                "go_forward",
+                "refresh",
+                "get_url",
+                "get_title",
+                "new_tab",
+                "close_tab",
+                "select",
+                "hover",
+                "focus",
+                "wait",
+            )
+            if action in general_actions:
+                result = await browser_action(
+                    page,
+                    action,
+                    selector=selector,
+                    value=value,
+                    delta=int(value) if value.isdigit() else 500,
+                    seconds=int(value) if value.isdigit() else 2,
+                    url=url,
+                )
+                if result.get("success"):
+                    return self._success(result.get("message", action), data=result)
+                return self._failure(result.get("error", "Eylem gerçekleştirilemedi"))
 
-                if url:
-                    await page.goto(url, timeout=timeout)
-
-                if action == "navigate":
-                    return self._success(f"Sayfaya gidildi: {page.url}", data={"url": page.url})
-                elif action == "click" and selector:
-                    await page.click(selector, timeout=timeout)
-                    return self._success(f"Tiklandi: {selector}")
-                elif action == "fill" and selector:
-                    await page.fill(selector, value, timeout=timeout)
-                    return self._success(f"Dolduruldu: {selector}")
-                elif action == "scroll":
-                    delta = int(value or "500")
-                    await page.mouse.wheel(0, delta)
-                    return self._success(f"Kaydirildi: {delta}px")
-                elif action == "screenshot":
-                    await page.screenshot(path=save_path, full_page=False)
-                    return self._success(f"Ekran goruntusu: {save_path}")
-                elif action == "get_text":
-                    text = await page.inner_text("body")
-                    return self._success(text[:4000], data={"url": page.url, "text": text[:4000]})
-                elif action == "wait_for" and selector:
-                    await page.wait_for_selector(selector, timeout=timeout)
-                    return self._success(f"Element bulundu: {selector}")
-                else:
-                    actions_list = (
-                        "navigate, click, fill, scroll, screenshot, get_text, "
-                        "youtube_search, open_and_play, wait_for, scroll_up, "
-                        "scroll_down, go_back, go_forward, refresh, get_url, "
-                        "get_title, new_tab, select, hover, focus"
+            if action in ("youtube_search", "open_and_play") and value:
+                result = await smart_youtube_play(page, value)
+                if result.get("success"):
+                    return self._success(
+                        f"YouTube videosu başlatıldı: '{result['title']}'",
+                        data=result,
                     )
-                    return self._failure(f"Bilinmeyen action: {action}. Kullanilabilir: {actions_list}")
-            finally:
-                pass
+                return self._failure(result.get("error", "YouTube hatası"))
+
+            if url and action not in ("get_text", "screenshot"):
+                await page.goto(url, timeout=timeout)
+
+            if action == "navigate":
+                return self._success(f"Sayfaya gidildi: {page.url}", data={"url": page.url})
+            elif action == "click" and selector:
+                await page.click(selector, timeout=timeout)
+                return self._success(f"Tıklandı: {selector}")
+            elif action == "fill" and selector:
+                await page.fill(selector, value, timeout=timeout)
+                return self._success(f"Dolduruldu: {selector}")
+            elif action == "scroll":
+                delta = int(value or "500")
+                await page.mouse.wheel(0, delta)
+                return self._success(f"Kaydırıldı: {delta}px")
+            elif action == "screenshot":
+                await page.screenshot(path=save_path, full_page=False)
+                return self._success(f"Ekran görüntüsü alındı: {save_path}")
+            elif action == "get_text":
+                text = await page.inner_text("body")
+                return self._success(text[:4000], data={"url": page.url, "text": text[:4000]})
+            elif action == "wait_for" and selector:
+                await page.wait_for_selector(selector, timeout=timeout)
+                return self._success(f"Element bulundu: {selector}")
+            else:
+                actions_list = (
+                    "navigate, click, fill, scroll, screenshot, get_text, "
+                    "youtube_search, open_and_play, wait_for, scroll_up, "
+                    "scroll_down, go_back, go_forward, refresh, get_url, "
+                    "get_title, new_tab, select, hover, focus"
+                )
+                return self._failure(f"Bilinmeyen eylem: {action}. Kullanılabilir: {actions_list}")
         except Exception as exc:
-            return self._failure(f"Tarayici hatasi: {exc}")
+            return self._failure(f"Tarayıcı hatası: {exc}")
 
     async def _youtube_search(self, page, query: str) -> ToolOutput:
         """Search YouTube, find first video result, return URL."""

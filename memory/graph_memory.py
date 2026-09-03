@@ -131,3 +131,60 @@ class GraphMemory:
             lines.append(f"  ({r['subject']}) --[{r['predicate']}]--> ({r['object']})")
         lines.append("----------------------------------")
         return "\n".join(lines)
+
+    async def export_graph_data(self, limit: int = 150) -> dict[str, Any]:
+        """Export full graph network formatted for Cytoscape.js visualizer."""
+        if not self._db:
+            await self.initialize()
+        assert self._db
+
+        async with self._db.execute(
+            """
+            SELECT subject, predicate, object, confidence FROM graph_relations
+            ORDER BY id DESC LIMIT ?
+            """,
+            (limit,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        nodes: dict[str, dict[str, Any]] = {}
+        edges: list[dict[str, Any]] = []
+
+        for row in rows:
+            s, p, o, conf = row[0], row[1], row[2], row[3]
+            for name in (s, o):
+                if name not in nodes:
+                    nodes[name] = {"id": name, "label": name}
+
+            edges.append({
+                "id": f"{s}_{p}_{o}",
+                "source": s,
+                "target": o,
+                "label": p,
+                "confidence": conf,
+            })
+
+        return {
+            "nodes": list(nodes.values()),
+            "edges": edges,
+            "count": len(edges),
+        }
+
+    async def extract_and_store_from_text(self, text: str) -> int:
+        """Metinden otomatik olarak varlık-ilişki çıkarır ve grafa ekler."""
+        try:
+            from memory.graph_extractor import extract_entities_and_relations
+            triples = extract_entities_and_relations(text)
+            count = 0
+            for triple in triples:
+                await self.add_relation(
+                    triple["subject"],
+                    triple["predicate"],
+                    triple["object"],
+                    confidence=0.8,
+                )
+                count += 1
+            return count
+        except Exception:
+            return 0
+

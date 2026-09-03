@@ -14,6 +14,14 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# Enforce UTF-8 across PowerShell streams and Python process
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+$env:PYTHONIOENCODING = "utf-8"
+$env:PYTHONUTF8 = "1"
+chcp 65001 >$null 2>&1
+
 if ($Mode -eq "--help" -or $Mode -eq "-h") {
     Write-Host ""
     Write-Host "OmniCore Quick Launcher" -ForegroundColor Cyan

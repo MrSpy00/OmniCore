@@ -430,4 +430,4 @@ async def test_rest_api_creation():
 
     app = create_app(DummyRouter())
     assert app.title == "OmniCore API"
-    assert app.version == "0.40.0"
+    assert app.version == "0.1.0"
