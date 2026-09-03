@@ -18,7 +18,7 @@
 ---
 
 <p align="left">
-  <img src="assets/flag_tr.svg" alt="Türkçe" width="28" height="20"/>
+  <img src="assets/flag_tr.svg" alt="Türkçe" width="28" height="20"/> <strong>Türkçe</strong>
 </p>
 
 ### 💡 Mimari ve Öne Çıkan Yetenekler
@@ -202,7 +202,7 @@ uv run ruff check .
 ---
 
 <p align="left">
-  <img src="assets/flag_gb.svg" alt="English" width="28" height="20"/>
+  <img src="assets/flag_gb.svg" alt="English" width="28" height="20"/> <strong>English</strong>
 </p>
 
 ### 💡 Architecture and Core Capabilities
