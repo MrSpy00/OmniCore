@@ -1419,7 +1419,7 @@ class CognitiveRouter:
             self._settings = self._settings.model_copy(update={"user_name": new_name})
             return (
                 f"Hoş geldin {new_name}! Bundan sonra sana {new_name} olarak hitap edeceğim.\n"
-                "Değişiklik otomatik kaydedildi (.env.local)."
+                "Degisiklik otomatik kaydedildi (.env)."
             )
         if lowered.startswith("/help"):
             return (

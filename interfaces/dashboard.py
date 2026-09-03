@@ -1050,7 +1050,7 @@ main.main-viewport {
       <div class="scroll-view">
         <div class="section-header">
           <div class="section-title" data-i18n="settings_title">Model & Güvenlik Yönetimi</div>
-          <div class="section-subtitle" data-i18n="settings_subtitle">Değişiklikler anında belleğe ve .env.local dosyasına kaydedilir.</div>
+          <div class="section-subtitle" data-i18n="settings_subtitle">Degisiklikler aninda bellege ve .env dosyasina kaydedilir.</div>
         </div>
 
         <div class="grid-cards">
@@ -1180,7 +1180,7 @@ const I18N = {
     welcome_msg: "OmniCore Yapay Zeka İşletim Sistemine Hoş Geldiniz. Doğal dilde talimat verin.",
     mic_blocked_msg: "🎙️ Mikrofon izni engellendi: Tarayıcı adres çubuğundaki kilit simgesine (🔒) tıklayıp Mikrofona izin verin.",
     settings_title: "Model & Güvenlik Yönetimi",
-    settings_subtitle: "Değişiklikler anında belleğe ve .env.local dosyasına kaydedilir.",
+    settings_subtitle: "Degisiklikler aninda bellege ve .env dosyasina kaydedilir.",
     active_model_title: "Aktif Model & Sağlayıcı",
     active_model_desc: "Kullanmak istediğiniz birincil yapay zeka modelini seçin.",
     perm_mode_title: "İzin & Yetki Modu",
@@ -1201,7 +1201,7 @@ const I18N = {
     welcome_msg: "Welcome to OmniCore Autonomous AI OS. Provide natural instructions.",
     mic_blocked_msg: "🎙️ Microphone permission blocked: Click the lock icon (🔒) in your browser address bar to allow microphone access.",
     settings_title: "Model & Security Management",
-    settings_subtitle: "Changes are instantly persisted to memory and .env.local.",
+    settings_subtitle: "Changes are instantly persisted to memory and .env.",
     active_model_title: "Active Model & Provider",
     active_model_desc: "Select the primary artificial intelligence model.",
     perm_mode_title: "Authority & Permission Policy",

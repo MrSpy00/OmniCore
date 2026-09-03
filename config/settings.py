@@ -13,11 +13,11 @@ import sys
 def _resolve_project_root() -> Path:
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
-        if (exe_dir / ".env").exists() or (exe_dir / ".env.local").exists():
+        if (exe_dir / ".env").exists():
             return exe_dir
-        if (exe_dir.parent / ".env").exists() or (exe_dir.parent / ".env.local").exists():
+        if (exe_dir.parent / ".env").exists():
             return exe_dir.parent
-        if (Path.cwd() / ".env").exists() or (Path.cwd() / ".env.local").exists():
+        if (Path.cwd() / ".env").exists():
             return Path.cwd()
         return exe_dir
     return Path(__file__).resolve().parent.parent
@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=(str(_PROJECT_ROOT / ".env"), str(_PROJECT_ROOT / ".env.local")),
+        env_file=str(_PROJECT_ROOT / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

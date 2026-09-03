@@ -1,7 +1,8 @@
-"""Live configuration manager — runtime overrides persisted to .env.local.
+"""Live configuration manager — runtime overrides persisted directly to .env.
 
-Allows changing settings from CLI commands without editing .env manually.
-Changes are applied immediately AND saved to .env.local for persistence.
+Tum ayarlar tek dosyada: .env
+Degisiklikler aninda uygulanir VE .env dosyasina kalici olarak kaydedilir.
+Ayri .env.local dosyasina ihtiyac yoktur.
 """
 
 from __future__ import annotations
@@ -15,57 +16,58 @@ from config.logging import get_logger
 
 logger = get_logger(__name__)
 
+
 def _resolve_project_root() -> Path:
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
-        if (exe_dir / ".env").exists() or (exe_dir / ".env.local").exists():
+        if (exe_dir / ".env").exists():
             return exe_dir
-        if (exe_dir.parent / ".env").exists() or (exe_dir.parent / ".env.local").exists():
+        if (exe_dir.parent / ".env").exists():
             return exe_dir.parent
-        if (Path.cwd() / ".env").exists() or (Path.cwd() / ".env.local").exists():
+        if (Path.cwd() / ".env").exists():
             return Path.cwd()
         return exe_dir
     return Path(__file__).resolve().parent.parent
 
-_PROJECT_ROOT = _resolve_project_root()
-_ENV_LOCAL = _PROJECT_ROOT / ".env.local"
 
-# All settings that users can modify at runtime, mapped to their env var names
-# and validation types.
+_PROJECT_ROOT = _resolve_project_root()
+_ENV_FILE = _PROJECT_ROOT / ".env"
+
+# Tum ayar anahtarlari: schema key -> env var, tip, aciklama
 CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
     "model": {
         "env_var": "OMNI_LLM_MODEL",
         "type": str,
-        "description": "Aktif Gemini modeli",
+        "description": "Aktif model (provider'a gore degisir)",
     },
     "provider": {
         "env_var": "LLM_PROVIDER",
         "type": str,
-        "description": "Aktif LLM provider (gemini/groq/openai/anthropic/deepseek/mistral/ollama)",
+        "description": "Aktif LLM provider",
     },
     "name": {
         "env_var": "USER_NAME",
         "type": str,
-        "description": "Görünen ad",
+        "description": "Gorunen ad",
     },
     "temperature": {
         "env_var": "LLM_TEMPERATURE",
         "type": float,
-        "description": "LLM sıcaklık değeri (0.0-2.0)",
+        "description": "LLM sicaklik degeri (0.0-2.0)",
         "min": 0.0,
         "max": 2.0,
     },
     "max_tokens": {
         "env_var": "LLM_MAX_OUTPUT_TOKENS",
         "type": int,
-        "description": "Maksimum output token sayısı",
+        "description": "Maksimum output token sayisi",
         "min": 256,
         "max": 1000000,
     },
     "approval_mode": {
         "env_var": "APPROVAL_MODE",
         "type": str,
-        "description": "Onay modu: full (tam yetki), safe (güvenli mod), ask (sorarak onay)",
+        "description": "Onay modu: full/safe/ask",
     },
     "groq_model": {
         "env_var": "GROQ_PRIMARY_MODEL",
@@ -85,42 +87,42 @@ CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
     "scheduler": {
         "env_var": "SCHEDULER_ENABLED",
         "type": bool,
-        "description": "Zamanlayıcı aç/kapat (true/false)",
+        "description": "Zamanlayici ac/kapat",
     },
     "hybrid_fallback": {
         "env_var": "HYBRID_FALLBACK_ENABLED",
         "type": bool,
-        "description": "Hybrid fallback aç/kapat (true/false)",
+        "description": "Hybrid fallback ac/kapat",
     },
     "hitl_timeout": {
         "env_var": "HITL_TIMEOUT_MINUTES",
         "type": int,
-        "description": "Onay zaman aşımı (dakika)",
+        "description": "Onay zaman asimi (dakika)",
         "min": 1,
         "max": 60,
     },
     "fallback_order": {
         "env_var": "LLM_FALLBACK_ORDER",
         "type": str,
-        "description": "Provider fallback sırası (ör: groq,gemini)",
+        "description": "Provider fallback sirasi",
     },
     "short_term_memory": {
         "env_var": "SHORT_TERM_MAX_MESSAGES",
         "type": int,
-        "description": "Kısa vadeli bellek kapasitesi",
+        "description": "Kisa vadeli bellek kapasitesi",
         "min": 10,
         "max": 500,
     },
     "long_term_results": {
         "env_var": "LONG_TERM_N_RESULTS",
         "type": int,
-        "description": "Uzun vadeli bellek sonuç sayısı",
+        "description": "Uzun vadeli bellek sonuc sayisi",
         "min": 1,
         "max": 20,
     },
 }
 
-# Model aliases for easy switching
+# Model kisa isimleri: alias -> gercek model ID
 MODEL_ALIASES: dict[str, dict[str, str]] = {
     "gemini": {
         "flash": "gemini-2.5-flash",
@@ -146,12 +148,12 @@ MODEL_ALIASES: dict[str, dict[str, str]] = {
 }
 
 
-def _read_env_local() -> dict[str, str]:
-    """Read key=value pairs from .env.local."""
+def _read_env() -> dict[str, str]:
+    """Read key=value pairs from .env."""
     result: dict[str, str] = {}
-    if not _ENV_LOCAL.exists():
+    if not _ENV_FILE.exists():
         return result
-    for line in _ENV_LOCAL.read_text(encoding="utf-8").splitlines():
+    for line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -161,20 +163,43 @@ def _read_env_local() -> dict[str, str]:
     return result
 
 
-def _write_env_local(data: dict[str, str]) -> None:
-    """Write key=value pairs to .env.local, preserving comments."""
-    lines: list[str] = [
-        "# OmniCore — User overrides (auto-generated by /config commands)",
-        "# Bu dosya otomatik oluşturulmuştur. Manuel düzenleme yapabilirsiniz.",
-        "",
-    ]
-    for key in sorted(data.keys()):
-        value = data[key]
-        if " " in value or "#" in value:
-            lines.append(f'{key}="{value}"')
+def _write_env(data: dict[str, str]) -> None:
+    """Write key=value pairs to .env, preserving comments."""
+    # Read existing .env to preserve comments
+    original_lines: list[str] = []
+    if _ENV_FILE.exists():
+        original_lines = _ENV_FILE.read_text(encoding="utf-8").splitlines()
+
+    # Rebuild file: keep comments/structure, update values
+    output_lines: list[str] = []
+    updated_keys: set[str] = set()
+
+    for line in original_lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in data:
+                value = data[key]
+                if " " in value or "#" in value:
+                    output_lines.append(f'{key}="{value}"')
+                else:
+                    output_lines.append(f"{key}={value}")
+                updated_keys.add(key)
+            else:
+                output_lines.append(line)
         else:
-            lines.append(f"{key}={value}")
-    _ENV_LOCAL.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            output_lines.append(line)
+
+    # Append any new keys not in original file
+    for key in sorted(data.keys()):
+        if key not in updated_keys:
+            value = data[key]
+            if " " in value or "#" in value:
+                output_lines.append(f'{key}="{value}"')
+            else:
+                output_lines.append(f"{key}={value}")
+
+    _ENV_FILE.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
 
 
 def resolve_model_alias(value: str, provider: str | None = None) -> str:
@@ -184,7 +209,6 @@ def resolve_model_alias(value: str, provider: str | None = None) -> str:
         resolved = MODEL_ALIASES[provider].get(value_lower)
         if resolved:
             return resolved
-    # Search all providers
     for prov_aliases in MODEL_ALIASES.values():
         resolved = prov_aliases.get(value_lower)
         if resolved:
@@ -193,23 +217,23 @@ def resolve_model_alias(value: str, provider: str | None = None) -> str:
 
 
 class LiveConfig:
-    """Runtime configuration that overlays .env with live overrides.
+    """Tek dosya tabanli runtime konfigurasyon.
 
-    Reads from: env vars → .env → .env.local
-    Writes to: .env.local only (never modifies .env)
+    Oku: env vars -> .env
+    Yaz: .env (dogrudan)
     """
 
     def __init__(self) -> None:
-        self._overrides: dict[str, str] = _read_env_local()
+        self._overrides: dict[str, str] = _read_env()
         self._apply_env_overrides()
 
     def _apply_env_overrides(self) -> None:
-        """Apply .env.local overrides to the current process environment."""
+        """Override'lari process environment'a uygula."""
         for key, value in self._overrides.items():
             os.environ[key] = value
 
     def get(self, key: str) -> str | None:
-        """Get a config value by schema key (e.g. 'model', 'provider')."""
+        """Schema key ile deger al (ornegin 'model', 'provider')."""
         if key == "approval_mode":
             return self._overrides.get("APPROVAL_MODE") or os.environ.get("APPROVAL_MODE", "ask")
         schema = CONFIG_SCHEMA.get(key)
@@ -221,13 +245,13 @@ class LiveConfig:
         return self._overrides.get(env_var) or os.environ.get(env_var, "")
 
     def set(self, key: str, value: str) -> tuple[bool, str]:
-        """Set a config value. Returns (success, message)."""
+        """Ayar degeri ata. (basari, mesaj) doner."""
         schema = CONFIG_SCHEMA.get(key)
         if not schema:
             valid_keys = ", ".join(CONFIG_SCHEMA.keys())
-            return False, f"Geçersiz anahtar: {key}\nGeçerli anahtarlar: {valid_keys}"
+            return False, f"Gecersiz anahtar: {key}\nGecerli anahtarlar: {valid_keys}"
 
-        # Type validation & normalization
+        # Tip dogrulama ve normalizasyon
         try:
             if key == "approval_mode":
                 norm = value.lower().strip()
@@ -239,45 +263,44 @@ class LiveConfig:
                     typed_value = "ask"
             elif schema["type"] == bool:
                 normalized = value.lower().strip()
-                if normalized in ("true", "1", "yes", "evet", "aç", "ac", "on"):
+                if normalized in ("true", "1", "yes", "evet", "ac", "on"):
                     typed_value = "true"
-                elif normalized in ("false", "0", "no", "hayır", "hayir", "kapat", "off"):
+                elif normalized in ("false", "0", "no", "hayir", "kapat", "off"):
                     typed_value = "false"
                 else:
-                    return False, f"Geçersiz değer (true/false bekleniyor): {value}"
+                    return False, f"Gecersiz deger (true/false): {value}"
             elif schema["type"] == int:
                 typed_value = str(int(value))
                 min_val = schema.get("min")
                 max_val = schema.get("max")
                 int_val = int(typed_value)
                 if min_val is not None and int_val < min_val:
-                    return False, f"Değer çok düşük: {int_val} (min: {min_val})"
+                    return False, f"Deger cok dusuk: {int_val} (min: {min_val})"
                 if max_val is not None and int_val > max_val:
-                    return False, f"Değer çok yüksek: {int_val} (max: {max_val})"
+                    return False, f"Deger cok yuksek: {int_val} (max: {max_val})"
             elif schema["type"] == float:
                 typed_value = str(float(value))
                 min_val = schema.get("min")
                 max_val = schema.get("max")
                 float_val = float(typed_value)
                 if min_val is not None and float_val < min_val:
-                    return False, f"Değer çok düşük: {float_val} (min: {min_val})"
+                    return False, f"Deger cok dusuk: {float_val} (min: {min_val})"
                 if max_val is not None and float_val > max_val:
-                    return False, f"Değer çok yüksek: {float_val} (max: {max_val})"
+                    return False, f"Deger cok yuksek: {float_val} (max: {max_val})"
             else:
                 typed_value = value.strip()
         except (ValueError, TypeError) as exc:
-            return False, f"Geçersiz değer tipi: {exc}"
+            return False, f"Gecersiz deger tipi: {exc}"
 
         env_var = schema["env_var"]
         if not env_var:
-            # Runtime-only setting
-            return True, f"✅ {key} = {typed_value} (runtime only)"
+            return True, f"✅ {key} = {typed_value} (sadece runtime)"
 
-        # Save to overrides
+        # Kaydet
         self._overrides[env_var] = typed_value
         os.environ[env_var] = typed_value
 
-        # If setting 'model', also persist provider-specific variables
+        # Model degistirilirse provider'a gore ilgili degiskeni de guncelle
         if key == "model":
             active_p = self._overrides.get("LLM_PROVIDER") or os.environ.get("LLM_PROVIDER", "gemini")
             if active_p == "groq" or "/" in typed_value or "llama" in typed_value.lower():
@@ -289,7 +312,7 @@ class LiveConfig:
                 self._overrides["OMNI_LLM_MODEL"] = typed_value
                 os.environ["OMNI_LLM_MODEL"] = typed_value
 
-        _write_env_local(self._overrides)
+        _write_env(self._overrides)
 
         try:
             from config.settings import invalidate_settings_cache
@@ -298,10 +321,10 @@ class LiveConfig:
             pass
 
         logger.info("config.updated", key=key, env_var=env_var, value=typed_value)
-        return True, f"✅ {key} = {typed_value} (kaydedildi: .env.local)"
+        return True, f"✅ {key} = {typed_value}"
 
     def set_model_for_provider(self, provider: str, model_id: str) -> tuple[bool, str]:
-        """Set and persist the model for a specific provider in .env.local."""
+        """Belirli bir provider icin model ata ve .env'ye kaydet."""
         p = provider.lower().strip()
         var_map = {
             "gemini": "OMNI_LLM_MODEL",
@@ -321,7 +344,7 @@ class LiveConfig:
         elif p == "gemini":
             self._overrides["OMNI_LLM_MODEL"] = model_id
             os.environ["OMNI_LLM_MODEL"] = model_id
-        _write_env_local(self._overrides)
+        _write_env(self._overrides)
 
         try:
             from config.settings import invalidate_settings_cache
@@ -330,27 +353,26 @@ class LiveConfig:
             pass
 
         logger.info("config.provider_model_updated", provider=p, var=target_var, model=model_id)
-        msg = f"✅ {p.capitalize()} modeli '{model_id}' olarak güncellendi ve .env.local dosyasına kalıcı olarak kaydedildi."
-        return True, msg
+        return True, f"✅ {p.capitalize()} modeli '{model_id}' olarak guncellendi."
 
     def show(self) -> str:
-        """Show all configurable settings with current values."""
-        lines = ["⚙️  Yapılandırma Ayarları:\n"]
+        """Tum ayarlari goster."""
+        lines = ["⚙️  Yapilandirma Ayarlari:\n"]
         for key, schema in CONFIG_SCHEMA.items():
             env_var = schema.get("env_var")
             if not env_var:
                 continue
-            current = self._overrides.get(env_var) or os.environ.get(env_var, "(varsayılan)")
+            current = self._overrides.get(env_var) or os.environ.get(env_var, "(varsayilan)")
             desc = schema["description"]
             lines.append(f"  {key:<20} = {current:<25} # {desc}")
         lines.append(
-            "\n💡 Değiştirmek için: /config set <anahtar> <değer>\n"
-            "💡 Değeri görmek için: /config get <anahtar>"
+            "\n💡 Degistirmek icin: /config set <anahtar> <deger>\n"
+            "💡 Degeri gormek icin: /config get <anahtar>"
         )
         return "\n".join(lines)
 
     def get_env_value(self, env_var: str) -> str | None:
-        """Get a raw environment variable value."""
+        """Ham environment variable degeri al."""
         return self._overrides.get(env_var) or os.environ.get(env_var)
 
 
@@ -359,7 +381,7 @@ _live_config: LiveConfig | None = None
 
 
 def get_live_config() -> LiveConfig:
-    """Get or create the singleton LiveConfig instance."""
+    """LiveConfig singleton'ini al veya olustur."""
     global _live_config
     if _live_config is None:
         _live_config = LiveConfig()

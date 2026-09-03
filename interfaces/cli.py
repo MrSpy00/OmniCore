@@ -1041,7 +1041,7 @@ class CLIGateway:
             success, msg = live_config.set_model_for_provider(provider, resolved)
             print(f"\n{msg}")
             if success:
-                print(f"  📁 Kalıcı kayıt: .env.local ({provider}_model = {resolved})")
+                print(f"  📁 Kalici kayit: .env ({provider}_model = {resolved})")
                 self._refresh_settings_on_router()
 
     def _refresh_settings_on_router(self) -> None:
