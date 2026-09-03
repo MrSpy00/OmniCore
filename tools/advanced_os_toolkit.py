@@ -375,62 +375,114 @@ async def _clipboard_restore_action(tool: OsClipboardHistoryManager, index) -> T
 class WebPlayYoutubeVideoVisible(BaseTool):
     name = "web_play_youtube_video_visible"
     description = (
-        "Search YouTube for a video, find the first result, navigate to it "
-        "and play it. Uses user's default browser (Chrome/Edge). "
-        "Handles ads automatically. "
-        "Parameters: query (search term or YouTube URL)."
+        "Full YouTube control: search, play, seek, pause, volume, fullscreen, "
+        "subscribe, like. Uses user's default browser. Auto-skips ads. "
+        "Parameters: query (search term/URL), action (play|seek|pause|resume|"
+        "mute|unmute|volume_up|volume_down|fullscreen|next|previous|"
+        "speed_up|speed_down|normal_speed|pip|like|subscribe|channel), "
+        "time (for seek: '1:30', 'orta', '%50'), channel_name (for channel action)."
     )
     is_destructive = False
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
         query = str(self._first_param(params, "query", "search", "video", "song", "url", "value", default=""))
-        if not query:
+        action = str(self._first_param(params, "action", default="play") or "play").lower()
+        time_str = str(self._first_param(params, "time", "timestamp", "seek_to", default="") or "")
+        channel_name = str(self._first_param(params, "channel_name", "channel", "kanal", default="") or "")
+
+        no_query_actions = (
+            "pause",
+            "resume",
+            "mute",
+            "unmute",
+            "fullscreen",
+            "next",
+            "previous",
+            "speed_up",
+            "speed_down",
+            "normal_speed",
+            "pip",
+            "like",
+            "subscribe",
+        )
+        if not query and action not in no_query_actions:
             return self._failure("query is required")
 
-        # If it's already a YouTube URL, open directly
-        if "youtube.com/" in query or "youtu.be/" in query:
-            url = query if query.startswith("http") else f"https://{query}"
-            return await self._playwright_open_url(url)
-
-        # Search YouTube, find first video, navigate and play
-        return await self._playwright_youtube_search_and_play(query)
-
-    async def _playwright_open_url(self, url: str) -> ToolOutput:
-        """Open a YouTube URL in user's default browser."""
-        try:
-            from tools.browser_helpers import launch_user_browser
-        except ImportError:
-            return self._failure("browser_helpers modulu bulunamadi")
-        try:
-            pw, browser, page = await launch_user_browser(headless=False)
-            try:
-                await page.goto(url, timeout=30000)
-                return self._success(f"YouTube acildi: {url}", data={"url": url})
-            finally:
-                pass  # Keep browser open
-        except Exception as exc:
-            return self._failure(f"YouTube acilamadi: {exc}")
-
-    async def _playwright_youtube_search_and_play(self, query: str) -> ToolOutput:
-        """Search YouTube using user's browser, find video, play it."""
         try:
             from tools.browser_helpers import (
                 launch_user_browser,
+                smart_youtube_channel_and_play,
                 smart_youtube_play,
+                youtube_control,
+                youtube_seek,
             )
         except ImportError:
             return self._failure("browser_helpers modulu bulunamadi")
+
         try:
             pw, browser, page = await launch_user_browser(headless=False)
             try:
-                result = await smart_youtube_play(page, query)
-                if result.get("success"):
-                    return self._success(
-                        f"YouTube video baslatildi: '{result['title']}'",
-                        data=result,
-                    )
-                return self._failure(result.get("error", "YouTube hatasi"))
+                # Control actions (don't need to search)
+                control_actions = (
+                    "pause",
+                    "resume",
+                    "mute",
+                    "unmute",
+                    "fullscreen",
+                    "next",
+                    "previous",
+                    "speed_up",
+                    "speed_down",
+                    "normal_speed",
+                    "pip",
+                    "like",
+                    "subscribe",
+                    "toggle",
+                    "volume_up",
+                    "volume_down",
+                )
+                if action in control_actions:
+                    result = await youtube_control(page, action)
+                    return self._success(result.get("message", action), data=result)
+
+                if action == "seek" and time_str:
+                    result = await youtube_seek(page, time_str)
+                    return self._success(f"Video {time_str} konumuna atlandi", data=result)
+
+                if action == "channel" and channel_name:
+                    result = await smart_youtube_channel_and_play(page, channel_name)
+                    if result.get("success"):
+                        return self._success(
+                            f"Kanal '{channel_name}' son video: '{result['title']}'",
+                            data=result,
+                        )
+                    return self._failure(result.get("error", "Kanal hatasi"))
+
+                # Default: search and play
+                if query:
+                    if "youtube.com/" in query or "youtu.be/" in query:
+                        url = query if query.startswith("http") else f"https://{query}"
+                        await page.goto(url, timeout=30000)
+                        return self._success(f"YouTube acildi: {url}", data={"url": url})
+
+                    result = await smart_youtube_play(page, query)
+                    if result.get("success"):
+                        # If seek time specified, seek after play
+                        if time_str:
+                            await asyncio.sleep(1)
+                            seek_result = await youtube_seek(page, time_str)
+                            return self._success(
+                                f"Video: '{result['title']}' ({time_str} konumuna atlandi)",
+                                data={**result, "seek": seek_result},
+                            )
+                        return self._success(
+                            f"YouTube video baslatildi: '{result['title']}'",
+                            data=result,
+                        )
+                    return self._failure(result.get("error", "YouTube hatasi"))
+
+                return self._failure(f"Bilinmeyen eylem: {action}")
             finally:
                 pass  # Keep browser open
         except Exception as exc:

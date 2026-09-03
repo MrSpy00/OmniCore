@@ -367,3 +367,294 @@ async def smart_youtube_channel_and_play(page: Any, channel_name: str) -> dict[s
         "channel": channel_name,
         "status": "playing",
     }
+
+
+# ---------------------------------------------------------------------------
+# YouTube Kontrol Fonksiyonlari
+# ---------------------------------------------------------------------------
+
+
+async def youtube_seek(page: Any, time_str: str) -> dict[str, Any]:
+    """Seek to a specific time in a YouTube video.
+
+    time_str: "1:30", "10:25", "1:30:00", "orta", "bas", "son", "yuzde50"
+    """
+    # Parse time string to seconds
+    seconds = _parse_time_to_seconds(time_str)
+    if seconds is None and time_str.lower() not in ("orta", "bas", "son"):
+        return {"success": False, "error": f"Geçersiz zaman: {time_str}"}
+
+    # Get video duration
+    duration = await page.evaluate("() => { const v = document.querySelector('video'); return v ? v.duration : 0; }")
+    if duration <= 0:
+        return {"success": False, "error": "Video oynatıcı bulunamadı veya video henüz yüklenmedi"}
+
+    # Handle relative times
+    ts = time_str.lower().strip()
+    if ts == "orta":
+        seconds = duration / 2
+    elif ts == "bas":
+        seconds = 0
+    elif ts == "son":
+        seconds = max(0, duration - 5)
+    elif ts.startswith("yuzde") or ts.startswith("%"):
+        pct = float(ts.replace("yuzde", "").replace("%", "")) / 100
+        seconds = duration * pct
+
+    # Seek
+    await page.evaluate(f"() => {{ const v = document.querySelector('video'); if(v) v.currentTime = {seconds}; }}")
+    await asyncio.sleep(0.5)
+
+    # Ensure playing
+    is_paused = await page.evaluate("() => { const v = document.querySelector('video'); return v ? v.paused : true; }")
+    if is_paused:
+        await page.evaluate("() => { const v = document.querySelector('video'); if(v) v.play(); }")
+
+    await _smart_skip_youtube_ad(page)
+
+    mins = int(seconds // 60)
+    secs = int(seconds % 60)
+    return {
+        "success": True,
+        "action": "seek",
+        "time": f"{mins}:{secs:02d}",
+        "total_duration": f"{int(duration // 60)}:{int(duration % 60):02d}",
+    }
+
+
+async def youtube_control(page: Any, action: str) -> dict[str, Any]:
+    """Control YouTube video playback.
+
+    action: play, pause, toggle, fullscreen, mute, unmute, volume_up,
+            volume_down, next, previous, speed_up, speed_down, normal_speed,
+            pip (picture-in-picture), like, subscribe
+    """
+    action = action.lower().strip()
+
+    if action in ("play", "devam", "oynat"):
+        await page.evaluate("() => { const v = document.querySelector('video'); if(v) v.play(); }")
+        return {"success": True, "action": "play", "message": "Video oynatılıyor"}
+
+    elif action in ("pause", "duraklat", "dur"):
+        await page.evaluate("() => { const v = document.querySelector('video'); if(v) v.pause(); }")
+        return {"success": True, "action": "pause", "message": "Video duraklatıldı"}
+
+    elif action in ("toggle", "degistir", "oynatduraklat"):
+        await page.evaluate(
+            "() => { const v = document.querySelector('video'); if(v) { v.paused ? v.play() : v.pause(); } }"
+        )
+        state = await page.evaluate(
+            "() => { const v = document.querySelector('video'); "
+            "return v ? (v.paused ? 'duraklatildi' : 'oynatiliyor') : 'bulunamadi'; }"
+        )
+        return {"success": True, "action": "toggle", "message": f"Video {state}"}
+
+    elif action in ("fullscreen", "tam_ekran", "ekran"):
+        await page.evaluate(
+            "() => { const v = document.querySelector('video'); "
+            "if(v) { v.requestFullscreen ? v.requestFullscreen() : "
+            "v.webkitRequestFullscreen ? v.webkitRequestFullscreen() : null; } }"
+        )
+        return {"success": True, "action": "fullscreen", "message": "Tam ekran modu"}
+
+    elif action in ("mute", "sessiz"):
+        await page.evaluate("() => { const v = document.querySelector('video'); if(v) v.muted = true; }")
+        return {"success": True, "action": "mute", "message": "Sessize alındı"}
+
+    elif action in ("unmute", "sesli"):
+        await page.evaluate("() => { const v = document.querySelector('video'); if(v) v.muted = false; }")
+        return {"success": True, "action": "unmute", "message": "Ses açıldı"}
+
+    elif action in ("volume_up", "ses_ac", "ses_artir"):
+        await page.evaluate(
+            "() => { const v = document.querySelector('video'); if(v) v.volume = Math.min(1.0, v.volume + 0.1); }"
+        )
+        vol_js = "() => { const v = document.querySelector('video'); return v ? Math.round(v.volume * 100) : 0; }"
+        vol = await page.evaluate(vol_js)
+        return {"success": True, "action": "volume_up", "volume": f"%{vol}"}
+
+    elif action in ("volume_down", "ses_kis", "ses_azalt"):
+        await page.evaluate(
+            "() => { const v = document.querySelector('video'); if(v) v.volume = Math.max(0.0, v.volume - 0.1); }"
+        )
+        vol_js = "() => { const v = document.querySelector('video'); return v ? Math.round(v.volume * 100) : 0; }"
+        vol = await page.evaluate(vol_js)
+        return {"success": True, "action": "volume_down", "volume": f"%{vol}"}
+
+    elif action in ("next", "sonraki"):
+        next_btn = await page.query_selector("a.ytp-next-button, button.ytp-next-button")
+        if next_btn:
+            await next_btn.click()
+            return {"success": True, "action": "next", "message": "Sonraki videoya geçildi"}
+        return {"success": False, "error": "Sonraki butonu bulunamadı"}
+
+    elif action in ("previous", "onceki"):
+        prev_btn = await page.query_selector("a.ytp-prev-button, button.ytp-prev-button")
+        if prev_btn:
+            await prev_btn.click()
+            return {"success": True, "action": "previous", "message": "Önceki videoya geçildi"}
+        return {"success": False, "error": "Önceki butonu bulunamadı"}
+
+    elif action in ("speed_up", "hizlan"):
+        await page.evaluate(
+            "() => { const v = document.querySelector('video'); "
+            "if(v) v.playbackRate = Math.min(2.0, v.playbackRate + 0.25); }"
+        )
+        speed_js = "() => { const v = document.querySelector('video'); return v ? v.playbackRate : 1; }"
+        speed = await page.evaluate(speed_js)
+        return {"success": True, "action": "speed_up", "speed": f"{speed}x"}
+
+    elif action in ("speed_down", "yavasla"):
+        await page.evaluate(
+            "() => { const v = document.querySelector('video'); "
+            "if(v) v.playbackRate = Math.max(0.25, v.playbackRate - 0.25); }"
+        )
+        speed_js = "() => { const v = document.querySelector('video'); return v ? v.playbackRate : 1; }"
+        speed = await page.evaluate(speed_js)
+        return {"success": True, "action": "speed_down", "speed": f"{speed}x"}
+
+    elif action in ("normal_speed", "normal", "hiz_sifirla"):
+        await page.evaluate("() => { const v = document.querySelector('video'); if(v) v.playbackRate = 1.0; }")
+        return {"success": True, "action": "normal_speed", "speed": "1x"}
+
+    elif action in ("pip", "picture_in_picture", "kucuk_ekran"):
+        await page.evaluate(
+            "() => { const v = document.querySelector('video'); "
+            "if(v && v.requestPictureInPicture) v.requestPictureInPicture(); }"
+        )
+        return {"success": True, "action": "pip", "message": "Picture-in-Picture modu"}
+
+    elif action in ("like", "begen"):
+        like_sel = "ytd-toggle-button-renderer#segmented-like-button button, button[aria-label*='Begen']"
+        like_btn = await page.query_selector(like_sel)
+        if like_btn:
+            await like_btn.click()
+            return {"success": True, "action": "like", "message": "Video beğenildi"}
+        return {"success": False, "error": "Beğen butonu bulunamadı"}
+
+    elif action in ("subscribe", "abone", "abone_ol"):
+        sub_btn = await page.query_selector("ytd-subscribe-button-renderer button, #subscribe-button button")
+        if sub_btn:
+            await sub_btn.click()
+            return {"success": True, "action": "subscribe", "message": "Kanala abone olundu"}
+        return {"success": False, "error": "Abone butonu bulunamadı"}
+
+    return {"success": False, "error": f"Bilinmeyen video kontrolü: {action}"}
+
+
+def _parse_time_to_seconds(time_str: str) -> float | None:
+    """Parse time string to seconds. Supports: '1:30', '10:25', '1:30:00', '90', '1.5dakika'."""
+    import re
+
+    ts = time_str.lower().strip()
+
+    # Try "X dakika" / "X saniye" format
+    m = re.match(r"(\d+(?:\.\d+)?)\s*dakika", ts)
+    if m:
+        return float(m.group(1)) * 60
+    m = re.match(r"(\d+(?:\.\d+)?)\s*saniye", ts)
+    if m:
+        return float(m.group(1))
+
+    # Try "HH:MM:SS" or "MM:SS" or "SS" format
+    parts = ts.split(":")
+    if len(parts) == 3:
+        try:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        except ValueError:
+            return None
+    elif len(parts) == 2:
+        try:
+            return int(parts[0]) * 60 + float(parts[1])
+        except ValueError:
+            return None
+    elif len(parts) == 1:
+        try:
+            return float(ts)
+        except ValueError:
+            return None
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Genel Tarayici Kontrol
+# ---------------------------------------------------------------------------
+
+
+async def browser_action(page: Any, action: str, **kwargs: Any) -> dict[str, Any]:
+    """General browser page actions beyond YouTube.
+
+    Actions: scroll_up, scroll_down, go_back, go_forward, refresh,
+             get_url, get_title, wait, close_tab, new_tab, switch_tab,
+             select, hover, focus
+    """
+    action = action.lower().strip()
+
+    if action in ("scroll_up", "yukari_kaydir"):
+        delta = kwargs.get("delta", 500)
+        await page.mouse.wheel(0, -delta)
+        return {"success": True, "action": "scroll_up", "delta": delta}
+
+    elif action in ("scroll_down", "asagi_kaydir"):
+        delta = kwargs.get("delta", 500)
+        await page.mouse.wheel(0, delta)
+        return {"success": True, "action": "scroll_down", "delta": delta}
+
+    elif action in ("go_back", "geri"):
+        await page.go_back()
+        return {"success": True, "action": "go_back", "url": page.url}
+
+    elif action in ("go_forward", "ileri"):
+        await page.go_forward()
+        return {"success": True, "action": "go_forward", "url": page.url}
+
+    elif action in ("refresh", "yenile", "yeniden_yukle"):
+        await page.reload()
+        return {"success": True, "action": "refresh", "url": page.url}
+
+    elif action in ("get_url", "url"):
+        return {"success": True, "action": "get_url", "url": page.url}
+
+    elif action in ("get_title", "baslik"):
+        title = await page.title()
+        return {"success": True, "action": "get_title", "title": title}
+
+    elif action in ("wait", "bekle"):
+        seconds = kwargs.get("seconds", 2)
+        await asyncio.sleep(seconds)
+        return {"success": True, "action": "wait", "seconds": seconds}
+
+    elif action in ("new_tab", "yeni_sekme"):
+        new_page = await page.context.new_page()
+        url = kwargs.get("url", "about:blank")
+        if url and url != "about:blank":
+            await new_page.goto(url, timeout=30000)
+        return {"success": True, "action": "new_tab", "url": new_page.url}
+
+    elif action in ("close_tab", "sekme_kapat"):
+        await page.close()
+        return {"success": True, "action": "close_tab"}
+
+    elif action in ("select", "sec"):
+        selector = kwargs.get("selector", "")
+        value = kwargs.get("value", "")
+        if selector and value:
+            await page.select_option(selector, value)
+            return {"success": True, "action": "select", "selector": selector}
+        return {"success": False, "error": "selector ve value gerekli"}
+
+    elif action in ("hover", "ustune_gel"):
+        selector = kwargs.get("selector", "")
+        if selector:
+            await page.hover(selector)
+            return {"success": True, "action": "hover", "selector": selector}
+        return {"success": False, "error": "selector gerekli"}
+
+    elif action in ("focus", "odaklan"):
+        selector = kwargs.get("selector", "")
+        if selector:
+            await page.focus(selector)
+            return {"success": True, "action": "focus", "selector": selector}
+        return {"success": False, "error": "selector gerekli"}
+
+    return {"success": False, "error": f"Bilinmeyen tarayici eylemi: {action}"}

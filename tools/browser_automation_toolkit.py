@@ -218,10 +218,12 @@ class BrowserPlaywrightInteract(BaseTool):
 
     name = "browser_interact"
     description = (
-        "Interact with web pages using user's default browser (Chrome/Edge). "
+        "Interact with web pages using user's default browser. "
         "Actions: navigate, click, fill, scroll, screenshot, get_text, "
-        "youtube_search, open_and_play, wait_for. "
-        "Parameters: url, action, selector, value, save_path, timeout."
+        "youtube_search, open_and_play, wait_for, scroll_up, scroll_down, "
+        "go_back, go_forward, refresh, get_url, get_title, new_tab, "
+        "select, hover, focus. "
+        "Parameters: url, action, selector, value, save_path, timeout, delta."
     )
     is_destructive = False
 
@@ -235,9 +237,53 @@ class BrowserPlaywrightInteract(BaseTool):
         timeout = int(params.get("timeout", 30000))
 
         try:
-            from tools.browser_helpers import launch_user_browser, smart_youtube_play
+            from tools.browser_helpers import (
+                browser_action,
+                launch_user_browser,
+                smart_youtube_play,
+            )
         except ImportError:
             return self._failure("browser_helpers modulu bulunamadi")
+
+        # General browser actions (don't need URL)
+        general_actions = (
+            "scroll_up",
+            "scroll_down",
+            "go_back",
+            "go_forward",
+            "refresh",
+            "get_url",
+            "get_title",
+            "new_tab",
+            "close_tab",
+            "select",
+            "hover",
+            "focus",
+            "wait",
+        )
+        if action in general_actions:
+            try:
+                pw, browser, page = await launch_user_browser(headless=False)
+                try:
+                    result = await browser_action(
+                        page,
+                        action,
+                        selector=selector,
+                        value=value,
+                        delta=int(value) if value.isdigit() else 500,
+                        seconds=int(value) if value.isdigit() else 2,
+                        url=url,
+                    )
+                    if result.get("success"):
+                        return self._success(
+                            result.get("message", action),
+                            data=result,
+                        )
+                    return self._failure(result.get("error", "Hata"))
+                finally:
+                    pass
+            except Exception as exc:
+                return self._failure(f"Tarayici hatasi: {exc}")
 
         try:
             pw, browser, page = await launch_user_browser(headless=False)
@@ -285,10 +331,15 @@ class BrowserPlaywrightInteract(BaseTool):
                     await page.wait_for_selector(selector, timeout=timeout)
                     return self._success(f"Element bulundu: {selector}")
                 else:
-                    actions = "navigate, click, fill, scroll, screenshot, get_text, youtube_search, open_and_play"
-                    return self._failure(f"Bilinmeyen action: {action}. Kullanilabilir: {actions}")
+                    actions_list = (
+                        "navigate, click, fill, scroll, screenshot, get_text, "
+                        "youtube_search, open_and_play, wait_for, scroll_up, "
+                        "scroll_down, go_back, go_forward, refresh, get_url, "
+                        "get_title, new_tab, select, hover, focus"
+                    )
+                    return self._failure(f"Bilinmeyen action: {action}. Kullanilabilir: {actions_list}")
             finally:
-                pass  # Keep browser open
+                pass
         except Exception as exc:
             return self._failure(f"Tarayici hatasi: {exc}")
 
