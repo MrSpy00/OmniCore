@@ -26,7 +26,7 @@ except Exception:  # pragma: no cover - optional backend
 
 try:
     import pyautogui
-except (ImportError, Exception):
+except (ImportError, Exception, SystemExit):
     pyautogui = None  # type: ignore[assignment]
 
 from PIL import Image  # type: ignore[import-not-found]

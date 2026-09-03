@@ -13,7 +13,7 @@ import mss  # type: ignore[import-not-found]
 
 try:
     import pyautogui
-except (ImportError, Exception):
+except (ImportError, Exception, SystemExit):
     pyautogui = None  # type: ignore[assignment]
 
 from google import genai

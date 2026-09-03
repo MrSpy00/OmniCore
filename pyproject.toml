@@ -116,6 +116,7 @@ select = ["E", "F", "I", "N", "W", "UP"]
 "tools/base.py" = ["E501"]  # PowerShell script strings
 "tools/smart_clipboard_toolkit.py" = ["E501"]  # PowerShell toast template strings
 "tools/advanced_os_toolkit.py" = ["E501"]  # PowerShell automation commands
+"workspace/**" = ["I001", "W292"]  # Workspace test helpers — skip import sort/newline rules
 
 [tool.mypy]
 python_version = "3.12"
