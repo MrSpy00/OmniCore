@@ -490,6 +490,27 @@ class CognitiveRouter:
                 )
                 return _LocalLLMResponse("Mistral provider: langchain-mistralai is not installed.")
 
+        # --- Genel OpenAI-uyumlu provider handler ---
+        # xai, cohere, ai21, fireworks, together, deepinfra, novita, cerebras,
+        # sambanova, hyperbolic, nebius, siliconflow, nvidia, lepton, openrouter,
+        # moonshot, zhipu, minimax, qwen, stepfun
+        from config.settings import OPENAI_COMPATIBLE_PROVIDERS
+        compat_base_url = OPENAI_COMPATIBLE_PROVIDERS.get(normalized)
+        if compat_base_url:
+            try:
+                from langchain_openai import ChatOpenAI
+                api_key = getattr(settings, f"{normalized}_api_key", "")
+                model = getattr(settings, f"{normalized}_model", "")
+                return ChatOpenAI(
+                    model=model,
+                    api_key=SecretStr(api_key) if api_key else None,
+                    base_url=compat_base_url,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_output_tokens,
+                )
+            except ImportError:
+                return _LocalLLMResponse(f"{normalized} provider: langchain-openai is not installed.")
+
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
     def _select_initial_provider(self, settings) -> str:
@@ -505,16 +526,12 @@ class CognitiveRouter:
             return any(key.strip() for key in cfg.groq_api_keys)
         if normalized == "gemini":
             return any(key.strip() for key in cfg.google_api_keys)
-        if normalized == "openai":
-            return bool(getattr(cfg, "openai_api_key", "").strip())
-        if normalized == "anthropic":
-            return bool(getattr(cfg, "anthropic_api_key", "").strip())
-        if normalized == "deepseek":
-            return bool(getattr(cfg, "deepseek_api_key", "").strip())
-        if normalized == "mistral":
-            return bool(getattr(cfg, "mistral_api_key", "").strip())
         if normalized == "ollama":
             return getattr(cfg, "ollama_enabled", False)
+        # Tek API key ile provider'lar
+        api_key_attr = f"{normalized}_api_key"
+        if hasattr(cfg, api_key_attr):
+            return bool(getattr(cfg, api_key_attr, "").strip())
         return False
 
     def _find_alternate_provider(self, current: str) -> str | None:

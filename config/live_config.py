@@ -128,11 +128,19 @@ MODEL_ALIASES: dict[str, dict[str, str]] = {
         "flash": "gemini-2.5-flash",
         "lite": "gemini-2.5-flash-lite",
         "pro": "gemini-2.5-pro",
-        "2.5-flash": "gemini-2.5-flash",
-        "2.5-lite": "gemini-2.5-flash-lite",
-        "2.5-pro": "gemini-2.5-pro",
-        "2.0-flash": "gemini-2.5-flash",
-        "2.0-flash-lite": "gemini-2.5-flash-lite",
+    },
+    "openai": {
+        "4o": "gpt-4o",
+        "4o-mini": "gpt-4o-mini",
+        "4.1": "gpt-4.1",
+        "4.1-mini": "gpt-4.1-mini",
+        "o3": "o3-mini",
+        "o4": "o4-mini",
+    },
+    "anthropic": {
+        "opus": "claude-opus-4-5",
+        "sonnet": "claude-sonnet-4-5",
+        "haiku": "claude-haiku-3-5",
     },
     "groq": {
         "20b": "openai/gpt-oss-20b",
@@ -144,6 +152,37 @@ MODEL_ALIASES: dict[str, dict[str, str]] = {
         "deepseek": "deepseek-r1-distill-llama-70b",
         "qwen": "qwen-qwq-32b",
         "scout": "meta-llama/llama-4-scout-17b-16e-instruct",
+    },
+    "xai": {
+        "grok3": "grok-3",
+        "grok": "grok-3-mini",
+    },
+    "deepseek": {
+        "chat": "deepseek-chat",
+        "r1": "deepseek-reasoner",
+    },
+    "mistral": {
+        "large": "mistral-large-latest",
+        "small": "mistral-small-latest",
+        "codex": "codestral-latest",
+    },
+    "cohere": {
+        "r+": "command-r-plus",
+        "r": "command-r",
+    },
+    "qwen": {
+        "max": "qwen-max",
+        "plus": "qwen-plus",
+        "turbo": "qwen-turbo",
+        "long": "qwen-long",
+    },
+    "ollama": {
+        "llama": "llama3.2",
+        "mistral": "mistral",
+        "gemma": "gemma2",
+        "qwen": "qwen2.5",
+        "phi": "phi4",
+        "r1": "deepseek-r1",
     },
 }
 
