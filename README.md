@@ -1,9 +1,8 @@
 <p align="center">
-  <img src="assets/OmniCore-bounce.png" alt="OmniCore Sovereign AI OS Logo" width="320"/>
+  <img src="assets/OmniCore-bounce.png" alt="OmniCore Logo" width="600"/>
 </p>
 
 <h1 align="center">OmniCore — Otonom Bilişsel İşletim Sistemi Asistanı Mimarisi</h1>
-<p align="center"><strong>Sovereign Autonomous Cognitive AI Operating System Architecture</strong></p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12+-3776AB.svg?style=flat&logo=python&logoColor=white" alt="Python 3.12+"/>
@@ -13,9 +12,6 @@
   <img src="https://img.shields.io/badge/License-MIT-gray.svg?style=flat" alt="License MIT"/>
 </p>
 
-<p align="center">
-  <img src="assets/OmniCore-bounce.png" alt="OmniCore Logo" width="600"/>
-</p>
 
 **OmniCore**, işletim sistemi düzeyinde mutlak kontrol, otonom süreç otomasyonu ve yapay zeka tabanlı yönetim sağlayan kurumsal düzeyde bilişsel bir işletim sistemi (OS) asistanı mimarisidir. Sistem yöneticiliği, Model Context Protocol (MCP) sunucu entegrasyonu, kendi kendini iyileştiren kod refaktörü, evrensel veritabanı inceleme, tekil kalıcı tarayıcı ve akıllı YouTube otomasyonu, donanım telemetrisi, çoklu ajan (swarm) protokolleri, siberpunk terminal telemetri ekranı (HUD), gerçek zamanlı ses akışı, güvenlik denetim araçları, kendi kendini eğiten kullanıcı Persona Sistemi, runtime skill (yetenek) sentezleme ve iki aşamalı grafik hafıza (GraphRAG) teknolojilerini tek bir çatı altında birleştirir.
 
