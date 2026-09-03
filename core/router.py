@@ -878,6 +878,14 @@ class CognitiveRouter:
             "DOGHRUDAN os_open_browser_visible veya browser_launch aracini cagir. "
             "Asla dev_glob_search ile tarayici acmaya calisma - bu dosya arama aracidir!"
         )
+        # Taste context ekle
+        taste_context = ""
+        try:
+            from memory.taste import get_taste_engine
+            taste_context = get_taste_engine().format_for_system_prompt()
+        except Exception:
+            pass
+
         return (
             f"{mandated}\n\n"
             f"{user_line}\n"
@@ -885,6 +893,7 @@ class CognitiveRouter:
             f"{tools_desc}\n\n"
             "## İlgili Hatıralar\n"
             f"{memory_context or '(yok)'}\n\n"
+            f"{taste_context}\n\n"
             "## Talimatlar\n"
             "Kullanıcı sistem verisi veya eylem istediğinde JSON plan üret.\n"
             "Araç çıktısındaki ham veriyi eksiksiz aktar.\n"
@@ -1161,6 +1170,18 @@ class CognitiveRouter:
             metadata={"user_id": user_message.user_id, "channel": user_message.channel},
         )
         await self._persist_operational_memory(user_message, reply)
+
+        # 8. Auto-learn from interaction (taste engine)
+        try:
+            from memory.taste import get_taste_engine
+            tools_used = []
+            if hasattr(self, '_last_tools_used'):
+                tools_used = self._last_tools_used
+            get_taste_engine().auto_learn_from_interaction(
+                user_message.content, reply, tools_used
+            )
+        except Exception:
+            pass
 
         return reply
 
@@ -1507,6 +1528,60 @@ class CognitiveRouter:
                 except Exception:
                     pass
             return msg
+
+        # --- TASTE ENGINE ---
+        if lowered == "/taste" or lowered.startswith("/taste "):
+            try:
+                from memory.taste import get_taste_engine, CATEGORIES
+                engine = get_taste_engine()
+                parts = content.split(" ", 2)
+
+                if lowered == "/taste":
+                    # Tum tercihleri goster
+                    all_prefs = engine.get_all()
+                    if not all_prefs:
+                        return "🧠 Henuz ogrenilmis tercih yok. Kullandikca otomatik ogrenirim.\n\nKullanilabilir kategoriler: " + ", ".join(CATEGORIES.keys())
+                    lines = ["🧠 **Ogrenilmis Tercihler:**\n"]
+                    current_cat = ""
+                    for p in all_prefs:
+                        if p["category"] != current_cat:
+                            current_cat = p["category"]
+                            cat_name = CATEGORIES.get(current_cat, current_cat)
+                            lines.append(f"\n**{cat_name}:**")
+                        conf_bar = "█" * int(p["confidence"] * 5) + "░" * (5 - int(p["confidence"] * 5))
+                        lines.append(f"  {p['key']}: {p['value']} [{conf_bar}] {p['confidence']:.0%}")
+                    return "\n".join(lines)
+
+                # /taste <category> - Belirli kategorideki tercihleri goster
+                if len(parts) >= 2:
+                    cat = parts[1].strip()
+                    if cat == "reset":
+                        deleted = engine.forget()
+                        return f"🧠 Tum tercihler sifirlandi ({deleted} tercih silindi)."
+                    if cat == "help":
+                        return (
+                            "🧠 **Taste Komutlari:**\n"
+                            "  /taste — Tum tercihleri goster\n"
+                            "  /taste <kategori> — Belirli kategorideki tercihleri goster\n"
+                            "  /taste reset — Tum tercihleri sifirla\n"
+                            "  /taste forget <kategori> <anahtar> — Belirli tercihi sil\n"
+                            "  /taste help — Bu yardimi goster\n\n"
+                            "Kategoriler: " + ", ".join(CATEGORIES.keys())
+                        )
+                    if cat in CATEGORIES:
+                        prefs = engine.get_all(cat)
+                        if not prefs:
+                            return f"🧠 '{cat}' kategorisinde henuz tercih yok."
+                        lines = [f"🧠 **{CATEGORIES.get(cat, cat)}:**\n"]
+                        for p in prefs:
+                            conf_bar = "█" * int(p["confidence"] * 5) + "░" * (5 - int(p["confidence"] * 5))
+                            lines.append(f"  {p['key']}: {p['value']} [{conf_bar}] {p['confidence']:.0%}")
+                        return "\n".join(lines)
+                    return f"bilinmeyen kategori: {cat}. /taste help icin yardima bak."
+
+                return "Kullanim: /taste veya /taste <kategori>"
+            except Exception as exc:
+                return f"Taste hatasi: {exc}"
 
         return None
 

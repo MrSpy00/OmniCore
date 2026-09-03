@@ -10,11 +10,12 @@ from tools.base import BaseTool
 
 
 class BrowserFetchPage(BaseTool):
-    """Fetch web page HTML and extract clean text content."""
+    """Fetch web page content — Playwright for JS-rendered pages, urllib fallback."""
 
     name = "browser_fetch_page"
     description = (
-        "Fetch web page URL content and extract clean readable text. "
+        "Fetch web page content with full JavaScript rendering via Playwright. "
+        "Falls back to urllib for simple pages. "
         "Parameters: url (http/https web URL)."
     )
     is_destructive = False
@@ -29,12 +30,34 @@ class BrowserFetchPage(BaseTool):
         if not url.startswith(("http://", "https://")):
             url = f"https://{url}"
 
+        # Try Playwright first (renders JavaScript)
+        try:
+            from playwright.async_api import async_playwright
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                try:
+                    await page.goto(url, timeout=20000, wait_until="domcontentloaded")
+                    text = await page.inner_text("body")
+                    clean = text[:8000] if text else ""
+                    return self._success(
+                        f"Web page fetched (Playwright) from {url}.",
+                        data={"url": url, "text": clean, "length": len(clean), "method": "playwright"},
+                    )
+                finally:
+                    await browser.close()
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # Fallback: urllib (static HTTP)
         try:
             html_text = await asyncio.to_thread(_fetch_url_html, url)
             clean_text = _extract_clean_text_from_html(html_text)
             return self._success(
-                f"Web page fetched successfully from {url}.",
-                data={"url": url, "text": clean_text[:4000], "length": len(clean_text)},
+                f"Web page fetched (urllib) from {url}.",
+                data={"url": url, "text": clean_text[:4000], "length": len(clean_text), "method": "urllib"},
             )
         except Exception as exc:
             return self._failure(f"Failed to fetch web page: {exc}")

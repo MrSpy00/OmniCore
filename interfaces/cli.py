@@ -97,8 +97,9 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/doctor", "Sistem tanılaması"),
     ("/memory", "Uzun süreli bellek önizleme"),
     ("/reset", "Konuşma geçmişini temizle"),
-    ("/hud", "Cyberpunk HUD göster"),
-    ("/commit", "Git commit yardımcısı"),
+    ("/hud", "Cyberpunk HUD goster"),
+    ("/commit", "Git commit yardimcisi"),
+    ("/taste", "Ogrenilmis tercihleri goruntule/yonet"),
 ]
 SLASH_COMMAND_NAMES = [c[0] for c in SLASH_COMMANDS]
 
@@ -420,6 +421,9 @@ _SLASH_CATEGORIES: list[tuple[str, list[tuple[str, str]]]] = [
         ("/reset", "Oturumu sıfırla"),
         ("/commit", "Git commit"),
         ("/hud", "HUD göster"),
+    ]),
+    ("🧬 Öğrenme", [
+        ("/taste", "Tercihleri gör/yonet"),
     ]),
     ("ℹ️ Yardım", [
         ("/help", "Kullanım kılavuzu"),

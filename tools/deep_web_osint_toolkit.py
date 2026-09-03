@@ -22,7 +22,7 @@ def _resolve_sandboxed(path_str: str) -> Path:
 
 class WebBypassScraper(BaseTool):
     name = "web_bypass_scraper"
-    description = "Fetch HTML using browser-like headers to bypass simple blocks."
+    description = "Fetch page content using Playwright (renders JS, bypasses simple blocks). Falls back to httpx."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
@@ -32,20 +32,33 @@ class WebBypassScraper(BaseTool):
         if not url.startswith("http"):
             url = "https://" + url
 
+        # Try Playwright first (real browser rendering)
+        try:
+            from playwright.async_api import async_playwright
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                try:
+                    await page.goto(url, timeout=25000, wait_until="domcontentloaded")
+                    html = await page.content()
+                    return self._success("HTML fetched (Playwright)", data={"url": url, "html": html[:20000], "method": "playwright"})
+                finally:
+                    await browser.close()
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # Fallback: httpx with browser-like headers
         headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            )
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         }
         try:
-            async with httpx.AsyncClient(
-                timeout=20, headers=headers, follow_redirects=True, verify=False
-            ) as client:
+            async with httpx.AsyncClient(timeout=20, headers=headers, follow_redirects=True, verify=False) as client:
                 response = await client.get(url)
                 response.raise_for_status()
             html = response.text
-            return self._success("HTML fetched", data={"url": url, "html": html[:20000]})
+            return self._success("HTML fetched (httpx)", data={"url": url, "html": html[:20000], "method": "httpx"})
         except Exception as exc:
             return self._failure(str(exc))
 
