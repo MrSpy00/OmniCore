@@ -72,9 +72,7 @@ async def test_security_audit_toolkit():
     assert "open_ports" in res_scan.data
 
     audit_tool = SecurityAuditSystem()
-    res_audit = await audit_tool.execute(
-        ToolInput(tool_name="security_audit_system", parameters={})
-    )
+    res_audit = await audit_tool.execute(ToolInput(tool_name="security_audit_system", parameters={}))
     assert res_audit.status.value == "success"
     assert "os" in res_audit.data or "platform" in res_audit.data
 

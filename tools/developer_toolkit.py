@@ -84,8 +84,7 @@ class DevRunSqliteQuery(BaseTool):
 class DevTodoTracker(BaseTool):
     name = "dev_todo_tracker"
     description = (
-        "Manage plan todos in OmniCore SQLite state. "
-        "Actions: upsert, set_status, add_dependency, list, ready."
+        "Manage plan todos in OmniCore SQLite state. Actions: upsert, set_status, add_dependency, list, ready."
     )
     is_destructive = True
 
@@ -106,10 +105,7 @@ class DevTodoTracker(BaseTool):
             }
             handler = handlers.get(action)
             if handler is None:
-                return self._failure(
-                    "Unsupported action. Use one of: upsert, set_status, "
-                    "add_dependency, list, ready"
-                )
+                return self._failure("Unsupported action. Use one of: upsert, set_status, add_dependency, list, ready")
             return await handler(tracker, params)
         except Exception as exc:
             return self._failure(f"{type(exc).__name__}: {exc}")
@@ -296,9 +292,7 @@ class AgentSpawnSubtask(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        objective = str(
-            self._first_param(params, "objective", "goal", "description", "query", default="")
-        ).strip()
+        objective = str(self._first_param(params, "objective", "goal", "description", "query", default="")).strip()
         max_subtasks = int(self._first_param(params, "max_subtasks", default=4) or 4)
         max_subtasks = max(1, min(10, max_subtasks))
 
@@ -313,13 +307,8 @@ class AgentSpawnSubtask(BaseTool):
         subtasks: list[dict] = []
         for idx, chunk in enumerate(chunks[:max_subtasks], start=1):
             lowered = chunk.lower()
-            browser_words = (
-                "browser", "tarayıcı", "tarayici", "youtube",
-                "web", "internet", "google", "site"
-            )
-            file_words = (
-                "dosya", "file", "kod", "code", "glob", "dizin", "folder"
-            )
+            browser_words = ("browser", "tarayıcı", "tarayici", "youtube", "web", "internet", "google", "site")
+            file_words = ("dosya", "file", "kod", "code", "glob", "dizin", "folder")
             search_words = ("find", "search", "bul", "ara")
             is_browser = any(w in lowered for w in browser_words)
             is_file = any(w in lowered for w in file_words)

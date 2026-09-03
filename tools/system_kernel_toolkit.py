@@ -51,9 +51,7 @@ class SysEditRegistry(BaseTool):
         if not key_path:
             return self._failure("key_path is required")
         try:
-            result = await asyncio.to_thread(
-                _registry_action, hive, key_path, value_name, action, value
-            )
+            result = await asyncio.to_thread(_registry_action, hive, key_path, value_name, action, value)
             return self._success("Registry operation completed", data=result)
         except Exception as exc:
             return self._failure(str(exc))
@@ -98,9 +96,7 @@ class SysKillTaskForcefully(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        target = str(
-            self._first_param(params, "name", "process", "pid", "target", "app", default="")
-        )
+        target = str(self._first_param(params, "name", "process", "pid", "target", "app", default=""))
         if not target:
             return self._failure("process name or PID is required")
         try:
@@ -131,12 +127,8 @@ class SysPrivilegeTriage(BaseTool):
 
 def _inspect_privileges() -> dict[str, object]:
     try:
-        priv_out = subprocess.run(
-            ["whoami", "/priv"], capture_output=True, text=True, timeout=10
-        ).stdout
-        group_out = subprocess.run(
-            ["whoami", "/groups"], capture_output=True, text=True, timeout=10
-        ).stdout
+        priv_out = subprocess.run(["whoami", "/priv"], capture_output=True, text=True, timeout=10).stdout
+        group_out = subprocess.run(["whoami", "/groups"], capture_output=True, text=True, timeout=10).stdout
         high_privs = [
             priv
             for priv in [
@@ -164,14 +156,10 @@ def _inspect_privileges() -> dict[str, object]:
 def _service_command(service: str, action: str) -> str:
     if action == "restart":
         subprocess.run(["sc", "stop", service], capture_output=True, text=True, timeout=15)
-        completed = subprocess.run(
-            ["sc", "start", service], capture_output=True, text=True, timeout=15
-        )
+        completed = subprocess.run(["sc", "start", service], capture_output=True, text=True, timeout=15)
         return completed.stdout + completed.stderr
     if action in {"start", "stop", "query"}:
-        completed = subprocess.run(
-            ["sc", action, service], capture_output=True, text=True, timeout=15
-        )
+        completed = subprocess.run(["sc", action, service], capture_output=True, text=True, timeout=15)
         return completed.stdout + completed.stderr
     raise ValueError("Unsupported service action")
 
@@ -183,9 +171,7 @@ def _registry_action(
     action: str,
     value: object,
 ) -> dict[str, object]:
-    hive = getattr(
-        winreg, "HKEY_CURRENT_USER" if hive_name.upper() == "HKCU" else "HKEY_LOCAL_MACHINE"
-    )
+    hive = getattr(winreg, "HKEY_CURRENT_USER" if hive_name.upper() == "HKCU" else "HKEY_LOCAL_MACHINE")
     if action == "read":
         with winreg.OpenKey(hive, key_path) as key:
             data, reg_type = winreg.QueryValueEx(key, value_name)
@@ -226,11 +212,7 @@ def _wifi_passwords() -> list[dict[str, str]]:
 
 def _control_hardware(target: str, value: int) -> str:
     if target == "brightness":
-        command = (
-            "(Get-WmiObject -Namespace root/WMI "
-            "-Class WmiMonitorBrightnessMethods)."
-            f"WmiSetBrightness(1,{value})"
-        )
+        command = f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{value})"
         completed = subprocess.run(
             ["powershell", "-NoProfile", "-Command", command],
             capture_output=True,

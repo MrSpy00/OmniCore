@@ -259,11 +259,7 @@ class Planner:
             risk_level=RiskLevel.LOW,
         )
 
-        new_steps = (
-            list(plan.steps[:failed_step_index])
-            + [recovery_step]
-            + list(plan.steps[failed_step_index:])
-        )
+        new_steps = list(plan.steps[:failed_step_index]) + [recovery_step] + list(plan.steps[failed_step_index:])
         return TaskPlan(
             user_request=plan.user_request,
             steps=new_steps,

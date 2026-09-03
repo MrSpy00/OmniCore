@@ -23,6 +23,7 @@ class WebExtractAllLinks(BaseTool):
         # Try Playwright first (renders JS)
         try:
             from playwright.async_api import async_playwright
+
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
@@ -38,10 +39,12 @@ class WebExtractAllLinks(BaseTool):
                 href = a.get("href")
                 if not href:
                     continue
-                links.append({
-                    "text": (a.get_text() or "").strip(),
-                    "url": urljoin(url, str(href)),
-                })
+                links.append(
+                    {
+                        "text": (a.get_text() or "").strip(),
+                        "url": urljoin(url, str(href)),
+                    }
+                )
             return self._success(
                 f"Extracted {len(links)} links (Playwright)",
                 data={"url": url, "links": links, "method": "playwright"},
@@ -64,10 +67,12 @@ class WebExtractAllLinks(BaseTool):
                 href = a.get("href")
                 if not href:
                     continue
-                links.append({
-                    "text": (a.get_text() or "").strip(),
-                    "url": urljoin(url, str(href)),
-                })
+                links.append(
+                    {
+                        "text": (a.get_text() or "").strip(),
+                        "url": urljoin(url, str(href)),
+                    }
+                )
             return self._success(
                 f"Extracted {len(links)} links (httpx)",
                 data={"url": url, "links": links, "method": "httpx"},
@@ -90,6 +95,7 @@ class WebReadMainArticle(BaseTool):
         # Try Playwright first
         try:
             from playwright.async_api import async_playwright
+
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()

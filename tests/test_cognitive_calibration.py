@@ -21,10 +21,7 @@ def test_router_limits_are_hardened():
 
 def test_filter_relevant_tools_caps_to_12_and_prioritizes_native_media():
     router = CognitiveRouter.__new__(CognitiveRouter)
-    tools = [
-        {"name": f"dev_tool_{i}", "description": "developer utility", "destructive": "False"}
-        for i in range(80)
-    ]
+    tools = [{"name": f"dev_tool_{i}", "description": "developer utility", "destructive": "False"} for i in range(80)]
     tools.extend(
         [
             {
@@ -112,9 +109,7 @@ async def test_gui_locate_and_click_reports_missing_opencv(monkeypatch, tmp_work
 
 
 @pytest.mark.asyncio
-async def test_destructive_file_operations_refuse_absolute_paths_outside_workspace(
-    monkeypatch, tmp_workspace
-):
+async def test_destructive_file_operations_refuse_absolute_paths_outside_workspace(monkeypatch, tmp_workspace):
     from config.settings import get_settings
 
     monkeypatch.setenv("USERPROFILE", str(tmp_workspace))

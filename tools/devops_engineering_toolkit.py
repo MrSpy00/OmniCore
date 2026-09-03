@@ -17,9 +17,7 @@ class DevGitCommitPush(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        message = str(
-            self._first_param(params, "message", "commit_message", default="Update project")
-        )
+        message = str(self._first_param(params, "message", "commit_message", default="Update project"))
         repo_path_raw = str(self._first_param(params, "repo_path", "path", "cwd", default="."))
         try:
             repo_path = resolve_user_path(repo_path_raw)[0]

@@ -45,17 +45,13 @@ class WorkflowSystemCalculator(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        expression = str(
-            self._first_param(params, "expression", "expr", "query", "value", default="")
-        )
+        expression = str(self._first_param(params, "expression", "expr", "query", "value", default=""))
         if not expression:
             return self._failure("expression is required")
 
         try:
             result = await asyncio.to_thread(_safe_eval_math, expression)
-            return self._success(
-                "Calculation completed", data={"expression": expression, "result": result}
-            )
+            return self._success("Calculation completed", data={"expression": expression, "result": result})
         except Exception as exc:
             return self._failure(str(exc))
 

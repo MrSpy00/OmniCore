@@ -266,9 +266,7 @@ def _expand_windows_user_placeholder(
     downloads: Path,
     documents: Path,
 ) -> Path | None:
-    placeholder_match = re.match(
-        r"^[a-z]:/users/<username>(?:/(.*))?$", normalized_original.lower()
-    )
+    placeholder_match = re.match(r"^[a-z]:/users/<username>(?:/(.*))?$", normalized_original.lower())
     if not placeholder_match:
         return None
 
@@ -439,9 +437,7 @@ def _powershell_appactivate(window_title: str, last_error: str) -> dict[str, Any
         }
 
 
-def _force_window_foreground_windows_native(
-    title_hint: str, timeout_seconds: float
-) -> dict[str, Any]:
+def _force_window_foreground_windows_native(title_hint: str, timeout_seconds: float) -> dict[str, Any]:
     if not title_hint:
         return {"activated": False, "method": "win32_ctypes", "error": "empty_title_hint"}
 
@@ -579,4 +575,3 @@ def _force_window_foreground_windows_native(
         "stderr": completed.stderr,
         "returncode": completed.returncode,
     }
-

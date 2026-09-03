@@ -33,6 +33,7 @@ class BrowserFetchPage(BaseTool):
         # Try Playwright first (renders JavaScript)
         try:
             from playwright.async_api import async_playwright
+
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
@@ -108,6 +109,7 @@ class BrowserLaunch(BaseTool):
                 url = f"https://{url}"
             else:
                 import urllib.parse
+
                 url = f"https://www.google.com/search?q={urllib.parse.quote(url)}"
 
         launched = await asyncio.to_thread(_launch_browser_process, url, browser_choice)
@@ -128,6 +130,7 @@ def _launch_browser_process(url: str, browser_name: str = "default") -> dict:
 
     if sys.platform != "win32":
         import webbrowser
+
         webbrowser.open_new(url)
         return {"success": True, "method": "webbrowser.open_new"}
 
@@ -165,6 +168,7 @@ def _launch_browser_process(url: str, browser_name: str = "default") -> dict:
         if exe_path and os.path.exists(exe_path):
             proc = subprocess.Popen([exe_path, url], close_fds=True)
             import time
+
             time.sleep(1.0)
             for title in ("Chrome", "Edge", "Brave", "Browser"):
                 force_window_foreground(title, timeout_seconds=1.5)
@@ -173,6 +177,7 @@ def _launch_browser_process(url: str, browser_name: str = "default") -> dict:
         # OS default shell open fallback
         os.startfile(url)
         import time
+
         time.sleep(1.0)
         for title in ("Chrome", "Edge", "Brave", "Browser"):
             force_window_foreground(title, timeout_seconds=1.5)
@@ -180,6 +185,7 @@ def _launch_browser_process(url: str, browser_name: str = "default") -> dict:
     except Exception as exc:
         try:
             import webbrowser
+
             webbrowser.open_new(url)
             return {"success": True, "method": "webbrowser_fallback"}
         except Exception as fallback_exc:
@@ -279,13 +285,8 @@ class BrowserPlaywrightInteract(BaseTool):
                     await page.wait_for_selector(selector, timeout=timeout)
                     return self._success(f"Element bulundu: {selector}")
                 else:
-                    actions = (
-                        "navigate, click, fill, scroll, screenshot, "
-                        "get_text, youtube_search, open_and_play"
-                    )
-                    return self._failure(
-                        f"Bilinmeyen action: {action}. Kullanilabilir: {actions}"
-                    )
+                    actions = "navigate, click, fill, scroll, screenshot, get_text, youtube_search, open_and_play"
+                    return self._failure(f"Bilinmeyen action: {action}. Kullanilabilir: {actions}")
             finally:
                 pass  # Keep browser open
         except Exception as exc:
@@ -294,6 +295,7 @@ class BrowserPlaywrightInteract(BaseTool):
     async def _youtube_search(self, page, query: str) -> ToolOutput:
         """Search YouTube, find first video result, return URL."""
         import urllib.parse
+
         search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
         await page.goto(search_url, timeout=30000)
         await page.wait_for_selector("ytd-video-renderer", timeout=15000)
@@ -311,6 +313,7 @@ class BrowserPlaywrightInteract(BaseTool):
     async def _youtube_open_and_play(self, page, query: str) -> ToolOutput:
         """Search YouTube, navigate to first video, and play it."""
         import urllib.parse
+
         search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
         await page.goto(search_url, timeout=30000)
         await page.wait_for_selector("ytd-video-renderer", timeout=15000)

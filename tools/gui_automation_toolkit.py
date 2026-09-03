@@ -97,12 +97,7 @@ class GuiPressHotkey(BaseTool):
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
         values = list(params.values()) if params else []
-        keys = (
-            params.get("keys")
-            or params.get("key")
-            or params.get("hotkey")
-            or (values[0] if values else [])
-        )
+        keys = params.get("keys") or params.get("key") or params.get("hotkey") or (values[0] if values else [])
         if isinstance(keys, str):
             normalized = keys.replace("+", " ").replace(",", " ").split()
             keys = normalized if normalized else [keys]
@@ -163,9 +158,7 @@ class GuiTakeScreenshot(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        raw_path = str(self._first_param(
-            params, "output_path", "file_path", "path", default=""
-        ) or "").strip()
+        raw_path = str(self._first_param(params, "output_path", "file_path", "path", default="") or "").strip()
 
         # Always ensure Desktop prefix for bare filenames
         if not raw_path:
@@ -180,9 +173,7 @@ class GuiTakeScreenshot(BaseTool):
         if isinstance(region, str):
             region = None
         # app_name: window title to focus BEFORE taking screenshot
-        app_name = str(
-            self._first_param(params, "app", "app_name", "application", "window", default="") or ""
-        ).strip()
+        app_name = str(self._first_param(params, "app", "app_name", "application", "window", default="") or "").strip()
 
         # Heuristic: if app_name is not provided, infer from output_path or common apps
         if not app_name:
@@ -210,6 +201,7 @@ class GuiTakeScreenshot(BaseTool):
             if app_name:
                 try:
                     from tools.base import force_window_foreground
+
                     await asyncio.to_thread(force_window_foreground, app_name, timeout_seconds=4.0)
                     await asyncio.sleep(1.2)
 
@@ -230,6 +222,7 @@ class GuiTakeScreenshot(BaseTool):
                     if region is None:
                         try:
                             import pygetwindow as gw  # type: ignore[import-not-found]
+
                             windows = await asyncio.to_thread(gw.getWindowsWithTitle, app_name)
                             if windows:
                                 w = windows[0]
@@ -313,9 +306,7 @@ def _capture_screen_dotnet(path: Path, region: dict | None = None) -> None:
 
     script = (
         "Add-Type -AssemblyName System.Windows.Forms; "
-        "Add-Type -AssemblyName System.Drawing; "
-        + sizing
-        + "$bmp=New-Object System.Drawing.Bitmap $width,$height; "
+        "Add-Type -AssemblyName System.Drawing; " + sizing + "$bmp=New-Object System.Drawing.Bitmap $width,$height; "
         "$gfx=[System.Drawing.Graphics]::FromImage($bmp); "
         "$gfx.CopyFromScreen($left,$top,0,0,$bmp.Size,"
         "[System.Drawing.CopyPixelOperation]::SourceCopy); "
@@ -329,18 +320,13 @@ def _capture_screen_dotnet(path: Path, region: dict | None = None) -> None:
         timeout=25,
     )
     if completed.returncode != 0:
-        raise RuntimeError(
-            (completed.stderr or completed.stdout or "dotnet capture failed").strip()
-        )
+        raise RuntimeError((completed.stderr or completed.stdout or "dotnet capture failed").strip())
 
 
 def _send_hotkey_sendkeys_windows(keys: list[str]) -> None:
     send_seq = _keys_to_sendkeys_sequence(keys)
     escaped_seq = send_seq.replace("'", "''")
-    script = (
-        "Add-Type -AssemblyName System.Windows.Forms; "
-        f"[System.Windows.Forms.SendKeys]::SendWait('{escaped_seq}')"
-    )
+    script = f"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{escaped_seq}')"
     completed = subprocess.run(
         ["powershell", "-NoProfile", "-Command", script],
         capture_output=True,

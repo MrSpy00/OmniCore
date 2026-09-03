@@ -25,9 +25,7 @@ async def test_list_dir_resolves_placeholder_username(monkeypatch, tmp_path):
     )
 
     tool = OsListDir()
-    result = await tool.execute(
-        ToolInput(tool_name="os_list_dir", parameters={"path": r"C:\Users\<Username>\Desktop"})
-    )
+    result = await tool.execute(ToolInput(tool_name="os_list_dir", parameters={"path": r"C:\Users\<Username>\Desktop"}))
 
     assert result.status == ToolStatus.SUCCESS
     assert result.data["path"] == str(desktop.resolve())

@@ -30,14 +30,18 @@ def build(
     spec_path = PROJECT_ROOT / "OmniCore.spec"
     if use_spec and spec_path.exists():
         args = [
-            sys.executable, "-m", "PyInstaller",
+            sys.executable,
+            "-m",
+            "PyInstaller",
             "--noconfirm",
             "--clean",
             str(spec_path),
         ]
     else:
         args = [
-            sys.executable, "-m", "PyInstaller",
+            sys.executable,
+            "-m",
+            "PyInstaller",
             "--noconfirm",
             "--clean",
             f"--name={name}",
@@ -111,16 +115,11 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Build OmniCore EXE")
-    parser.add_argument("--onefile", action="store_true", default=True,
-                        help="Create single EXE file (default)")
-    parser.add_argument("--onedir", action="store_true",
-                        help="Create directory with EXE + deps")
-    parser.add_argument("--console", action="store_true", default=True,
-                        help="Show console window (default)")
-    parser.add_argument("--windowed", action="store_true",
-                        help="Hide console window")
-    parser.add_argument("--name", default="OmniCore",
-                        help="EXE filename (default: OmniCore)")
+    parser.add_argument("--onefile", action="store_true", default=True, help="Create single EXE file (default)")
+    parser.add_argument("--onedir", action="store_true", help="Create directory with EXE + deps")
+    parser.add_argument("--console", action="store_true", default=True, help="Show console window (default)")
+    parser.add_argument("--windowed", action="store_true", help="Hide console window")
+    parser.add_argument("--name", default="OmniCore", help="EXE filename (default: OmniCore)")
     parser.add_argument("--icon", help="Icon file path (.ico)")
     args = parser.parse_args()
 

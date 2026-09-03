@@ -355,6 +355,7 @@ class LiveConfig:
 
         try:
             from config.settings import invalidate_settings_cache
+
             invalidate_settings_cache()
         except Exception:
             pass
@@ -387,6 +388,7 @@ class LiveConfig:
 
         try:
             from config.settings import invalidate_settings_cache
+
             invalidate_settings_cache()
         except Exception:
             pass
@@ -405,8 +407,7 @@ class LiveConfig:
             desc = schema["description"]
             lines.append(f"  {key:<20} = {current:<25} # {desc}")
         lines.append(
-            "\n💡 Değiştirmek için: /config set <anahtar> <değer>\n"
-            "💡 Değeri görmek için: /config get <anahtar>"
+            "\n💡 Değiştirmek için: /config set <anahtar> <değer>\n💡 Değeri görmek için: /config get <anahtar>"
         )
         return "\n".join(lines)
 

@@ -18,22 +18,8 @@ class SysClearBrowserCaches(BaseTool):
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         user_home = Path.home()
         targets = [
-            user_home
-            / "AppData"
-            / "Local"
-            / "Google"
-            / "Chrome"
-            / "User Data"
-            / "Default"
-            / "Cache",
-            user_home
-            / "AppData"
-            / "Local"
-            / "Microsoft"
-            / "Edge"
-            / "User Data"
-            / "Default"
-            / "Cache",
+            user_home / "AppData" / "Local" / "Google" / "Chrome" / "User Data" / "Default" / "Cache",
+            user_home / "AppData" / "Local" / "Microsoft" / "Edge" / "User Data" / "Default" / "Cache",
         ]
 
         cleared = 0

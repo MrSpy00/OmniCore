@@ -23,9 +23,7 @@ class DataHashText(BaseTool):
         try:
             params = self._params(tool_input)
             text = str(self._first_param(params, "text", "content", "value", default=""))
-            algorithm = str(
-                self._first_param(params, "algorithm", "algo", default="sha256")
-            ).lower()
+            algorithm = str(self._first_param(params, "algorithm", "algo", default="sha256")).lower()
             if algorithm not in {"md5", "sha1", "sha256", "sha512"}:
                 return self._failure("Unsupported algorithm. Use md5, sha1, sha256, or sha512.")
             digest = hashlib.new(algorithm, text.encode("utf-8")).hexdigest()

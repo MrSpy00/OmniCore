@@ -85,8 +85,7 @@ class RecoveryEngine:
                         reason="2_ardisik_basarisizlik",
                     )
                     last_output.error = (
-                        f"[DÖNGÜ KORUMASI] {tool.name} araci 2 kez basarisiz oldu. "
-                        f"Son hata: {last_output.error}"
+                        f"[DÖNGÜ KORUMASI] {tool.name} araci 2 kez basarisiz oldu. Son hata: {last_output.error}"
                     )
                     return last_output
 
@@ -139,8 +138,5 @@ class RecoveryEngine:
         return ToolOutput(
             tool_name=tool.name,
             status=ToolStatus.FAILURE,
-            error=(
-                f"[DÖNGÜ KORUMASI] {tool.name}: Tum denemeler tukendi "
-                f"({effective_max} deneme), sonuc alinamadi."
-            ),
+            error=(f"[DÖNGÜ KORUMASI] {tool.name}: Tum denemeler tukendi ({effective_max} deneme), sonuc alinamadi."),
         )

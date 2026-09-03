@@ -96,9 +96,7 @@ def create_dashboard_app() -> FastAPI:
 
             async def run_task():
                 try:
-                    reply = await _router.handle_message(
-                        msg, "web_session", on_progress=on_progress
-                    )
+                    reply = await _router.handle_message(msg, "web_session", on_progress=on_progress)
                     await queue.put({"type": "done", "reply": reply})
                 except Exception as exc:
                     logger.error("dashboard.chat_stream_error", error=str(exc))
@@ -189,7 +187,6 @@ def create_dashboard_app() -> FastAPI:
             "ram_total_gb": round(mem.total / (1024**3), 1),
             "privacy": "100% Yerel / Local Hardware System Info. Disari veri iletilmez.",
         }
-
 
     return app
 

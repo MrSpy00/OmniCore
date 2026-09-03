@@ -159,16 +159,13 @@ _SAFE_GUIDANCE = {
         "Use least-privilege audit, token hardening, and approved access workflows."
     ),
     "persistence_abuse": (
-        "Persistence pattern blocked. "
-        "Use startup/service/WMI auditing and containment-cleanup procedures."
+        "Persistence pattern blocked. Use startup/service/WMI auditing and containment-cleanup procedures."
     ),
     "stealth_memory_abuse": (
-        "Stealth memory-execution pattern blocked. "
-        "Use EDR telemetry, memory inspection, and incident triage playbooks."
+        "Stealth memory-execution pattern blocked. Use EDR telemetry, memory inspection, and incident triage playbooks."
     ),
     "kernel_manipulation": (
-        "Kernel-manipulation pattern blocked. "
-        "Use kernel module audit, integrity checks, and approved hardening steps."
+        "Kernel-manipulation pattern blocked. Use kernel module audit, integrity checks, and approved hardening steps."
     ),
     "raw_disk_access": (
         "Raw disk-access pattern blocked. "
@@ -179,8 +176,7 @@ _SAFE_GUIDANCE = {
         "Use firewall diagnostics, packet capture, and authorized validation workflows."
     ),
     "reverse_engineering_abuse": (
-        "Reverse-engineering abuse pattern blocked. "
-        "Use approved debugging and observability approaches instead."
+        "Reverse-engineering abuse pattern blocked. Use approved debugging and observability approaches instead."
     ),
     "defensive_only": (
         "Command blocked by defensive-only policy. "
@@ -319,9 +315,7 @@ def _resolve_cwd(params: dict[str, object]) -> str:
 def _blocked_response(analysis: dict[str, object]) -> str:
     category = str(analysis.get("blocked_category") or "defensive_only")
     guidance = _SAFE_GUIDANCE.get(category, _SAFE_GUIDANCE["defensive_only"])
-    return (
-        f"{guidance} Category: {category}. Matched marker: {analysis['matched_defensive_marker']}"
-    )
+    return f"{guidance} Category: {category}. Matched marker: {analysis['matched_defensive_marker']}"
 
 
 def _truncate_output(text: str, max_output: int) -> str:
@@ -411,10 +405,7 @@ class TerminalExecute(BaseTool):
     """Execute a shell command on the host OS."""
 
     name = "terminal_execute"
-    description = (
-        "Execute a shell command in a host working directory. "
-        "Requires explicit user approval before running."
-    )
+    description = "Execute a shell command in a host working directory. Requires explicit user approval before running."
     is_destructive = True  # always requires HITL approval
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
@@ -460,9 +451,7 @@ class TerminalExecute(BaseTool):
             stderr = _truncate_output(stderr, max_output)
 
             if exit_code != 0:
-                return self._failure(
-                    f"Command exited with code {exit_code}\nstdout:\n{stdout}\nstderr:\n{stderr}"
-                )
+                return self._failure(f"Command exited with code {exit_code}\nstdout:\n{stdout}\nstderr:\n{stderr}")
 
             return self._success(
                 f"Command completed (exit {exit_code})",

@@ -31,12 +31,11 @@ def _lazy_import_sr():
     if _sr is None:
         try:
             import speech_recognition as sr
+
             _sr = sr
             _speech_recognition = sr
         except ImportError:
-            raise RuntimeError(
-                "speech_recognition not installed. Run: uv add SpeechRecognition"
-            )
+            raise RuntimeError("speech_recognition not installed. Run: uv add SpeechRecognition")
     return _sr
 
 
@@ -45,6 +44,7 @@ def _lazy_import_edge_tts():
     if _edge_tts is None:
         try:
             import edge_tts
+
             _edge_tts = edge_tts
         except ImportError:
             raise RuntimeError("edge-tts not installed. Run: uv add edge-tts")
@@ -56,6 +56,7 @@ def _lazy_import_sounddevice():
     if _sounddevice is None:
         try:
             import sounddevice as sd
+
             _sounddevice = sd
         except ImportError:
             raise RuntimeError("sounddevice not installed. Run: uv add sounddevice")
@@ -114,9 +115,7 @@ class VoiceEngine:
         finally:
             Path(temp_path).unlink(missing_ok=True)
 
-    async def record_from_microphone(
-        self, duration: float = 5.0, sample_rate: int = 16000
-    ) -> bytes:
+    async def record_from_microphone(self, duration: float = 5.0, sample_rate: int = 16000) -> bytes:
         """Record audio from microphone for a fixed duration. Returns WAV bytes."""
         sd = _lazy_import_sounddevice()
         loop = asyncio.get_event_loop()

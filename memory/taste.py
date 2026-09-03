@@ -72,15 +72,13 @@ class TasteEngine:
         conn.commit()
         conn.close()
 
-    def learn(
-        self, category: str, key: str, value: str,
-        confidence: float = 0.6, source: str = "auto"
-    ) -> None:
+    def learn(self, category: str, key: str, value: str, confidence: float = 0.6, source: str = "auto") -> None:
         """Yeni bir tercih öğren veya mevcut olanı güncelle."""
         now = time.time()
         conn = sqlite3.connect(str(self._db_path))
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO taste (category, key, value, confidence, source, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(category, key) DO UPDATE SET
@@ -88,7 +86,9 @@ class TasteEngine:
                     confidence = MAX(confidence, excluded.confidence),
                     source = excluded.source,
                     updated_at = excluded.updated_at
-            """, (category, key, value, confidence, source, now, now))
+            """,
+                (category, key, value, confidence, source, now, now),
+            )
             conn.commit()
             logger.info("taste.learned", category=category, key=key, value=value, confidence=confidence)
         finally:
@@ -98,10 +98,7 @@ class TasteEngine:
         """Belirli bir tercihi al."""
         conn = sqlite3.connect(str(self._db_path))
         try:
-            row = conn.execute(
-                "SELECT value FROM taste WHERE category = ? AND key = ?",
-                (category, key)
-            ).fetchone()
+            row = conn.execute("SELECT value FROM taste WHERE category = ? AND key = ?", (category, key)).fetchone()
             return row[0] if row else None
         finally:
             conn.close()
@@ -114,16 +111,13 @@ class TasteEngine:
                 rows = conn.execute(
                     "SELECT category, key, value, confidence, source "
                     "FROM taste WHERE category = ? ORDER BY confidence DESC",
-                    (category,)
+                    (category,),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     "SELECT category, key, value, confidence, source FROM taste ORDER BY category, confidence DESC"
                 ).fetchall()
-            return [
-                {"category": r[0], "key": r[1], "value": r[2], "confidence": r[3], "source": r[4]}
-                for r in rows
-            ]
+            return [{"category": r[0], "key": r[1], "value": r[2], "confidence": r[3], "source": r[4]} for r in rows]
         finally:
             conn.close()
 
@@ -132,8 +126,7 @@ class TasteEngine:
         conn = sqlite3.connect(str(self._db_path))
         try:
             row = conn.execute(
-                "SELECT id, confidence FROM taste WHERE category = ? AND key = ?",
-                (category, key)
+                "SELECT id, confidence FROM taste WHERE category = ? AND key = ?", (category, key)
             ).fetchone()
 
             if row:
@@ -148,13 +141,12 @@ class TasteEngine:
                     new_conf = current_conf
 
                 conn.execute(
-                    "UPDATE taste SET confidence = ?, updated_at = ? WHERE id = ?",
-                    (new_conf, time.time(), taste_id)
+                    "UPDATE taste SET confidence = ?, updated_at = ? WHERE id = ?", (new_conf, time.time(), taste_id)
                 )
 
                 conn.execute(
                     "INSERT INTO taste_feedback (taste_id, feedback_type, context, created_at) VALUES (?, ?, ?, ?)",
-                    (taste_id, feedback_type, context, time.time())
+                    (taste_id, feedback_type, context, time.time()),
                 )
                 conn.commit()
                 logger.info("taste.feedback", category=category, key=key, type=feedback_type, new_confidence=new_conf)
@@ -205,8 +197,7 @@ class TasteEngine:
         return "\n".join(lines)
 
     def auto_learn_from_interaction(
-        self, user_message: str, assistant_response: str,
-        tools_used: list[str] | None = None
+        self, user_message: str, assistant_response: str, tools_used: list[str] | None = None
     ) -> None:
         """Otomatik öğrenme: kullanıcı mesajından tercih çıkar."""
         msg_lower = user_message.lower()

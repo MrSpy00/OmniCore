@@ -75,9 +75,7 @@ async def test_todo_tracker_ready_respects_dependencies(
         )
     )
 
-    ready_before = await tool.execute(
-        ToolInput(tool_name="dev_todo_tracker", parameters={"action": "ready"})
-    )
+    ready_before = await tool.execute(ToolInput(tool_name="dev_todo_tracker", parameters={"action": "ready"}))
     ready_before_any: Any = ready_before
     todos_before = cast(list[dict[str, Any]], ready_before_any.data.get("todos", []))
     ready_ids_before = {str(t.get("id")) for t in todos_before}
@@ -92,9 +90,7 @@ async def test_todo_tracker_ready_respects_dependencies(
     )
     assert status_result.status == ToolStatus.SUCCESS
 
-    ready_after = await tool.execute(
-        ToolInput(tool_name="dev_todo_tracker", parameters={"action": "ready"})
-    )
+    ready_after = await tool.execute(ToolInput(tool_name="dev_todo_tracker", parameters={"action": "ready"}))
     ready_after_any: Any = ready_after
     todos_after = cast(list[dict[str, Any]], ready_after_any.data.get("todos", []))
     ready_ids_after = {str(t.get("id")) for t in todos_after}

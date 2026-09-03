@@ -31,10 +31,7 @@ _HTTP_TIMEOUT = 30
 # ---------------------------------------------------------------------------
 class ApiHttpRequest(BaseTool):
     name = "api_http_request"
-    description = (
-        "Make an HTTP request (GET or POST) to any URL and return the response. "
-        "Use for generic API calls."
-    )
+    description = "Make an HTTP request (GET or POST) to any URL and return the response. Use for generic API calls."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
@@ -80,9 +77,7 @@ class ApiHttpRequest(BaseTool):
 # ---------------------------------------------------------------------------
 class ApiWeather(BaseTool):
     name = "api_weather"
-    description = (
-        "Get current weather for a latitude/longitude using Open-Meteo (free, no API key)."
-    )
+    description = "Get current weather for a latitude/longitude using Open-Meteo (free, no API key)."
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)

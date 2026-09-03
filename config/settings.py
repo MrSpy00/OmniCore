@@ -22,6 +22,7 @@ def _resolve_project_root() -> Path:
         return exe_dir
     return Path(__file__).resolve().parent.parent
 
+
 _PROJECT_ROOT = _resolve_project_root()
 
 
@@ -98,19 +99,44 @@ AVAILABLE_GROQ_MODELS: list[dict[str, str]] = [
     {"id": "llama3-8b-8192", "name": "Llama 3 8B", "context": "8k", "speed": "fastest"},
     {"id": "deepseek-r1-distill-llama-70b", "name": "DeepSeek R1 Distill 70B", "context": "128k", "speed": "medium"},
     {"id": "qwen-qwq-32b", "name": "Qwen QwQ 32B", "context": "128k", "speed": "medium"},
-    {"id": "meta-llama/llama-4-scout-17b-16e-instruct", "name": "Llama 4 Scout 17B", "context": "128k", "speed": "fast"},
+    {
+        "id": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "name": "Llama 4 Scout 17B",
+        "context": "128k",
+        "speed": "fast",
+    },
 ]
 
 # --- OpenAI-uyumlu hızlı inference providerları ---
 AVAILABLE_FIREWORKS_MODELS: list[dict[str, str]] = [
-    {"id": "accounts/fireworks/models/llama-v3p3-70b-instruct", "name": "Llama 3.3 70B", "context": "128k", "speed": "fast"},
-    {"id": "accounts/fireworks/models/mixtral-8x22b-instruct", "name": "Mixtral 8x22B", "context": "64k", "speed": "medium"},
-    {"id": "accounts/fireworks/models/qwen-2.5-72b-instruct", "name": "Qwen 2.5 72B", "context": "128k", "speed": "medium"},
+    {
+        "id": "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        "name": "Llama 3.3 70B",
+        "context": "128k",
+        "speed": "fast",
+    },
+    {
+        "id": "accounts/fireworks/models/mixtral-8x22b-instruct",
+        "name": "Mixtral 8x22B",
+        "context": "64k",
+        "speed": "medium",
+    },
+    {
+        "id": "accounts/fireworks/models/qwen-2.5-72b-instruct",
+        "name": "Qwen 2.5 72B",
+        "context": "128k",
+        "speed": "medium",
+    },
     {"id": "accounts/fireworks/models/deepseek-v3", "name": "DeepSeek V3", "context": "64k", "speed": "fast"},
 ]
 
 AVAILABLE_TOGETHER_MODELS: list[dict[str, str]] = [
-    {"id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "name": "Llama 3.3 70B Turbo", "context": "128k", "speed": "fast"},
+    {
+        "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "name": "Llama 3.3 70B Turbo",
+        "context": "128k",
+        "speed": "fast",
+    },
     {"id": "Qwen/Qwen2.5-72B-Instruct-Turbo", "name": "Qwen 2.5 72B Turbo", "context": "128k", "speed": "fast"},
     {"id": "deepseek-ai/DeepSeek-V3", "name": "DeepSeek V3", "context": "64k", "speed": "fast"},
     {"id": "mistralai/Mistral-Small-24B-Instruct-2501", "name": "Mistral Small 24B", "context": "32k", "speed": "fast"},
@@ -167,7 +193,12 @@ AVAILABLE_OPENROUTER_MODELS: list[dict[str, str]] = [
     {"id": "anthropic/claude-sonnet-4", "name": "Claude Sonnet 4 (OpenRouter)", "context": "200k", "speed": "medium"},
     {"id": "openai/gpt-4o", "name": "GPT-4o (OpenRouter)", "context": "128k", "speed": "fast"},
     {"id": "google/gemini-2.5-flash", "name": "Gemini 2.5 Flash (OpenRouter)", "context": "1M", "speed": "fastest"},
-    {"id": "meta-llama/llama-3.3-70b-instruct:free", "name": "Llama 3.3 70B (free)", "context": "128k", "speed": "fast"},
+    {
+        "id": "meta-llama/llama-3.3-70b-instruct:free",
+        "name": "Llama 3.3 70B (free)",
+        "context": "128k",
+        "speed": "fast",
+    },
     {"id": "deepseek/deepseek-chat", "name": "DeepSeek V3 (OpenRouter)", "context": "64k", "speed": "fast"},
     {"id": "mistralai/mistral-large", "name": "Mistral Large (OpenRouter)", "context": "128k", "speed": "medium"},
 ]
@@ -410,7 +441,11 @@ class Settings(BaseSettings):
 
     @property
     def groq_model_chain(self) -> list[str]:
-        explicit = [self.groq_primary_model.strip(), self.groq_fallback_model_1.strip(), self.groq_fallback_model_2.strip()]
+        explicit = [
+            self.groq_primary_model.strip(),
+            self.groq_fallback_model_1.strip(),
+            self.groq_fallback_model_2.strip(),
+        ]
         chain = [m for m in explicit if m]
         if not chain and self.groq_llm_model.strip():
             chain.append(self.groq_llm_model.strip())

@@ -21,9 +21,7 @@ class DevDecodeBase64(BaseTool):
             return self._failure("text is required")
         try:
             decoded = await asyncio.to_thread(base64.b64decode, encoded)
-            return self._success(
-                "Base64 decoded", data={"text": decoded.decode("utf-8", errors="replace")}
-            )
+            return self._success("Base64 decoded", data={"text": decoded.decode("utf-8", errors="replace")})
         except Exception as exc:
             return self._failure(str(exc))
 

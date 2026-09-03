@@ -74,6 +74,7 @@ class ToolRegistry:
 def discover_tool_classes(tools_package_path: Path) -> list[type[BaseTool]]:
     """Discover all concrete BaseTool subclasses under the tools package."""
     import sys
+
     discovered: list[type[BaseTool]] = []
     discovered_names: set[str] = set()
     package_name = "tools"
@@ -81,6 +82,7 @@ def discover_tool_classes(tools_package_path: Path) -> list[type[BaseTool]]:
     search_paths = [str(tools_package_path)]
     try:
         import tools as _tools_pkg
+
         if hasattr(_tools_pkg, "__path__"):
             for p in _tools_pkg.__path__:
                 if p not in search_paths:

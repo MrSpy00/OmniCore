@@ -43,9 +43,7 @@ class WebMonitorChanges(BaseTool):
             old_digest = path.read_text(encoding="utf-8") if path.exists() else ""
             await asyncio.to_thread(path.write_text, digest, encoding="utf-8")
             changed = old_digest != digest and old_digest != ""
-            return self._success(
-                "Web monitor check completed", data={"url": url, "changed": changed, "hash": digest}
-            )
+            return self._success("Web monitor check completed", data={"url": url, "changed": changed, "hash": digest})
         except Exception as exc:
             return self._failure(str(exc))
 

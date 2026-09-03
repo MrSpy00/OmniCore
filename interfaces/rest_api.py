@@ -64,9 +64,7 @@ def create_app(router: CognitiveRouter) -> Any:
     try:
         from fastapi import Depends, FastAPI, Header, HTTPException
     except ImportError:
-        raise ImportError(
-            "FastAPI is required for the REST gateway. Install it with: uv add fastapi uvicorn"
-        )
+        raise ImportError("FastAPI is required for the REST gateway. Install it with: uv add fastapi uvicorn")
 
     from config.settings import get_settings
 

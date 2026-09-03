@@ -35,6 +35,7 @@ class WebBypassScraper(BaseTool):
         # Try Playwright first (real browser rendering)
         try:
             from playwright.async_api import async_playwright
+
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
@@ -42,8 +43,7 @@ class WebBypassScraper(BaseTool):
                     await page.goto(url, timeout=25000, wait_until="domcontentloaded")
                     html = await page.content()
                     return self._success(
-                        "HTML fetched (Playwright)",
-                        data={"url": url, "html": html[:20000], "method": "playwright"}
+                        "HTML fetched (Playwright)", data={"url": url, "html": html[:20000], "method": "playwright"}
                     )
                 finally:
                     await browser.close()
@@ -86,9 +86,7 @@ class WebExtractAllEmails(BaseTool):
             async with httpx.AsyncClient(timeout=20, follow_redirects=True, verify=False) as client:
                 response = await client.get(url)
                 response.raise_for_status()
-            emails = sorted(
-                set(re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", response.text))
-            )
+            emails = sorted(set(re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", response.text)))
             return self._success("Email extraction completed", data={"url": url, "emails": emails})
         except Exception as exc:
             return self._failure(str(exc))
@@ -126,9 +124,7 @@ class OsintDnsLookup(BaseTool):
             return self._failure("domain is required")
         try:
             records = await asyncio.to_thread(_dns_lookup, domain)
-            return self._success(
-                "DNS lookup completed", data={"domain": domain, "records": records}
-            )
+            return self._success("DNS lookup completed", data={"domain": domain, "records": records})
         except Exception as exc:
             return self._failure(str(exc))
 

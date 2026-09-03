@@ -83,9 +83,7 @@ class LongTermMemory:
             self._collection = self._client.get_or_create_collection(**col_kwargs)
         except Exception as exc:
             logger.warning("long_term.persistent_failed_fallback_ephemeral", error=str(exc))
-            self._client = chromadb.EphemeralClient(
-                settings=ChromaSettings(anonymized_telemetry=False)
-            )
+            self._client = chromadb.EphemeralClient(settings=ChromaSettings(anonymized_telemetry=False))
             col_kwargs = {
                 "name": _COLLECTION_NAME,
                 "metadata": {"hnsw:space": "cosine"},
@@ -130,7 +128,6 @@ class LongTermMemory:
             except Exception as e2:
                 logger.error("long_term.store_fatal", error=str(e2))
         return doc_id
-
 
     # -- read -----------------------------------------------------------------
 
@@ -189,9 +186,7 @@ class LongTermMemory:
     _KNOWN_CATEGORIES = ("identity", "preferences", "projects", "relationships", "wishes", "notes")
     _MAX_PER_CATEGORY = 50
 
-    def get_all_memories_categorized(
-        self, limit_per_category: int = _MAX_PER_CATEGORY
-    ) -> dict[str, list[str]]:
+    def get_all_memories_categorized(self, limit_per_category: int = _MAX_PER_CATEGORY) -> dict[str, list[str]]:
         """Return all memories grouped by category with per-category limits."""
         if self._collection.count() == 0:
             return {}

@@ -54,9 +54,7 @@ class AsyncAuditVisitor(ast.NodeVisitor):
         in_async = bool(self.async_stack)
         mod, name = _call_name(node)
 
-        if in_async and (
-            (mod in BLOCKING_MODULES and name in BLOCKING_NAMES) or (mod == "" and name == "open")
-        ):
+        if in_async and ((mod in BLOCKING_MODULES and name in BLOCKING_NAMES) or (mod == "" and name == "open")):
             self.issues.append(
                 {
                     "type": "blocking_io_in_async",
@@ -80,9 +78,7 @@ class AsyncAuditVisitor(ast.NodeVisitor):
                         "line": node.lineno,
                         "function": self.async_stack[-1],
                         "call": name,
-                        "suggestion": (
-                            "Await coroutine or schedule with asyncio.create_task + tracking."
-                        ),
+                        "suggestion": ("Await coroutine or schedule with asyncio.create_task + tracking."),
                     }
                 )
 

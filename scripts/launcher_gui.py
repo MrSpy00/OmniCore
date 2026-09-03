@@ -35,6 +35,7 @@ def _notify_started() -> None:
     # Try win10toast first
     try:
         from win10toast import ToastNotifier
+
         toaster = ToastNotifier()
         toaster.show_toast(
             "OmniCore AI OS",
@@ -48,6 +49,7 @@ def _notify_started() -> None:
     # Fallback: PowerShell toast notification
     try:
         import subprocess
+
         ps_script = (
             "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; "
             "$n = New-Object System.Windows.Forms.NotifyIcon; "
@@ -76,12 +78,14 @@ def launch_gui() -> None:
     def _open():
         try:
             import time
+
             time.sleep(1.5)
             webbrowser.open("http://localhost:8080")
         except Exception:
             pass
 
     import threading
+
     t = threading.Thread(target=_open, daemon=True)
     t.start()
 

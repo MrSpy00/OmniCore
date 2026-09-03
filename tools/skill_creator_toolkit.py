@@ -41,9 +41,7 @@ class SkillCreate(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        skill_name = (
-            str(self._first_param(params, "skill_name", "name", default="") or "").strip().lower()
-        )
+        skill_name = str(self._first_param(params, "skill_name", "name", default="") or "").strip().lower()
         code = str(self._first_param(params, "code", "script", default="") or "").strip()
 
         if not skill_name or not code:
@@ -113,9 +111,7 @@ class SkillExecute(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        skill_name = (
-            str(self._first_param(params, "skill_name", "name", default="") or "").strip().lower()
-        )
+        skill_name = str(self._first_param(params, "skill_name", "name", default="") or "").strip().lower()
 
         if not skill_name:
             return self._failure("skill_name parameter is required.")

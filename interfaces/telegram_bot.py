@@ -290,9 +290,7 @@ class TelegramGateway:
 
         return result
 
-    async def _handle_approval_callback(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    async def _handle_approval_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle inline keyboard button presses for HITL approvals."""
         query = update.callback_query
         if query is None:
@@ -340,9 +338,7 @@ class TelegramGateway:
                 )
                 asyncio.get_running_loop().call_soon_threadsafe(future.set_result, decision)
             else:
-                logger.warning(
-                    "telegram.callback_unknown_action", action=action, callback_id=callback_id
-                )
+                logger.warning("telegram.callback_unknown_action", action=action, callback_id=callback_id)
         except Exception as e:
             logger.error(f"Callback failed: {e}")
             try:

@@ -16,9 +16,7 @@ async def test_launch_application_uses_first_param_value(monkeypatch):
     monkeypatch.setattr("tools.advanced_os_toolkit._launch_windows_app", fake_launch)
 
     tool = OsLaunchApplication()
-    result = await tool.execute(
-        ToolInput(tool_name="os_launch_application", parameters={"foo": "Spotify"})
-    )
+    result = await tool.execute(ToolInput(tool_name="os_launch_application", parameters={"foo": "Spotify"}))
 
     assert result.status == ToolStatus.SUCCESS
     assert captured["app"] == "Spotify"
@@ -37,9 +35,7 @@ async def test_launch_application_returns_foreground_payload(monkeypatch):
     )
 
     tool = OsLaunchApplication()
-    result = await tool.execute(
-        ToolInput(tool_name="os_launch_application", parameters={"app": "Notepad"})
-    )
+    result = await tool.execute(ToolInput(tool_name="os_launch_application", parameters={"app": "Notepad"}))
 
     assert result.status == ToolStatus.SUCCESS
     assert result.data.get("foreground", {}).get("activated") is True
@@ -53,9 +49,7 @@ async def test_media_control_spotify_native_runs(monkeypatch):
     )
 
     tool = MediaControlSpotifyNative()
-    result = await tool.execute(
-        ToolInput(tool_name="media_control_spotify_native", parameters={"action": "next"})
-    )
+    result = await tool.execute(ToolInput(tool_name="media_control_spotify_native", parameters={"action": "next"}))
 
     assert result.status == ToolStatus.SUCCESS
     assert result.data.get("action") == "next"

@@ -72,16 +72,10 @@ class WebFetchHackerNewsTop(BaseTool):
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         try:
             async with httpx.AsyncClient(timeout=20) as client:
-                ids = (
-                    await client.get("https://hacker-news.firebaseio.com/v0/topstories.json")
-                ).json()[:10]
+                ids = (await client.get("https://hacker-news.firebaseio.com/v0/topstories.json")).json()[:10]
                 stories = []
                 for story_id in ids:
-                    item = (
-                        await client.get(
-                            f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json"
-                        )
-                    ).json()
+                    item = (await client.get(f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json")).json()
                     stories.append({"title": item.get("title", ""), "url": item.get("url", "")})
             return self._success("Hacker News fetched", data={"stories": stories})
         except Exception as exc:
@@ -164,6 +158,7 @@ class DesktopSendNotification(BaseTool):
                 # PowerShell Windows Runtime toast notification fallback
                 def _ps_toast():
                     import subprocess
+
                     ps_cmd = (
                         f"[reflection.assembly]::loadwithpartialname('System.Windows.Forms') | Out-Null; "
                         f"$notify = New-Object System.Windows.Forms.NotifyIcon; "
@@ -174,11 +169,10 @@ class DesktopSendNotification(BaseTool):
                         f"$notify.ShowBalloonTip(5000); Start-Sleep -Seconds 1; $notify.Dispose()"
                     )
                     subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, timeout=8)
+
                 await asyncio.to_thread(_ps_toast)
 
-            return self._success(
-                "Desktop notification sent", data={"title": title, "message": message}
-            )
+            return self._success("Desktop notification sent", data={"title": title, "message": message})
         except Exception as exc:
             return self._failure(str(exc))
 
@@ -230,18 +224,14 @@ class DataMergeJson(BaseTool):
         if not isinstance(files, list) or not files:
             return self._failure("files list is required")
         try:
-            merged = await asyncio.to_thread(
-                _merge_json_files, [_resolve_sandboxed(str(f)) for f in files]
-            )
+            merged = await asyncio.to_thread(_merge_json_files, [_resolve_sandboxed(str(f)) for f in files])
             target = _resolve_sandboxed(output_path)
             await asyncio.to_thread(
                 target.write_text,
                 json.dumps(merged, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            return self._success(
-                "JSON files merged", data={"path": str(target), "items": len(merged)}
-            )
+            return self._success("JSON files merged", data={"path": str(target), "items": len(merged)})
         except Exception as exc:
             return self._failure(str(exc))
 
@@ -259,9 +249,7 @@ class WebExtractTables(BaseTool):
         try:
             tables = await asyncio.to_thread(pd.read_html, url)
             data = [table.fillna("").to_dict(orient="records") for table in tables]
-            return self._success(
-                "Web tables extracted", data={"table_count": len(data), "tables": data}
-            )
+            return self._success("Web tables extracted", data={"table_count": len(data), "tables": data})
         except Exception as exc:
             return self._failure(str(exc))
 
@@ -286,14 +274,10 @@ class FileWatchDirectory(BaseTool):
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
         root = _resolve_sandboxed(str(self._first_param(params, "root", "path", default=".")))
-        output_path = _resolve_sandboxed(
-            str(self._first_param(params, "output_path", default="watch_snapshot.json"))
-        )
+        output_path = _resolve_sandboxed(str(self._first_param(params, "output_path", default="watch_snapshot.json")))
         try:
             snapshot = await asyncio.to_thread(_snapshot_dir, root)
-            await asyncio.to_thread(
-                output_path.write_text, json.dumps(snapshot, indent=2), encoding="utf-8"
-            )
+            await asyncio.to_thread(output_path.write_text, json.dumps(snapshot, indent=2), encoding="utf-8")
             return self._success(
                 "Directory snapshot captured",
                 data={"path": str(output_path), "entries": len(snapshot)},
@@ -310,9 +294,7 @@ class MediaContactSheet(BaseTool):
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
         root = _resolve_sandboxed(str(self._first_param(params, "root", "path", default=".")))
-        output_path = _resolve_sandboxed(
-            str(self._first_param(params, "output_path", default="contact_sheet.jpg"))
-        )
+        output_path = _resolve_sandboxed(str(self._first_param(params, "output_path", default="contact_sheet.jpg")))
         try:
             await asyncio.to_thread(_make_contact_sheet, root, output_path)
             return self._success("Contact sheet created", data={"path": str(output_path)})
@@ -370,8 +352,7 @@ def _get_toast_notifier():
     except ModuleNotFoundError as exc:
         if exc.name == "pkg_resources":
             raise RuntimeError(
-                "Desktop notifications require setuptools because win10toast "
-                "depends on pkg_resources"
+                "Desktop notifications require setuptools because win10toast depends on pkg_resources"
             ) from exc
         raise
     return ToastNotifier()

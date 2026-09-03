@@ -411,9 +411,7 @@ class CognitiveRouter:
                         temperature=settings.llm_temperature,
                     )
                 except Exception:
-                    return _LocalLLMResponse(
-                        f"Local Ollama model fallback ({settings.ollama_model})"
-                    )
+                    return _LocalLLMResponse(f"Local Ollama model fallback ({settings.ollama_model})")
         if normalized == "openai":
             try:
                 from langchain_openai import ChatOpenAI
@@ -450,18 +448,14 @@ class CognitiveRouter:
                     "router.anthropic_not_installed",
                     hint="pip install langchain-anthropic",
                 )
-                return _LocalLLMResponse(
-                    "Anthropic provider: langchain-anthropic is not installed."
-                )
+                return _LocalLLMResponse("Anthropic provider: langchain-anthropic is not installed.")
         if normalized == "deepseek":
             try:
                 from langchain_openai import ChatOpenAI
 
                 deepseek_key = getattr(settings, "deepseek_api_key", "")
                 deepseek_model = getattr(settings, "deepseek_model", "deepseek-chat")
-                deepseek_base = getattr(
-                    settings, "deepseek_base_url", "https://api.deepseek.com/v1"
-                )
+                deepseek_base = getattr(settings, "deepseek_base_url", "https://api.deepseek.com/v1")
                 return ChatOpenAI(
                     model=deepseek_model,
                     api_key=SecretStr(deepseek_key) if deepseek_key else None,
@@ -495,10 +489,12 @@ class CognitiveRouter:
         # sambanova, hyperbolic, nebius, siliconflow, nvidia, lepton, openrouter,
         # moonshot, zhipu, minimax, qwen, stepfun
         from config.settings import OPENAI_COMPATIBLE_PROVIDERS
+
         compat_base_url = OPENAI_COMPATIBLE_PROVIDERS.get(normalized)
         if compat_base_url:
             try:
                 from langchain_openai import ChatOpenAI
+
                 api_key = getattr(settings, f"{normalized}_api_key", "")
                 model = getattr(settings, f"{normalized}_model", "")
                 return ChatOpenAI(
@@ -622,11 +618,7 @@ class CognitiveRouter:
         # Step key every retry; when key wraps to first entry, step model once.
         prev_key = self._key_rotator.current
         new_key = self._key_rotator.next_key()
-        wrapped = (
-            len(self._key_rotator) > 1
-            and new_key == self._key_rotator.first
-            and prev_key != new_key
-        )
+        wrapped = len(self._key_rotator) > 1 and new_key == self._key_rotator.first and prev_key != new_key
         if len(self._key_rotator) == 1:
             wrapped = True
 
@@ -638,9 +630,7 @@ class CognitiveRouter:
             old_model=old_model,
             new_model=self._model_rotator.current,
             old_key_suffix=f"...{old_key[-6:]}" if old_key else "<empty>",
-            new_key_suffix=f"...{self._key_rotator.current[-6:]}"
-            if self._key_rotator.current
-            else "<empty>",
+            new_key_suffix=f"...{self._key_rotator.current[-6:]}" if self._key_rotator.current else "<empty>",
         )
         self._destroy_current_llm()
         self._llm = self._create_groq_client(self._key_rotator.current, self._model_rotator.current)
@@ -731,9 +721,7 @@ class CognitiveRouter:
             )
             self._switch_provider(target, reason="semantic_routing")
 
-    def _filter_relevant_tools(
-        self, query: str, all_tools: list[dict[str, str]]
-    ) -> list[dict[str, str]]:
+    def _filter_relevant_tools(self, query: str, all_tools: list[dict[str, str]]) -> list[dict[str, str]]:
         """Select a compact, relevant tool subset for prompt injection."""
         if not all_tools:
             return []
@@ -775,9 +763,7 @@ class CognitiveRouter:
                         score += 30
 
             for marker, hints in _QUERY_TOOL_KEYWORDS:
-                if marker in lowered_query and any(
-                    hint in name_l or hint in desc_l for hint in hints
-                ):
+                if marker in lowered_query and any(hint in name_l or hint in desc_l for hint in hints):
                     score += 45
 
             media_markers = ("spotify", "muzik", "music", "oynat")
@@ -829,9 +815,7 @@ class CognitiveRouter:
         if user_name:
             user_line = f"KULLANICI ADI: {user_name}. Kullanıcıya hitap ederken bu adı kullan. "
 
-        tools_desc = "\n".join(
-            f"- {t['name']}: {t['description']} (yikici={t['destructive']})" for t in tools
-        )
+        tools_desc = "\n".join(f"- {t['name']}: {t['description']} (yikici={t['destructive']})" for t in tools)
         mandated = (
             "KRİTİK ZORUNLULUK: SEN OMNICORE ADINDA, "
             "KULLANICININ BİLGİSAYARINA TAM (ROOT) ERİŞİMİ OLAN, "
@@ -882,6 +866,7 @@ class CognitiveRouter:
         taste_context = ""
         try:
             from memory.taste import get_taste_engine
+
             taste_context = get_taste_engine().format_for_system_prompt()
         except Exception:
             pass
@@ -927,9 +912,7 @@ class CognitiveRouter:
             )
 
     def _local_fallback_response(self) -> _LocalLLMResponse:
-        return _LocalLLMResponse(
-            "Harici model gecici olarak devre disi. Lütfen 30 saniye sonra tekrar deneyin."
-        )
+        return _LocalLLMResponse("Harici model gecici olarak devre disi. Lütfen 30 saniye sonra tekrar deneyin.")
 
     def _collect_operational_facts(self, user_message: Message, reply: str) -> list[str]:
         combined = f"{user_message.content}\n{reply}".lower()
@@ -1147,9 +1130,7 @@ class CognitiveRouter:
         classification = await self._classify_intent(user_message.content, lc_messages)
 
         if classification["needs_plan"]:
-            reply = await self._execute_plan(
-                user_message, classification, conversation_id, on_progress=on_progress
-            )
+            reply = await self._execute_plan(user_message, classification, conversation_id, on_progress=on_progress)
         else:
             # Simple conversational reply — no tools needed.
             response = await self._ainvoke_with_retry(lc_messages)
@@ -1174,12 +1155,11 @@ class CognitiveRouter:
         # 8. Auto-learn from interaction (taste engine)
         try:
             from memory.taste import get_taste_engine
+
             tools_used = []
-            if hasattr(self, '_last_tools_used'):
+            if hasattr(self, "_last_tools_used"):
                 tools_used = self._last_tools_used
-            get_taste_engine().auto_learn_from_interaction(
-                user_message.content, reply, tools_used
-            )
+            get_taste_engine().auto_learn_from_interaction(user_message.content, reply, tools_used)
         except Exception:
             pass
 
@@ -1207,9 +1187,7 @@ class CognitiveRouter:
             groq_keys = len([k for k in getattr(settings, "groq_api_keys", []) if k])
             gemini_keys = len([k for k in getattr(settings, "google_api_keys", []) if k])
             model_name = live_config.get("model") or getattr(settings, "omni_llm_model", "unknown")
-            is_plan = (
-                getattr(self._guardian, "plan_mode", False) if hasattr(self, "_guardian") else False
-            )
+            is_plan = getattr(self._guardian, "plan_mode", False) if hasattr(self, "_guardian") else False
             perm_mode = self._guardian.mode.value if hasattr(self._guardian, "mode") else "ask"
             return (
                 "🔍 Sistem Tanılaması\n"
@@ -1266,10 +1244,7 @@ class CognitiveRouter:
                     is_active = m["id"] == active_models.get(prov, "")
                     active = " [AKTİF]" if is_active else ""
                     dim = "" if has_key or prov == "ollama" else "  (key yok) "
-                    lines.append(
-                        f"  - {m['id']}{active}\n"
-                        f"    {dim}{m['name']} | ctx={m['context']} | {m['speed']}"
-                    )
+                    lines.append(f"  - {m['id']}{active}\n    {dim}{m['name']} | ctx={m['context']} | {m['speed']}")
             lines.append(
                 "\n💡 Model değiştirmek: /setmodel <model-id>\n"
                 "💡 Kısa isim: flash, lite, pro, 20b, 120b, mixtral...\n"
@@ -1421,11 +1396,7 @@ class CognitiveRouter:
                 else live_config.get("model") or self._settings.groq_primary_model
             )
             is_plan = getattr(self._guardian, "plan_mode", False)
-            user_name = (
-                live_config.get("name")
-                or self._settings.user_name.strip()
-                or "(OmniCore)"
-            )
+            user_name = live_config.get("name") or self._settings.user_name.strip() or "(OmniCore)"
             perm_mode = self._guardian.mode.value if hasattr(self._guardian, "mode") else "ask"
             perm_label = {"yes": "🔓 Tam Yetki", "ask": "🔒 Sorarak Onay"}.get(perm_mode, perm_mode)
             return (
@@ -1440,16 +1411,8 @@ class CognitiveRouter:
 
             parts = content.split(" ", 1)
             if len(parts) < 2 or not parts[1].strip():
-                current = (
-                    get_live_config().get("name")
-                    or self._settings.user_name.strip()
-                    or "(OmniCore)"
-                )
-                return (
-                    f"Mevcut görünen ad: {current}\n"
-                    "Değiştirmek için: /name <yeni-ad>\n"
-                    "Sıfırlamak için: /name off"
-                )
+                current = get_live_config().get("name") or self._settings.user_name.strip() or "(OmniCore)"
+                return f"Mevcut görünen ad: {current}\nDeğiştirmek için: /name <yeni-ad>\nSıfırlamak için: /name off"
             new_name = parts[1].strip()
             live_config = get_live_config()
             if new_name.lower() in ("off", "reset", "sıfırla", "sifirla", "kapat"):
@@ -1488,15 +1451,15 @@ class CognitiveRouter:
             )
 
         if lowered.startswith(("/sysinfo", "/info")):
-
             import platform
 
             import psutil
+
             cpu_pct = psutil.cpu_percent(interval=0.1)
             vm = psutil.virtual_memory()
-            total_gb = vm.total / (1024 ** 3)
-            used_gb = vm.used / (1024 ** 3)
-            free_gb = vm.available / (1024 ** 3)
+            total_gb = vm.total / (1024**3)
+            used_gb = vm.used / (1024**3)
+            free_gb = vm.available / (1024**3)
             return (
                 "💻 Sistem Bilgisi (System Info)\n"
                 "─────────────────────────────\n"
@@ -1518,12 +1481,14 @@ class CognitiveRouter:
                     "Örnek: /set model <model_id>"
                 )
             from config.live_config import get_live_config
+
             key = parts[1].strip()
             val = parts[2].strip()
             success, msg = get_live_config().set(key, val)
             if success and key in ("model", "provider", "approval_mode"):
                 try:
                     from config.settings import get_settings, invalidate_settings_cache
+
                     invalidate_settings_cache()
                     new_settings = get_settings()
                     self._settings = new_settings
@@ -1537,6 +1502,7 @@ class CognitiveRouter:
         if lowered == "/taste" or lowered.startswith("/taste "):
             try:
                 from memory.taste import CATEGORIES, get_taste_engine
+
                 engine = get_taste_engine()
                 parts = content.split(" ", 2)
 
@@ -1593,7 +1559,6 @@ class CognitiveRouter:
 
         return None
 
-
     # -- internal helpers ------------------------------------------------------
 
     def _build_system_prompt(self, memory_context: str) -> str:
@@ -1647,9 +1612,7 @@ class CognitiveRouter:
         step.status = StepStatus.FAILED
         step.error = f"Unknown tool: {step.tool_name}"
         fallback_json = json.dumps(learning, ensure_ascii=True)
-        results_summary.append(
-            f"[FAIL] {step.description}: {step.error} | fallback={fallback_json}"
-        )
+        results_summary.append(f"[FAIL] {step.description}: {step.error} | fallback={fallback_json}")
         return True
 
     async def _build_tool_input(self, step: TaskStep) -> tuple[Any, ToolInput]:
@@ -1694,9 +1657,7 @@ class CognitiveRouter:
             and "backup_required" in policy_decision.reasons
             and RiskLevel(step.risk_level) == RiskLevel.CRITICAL
         ):
-            override_ok = await self._attempt_critical_backup_override(
-                step, user_id, results_summary
-            )
+            override_ok = await self._attempt_critical_backup_override(step, user_id, results_summary)
             if override_ok:
                 policy_decision = self._policy.evaluate(step)
                 if policy_decision.allowed:
@@ -1705,8 +1666,7 @@ class CognitiveRouter:
         step.status = StepStatus.SKIPPED
         if policy_decision.safe_response:
             step.error = (
-                f"Policy blocked: {', '.join(policy_decision.reasons)} | "
-                f"guidance={policy_decision.safe_response}"
+                f"Policy blocked: {', '.join(policy_decision.reasons)} | guidance={policy_decision.safe_response}"
             )
         else:
             step.error = f"Policy blocked: {', '.join(policy_decision.reasons)}"
@@ -1754,9 +1714,7 @@ class CognitiveRouter:
             results_summary.append(f"[DRY-RUN] {step.description}: policy preflight basarili")
             return True
 
-        step.error = (
-            f"Mandatory dry-run failed: {dry_run_output.error or 'unknown dry-run failure'}"
-        )
+        step.error = f"Mandatory dry-run failed: {dry_run_output.error or 'unknown dry-run failure'}"
         await self._state.log_audit(
             "policy_dry_run_failed",
             f"{step.tool_name}: {step.error}",
@@ -1795,9 +1753,7 @@ class CognitiveRouter:
                 "approval_mode": self._guardian.mode.value,
             },
         )
-        results_summary.append(
-            f"[OVERRIDE] {step.description}: user overrode CRITICAL backup requirement"
-        )
+        results_summary.append(f"[OVERRIDE] {step.description}: user overrode CRITICAL backup requirement")
         return True
 
     async def _handle_approval_gate(
@@ -1819,16 +1775,10 @@ class CognitiveRouter:
             )
             return True
 
-        if (
-            RiskLevel(step.risk_level) == RiskLevel.CRITICAL
-            and self._guardian.mode == ApprovalMode.YES
-        ):
+        if RiskLevel(step.risk_level) == RiskLevel.CRITICAL and self._guardian.mode == ApprovalMode.YES:
             await self._state.log_audit(
                 "critical_auto_override",
-                (
-                    f"{step.tool_name}: critical execution auto-approved because "
-                    "guardian mode is YES"
-                ),
+                (f"{step.tool_name}: critical execution auto-approved because guardian mode is YES"),
                 user_id=user_id,
                 metadata={
                     "risk_level": step.risk_level.value,
@@ -1875,8 +1825,7 @@ class CognitiveRouter:
                 update={
                     "status": "failure",
                     "error": (
-                        "Tool returned generic/empty success without actionable data; "
-                        "treated as failure for safety"
+                        "Tool returned generic/empty success without actionable data; treated as failure for safety"
                     ),
                 }
             )
@@ -1964,9 +1913,7 @@ class CognitiveRouter:
         )
 
         # Persist the plan.
-        await self._state.save_task(
-            plan.id, plan.user_request, plan.status.value, plan.model_dump_json()
-        )
+        await self._state.save_task(plan.id, plan.user_request, plan.status.value, plan.model_dump_json())
 
         plan.status = TaskStatus.EXECUTING
         results_summary: list[str] = []
@@ -1978,8 +1925,7 @@ class CognitiveRouter:
             {
                 "total": total_steps,
                 "steps": [
-                    {"step": i + 1, "tool": s.tool_name, "description": s.description}
-                    for i, s in enumerate(plan.steps)
+                    {"step": i + 1, "tool": s.tool_name, "description": s.description} for i, s in enumerate(plan.steps)
                 ],
             },
         )
@@ -2012,9 +1958,7 @@ class CognitiveRouter:
                 continue
 
             if step.delegated:
-                delegated_ok = await self._execute_delegated_step(
-                    step, user_message, results_summary
-                )
+                delegated_ok = await self._execute_delegated_step(step, user_message, results_summary)
                 if delegated_ok:
                     await self._emit_progress(
                         on_progress,
@@ -2096,9 +2040,7 @@ class CognitiveRouter:
         # Finalize plan.
         await self._finalize_plan_state(plan)
 
-        await self._state.save_task(
-            plan.id, plan.user_request, plan.status.value, plan.model_dump_json()
-        )
+        await self._state.save_task(plan.id, plan.user_request, plan.status.value, plan.model_dump_json())
 
         await self._emit_progress(
             on_progress,
@@ -2153,9 +2095,7 @@ class CognitiveRouter:
             if delegated_output.status.value == "success":
                 delegated_results.append(f"{item.get('id', 'subtask')}: ok ({tool_name})")
             else:
-                delegated_results.append(
-                    f"{item.get('id', 'subtask')}: fail ({tool_name}) {delegated_output.error}"
-                )
+                delegated_results.append(f"{item.get('id', 'subtask')}: fail ({tool_name}) {delegated_output.error}")
 
         if not delegated_results:
             return False
@@ -2226,18 +2166,12 @@ class CognitiveRouter:
         if not (hotkey_tool and type_tool and analyze_tool):
             return None
 
-        target = source_url.strip() or (
-            f"https://www.google.com/search?q={source_query.strip().replace(' ', '+')}"
-        )
+        target = source_url.strip() or (f"https://www.google.com/search?q={source_query.strip().replace(' ', '+')}")
         sequence_tools = [hotkey_tool, type_tool, analyze_tool]
-        needs_approval = any(
-            t.requires_approval(ToolInput(tool_name=t.name, parameters={})) for t in sequence_tools
-        )
+        needs_approval = any(t.requires_approval(ToolInput(tool_name=t.name, parameters={})) for t in sequence_tools)
         if needs_approval:
             approval = await self._guardian.request_approval(
-                action_description=(
-                    "GUI fallback sequence: gui_press_hotkey + gui_type_text + gui_analyze_screen"
-                ),
+                action_description=("GUI fallback sequence: gui_press_hotkey + gui_type_text + gui_analyze_screen"),
                 user_id=user_id,
             )
             if approval != ApprovalResult.APPROVED:
@@ -2321,9 +2255,7 @@ class CognitiveRouter:
         try:
             if fallback_tool.requires_approval(fallback_input):
                 approval = await self._guardian.request_approval(
-                    action_description=(
-                        f"gui_autonomous_explorer: Fallback for failed step '{step.tool_name}'"
-                    ),
+                    action_description=(f"gui_autonomous_explorer: Fallback for failed step '{step.tool_name}'"),
                     user_id=user_message.user_id,
                 )
                 if approval != ApprovalResult.APPROVED:

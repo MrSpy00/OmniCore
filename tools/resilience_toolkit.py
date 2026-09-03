@@ -121,9 +121,7 @@ class NetLatencyProfiler(BaseTool):
                         await writer.wait_closed()
 
         if not results_ms:
-            return self._failure(
-                f"No successful samples. host={host} port={port} errors={errors[:3]}"
-            )
+            return self._failure(f"No successful samples. host={host} port={port} errors={errors[:3]}")
 
         return self._success(
             "Latency profile computed",

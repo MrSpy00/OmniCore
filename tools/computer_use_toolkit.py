@@ -151,9 +151,7 @@ class GuiClickImageOnScreen(BaseTool):
                     )
                 ).strip()
                 result = await asyncio.to_thread(_locate_and_click_via_vision, desc)
-                return self._success(
-                    "OCR fallback clicked target", data={**result, "method": "vision_ocr"}
-                )
+                return self._success("OCR fallback clicked target", data={**result, "method": "vision_ocr"})
 
             return self._failure("Image not found on screen")
         except Exception as exc:
@@ -206,9 +204,7 @@ class GuiRecordScreen(BaseTool):
         params = self._params(tool_input)
         seconds = float(self._first_param(params, "seconds", "duration", default=5) or 5)
         fps = int(self._first_param(params, "fps", default=5) or 5)
-        output_path = str(
-            self._first_param(params, "output_path", "path", default="screen_record.mp4")
-        )
+        output_path = str(self._first_param(params, "output_path", "path", default="screen_record.mp4"))
         try:
             save_path = _resolve_sandboxed(output_path)
             await asyncio.to_thread(_record_screen, save_path, seconds, fps)
@@ -226,11 +222,7 @@ class MediaScreenRecordInvisible(BaseTool):
         params = self._params(tool_input)
         action = str(self._first_param(params, "action", default="start")).lower()
         if action == "start":
-            output_path = str(
-                self._first_param(
-                    params, "output_path", "path", default="screen_record_invisible.mp4"
-                )
-            )
+            output_path = str(self._first_param(params, "output_path", "path", default="screen_record_invisible.mp4"))
             fps = int(self._first_param(params, "fps", default=5) or 5)
             try:
                 save_path = _resolve_sandboxed(output_path)
@@ -273,9 +265,7 @@ class GuiExtractTextFromRegion(BaseTool):
             "width": int(self._first_param(params, "width", default=0) or 0),
             "height": int(self._first_param(params, "height", default=0) or 0),
         }
-        output_path = str(
-            self._first_param(params, "output_path", "path", default="region_ocr.png")
-        )
+        output_path = str(self._first_param(params, "output_path", "path", default="region_ocr.png"))
         try:
             save_path = _resolve_sandboxed(output_path)
             save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -284,9 +274,7 @@ class GuiExtractTextFromRegion(BaseTool):
             max_chars = int(self._first_param(params, "max_chars", default=20_000) or 20_000)
             if len(text) > max_chars:
                 text = text[:max_chars] + "\n... (truncated)"
-            return self._success(
-                "Region analysis completed", data={"path": str(save_path), "text": text}
-            )
+            return self._success("Region analysis completed", data={"path": str(save_path), "text": text})
         except Exception as exc:
             return self._failure(str(exc))
 
@@ -294,8 +282,7 @@ class GuiExtractTextFromRegion(BaseTool):
 class GuiLocateAndClick(BaseTool):
     name = "gui_locate_and_click"
     description = (
-        "Take a screenshot, use Gemini vision to locate a described UI element, "
-        "and click its center coordinates."
+        "Take a screenshot, use Gemini vision to locate a described UI element, and click its center coordinates."
     )
     is_destructive = True
 
@@ -322,11 +309,7 @@ class GuiLocateAndClick(BaseTool):
             except Exception as exc:
                 return self._failure(str(exc))
 
-        element_desc = str(
-            self._first_param(
-                params, "element", "description", "target", "text", "label", default=""
-            )
-        )
+        element_desc = str(self._first_param(params, "element", "description", "target", "text", "label", default=""))
         if not element_desc:
             return self._failure("element description is required")
         try:
@@ -395,9 +378,7 @@ def _capture_frame_dotnet() -> Image.Image:
         timeout=25,
     )
     if completed.returncode != 0:
-        raise RuntimeError(
-            (completed.stderr or completed.stdout or "dotnet frame capture failed").strip()
-        )
+        raise RuntimeError((completed.stderr or completed.stdout or "dotnet frame capture failed").strip())
 
     with Image.open(temp_path) as img:
         frame = img.copy()
@@ -445,9 +426,7 @@ def _capture_region(path: Path, region: dict[str, int]) -> None:
         timeout=25,
     )
     if completed.returncode != 0:
-        raise RuntimeError(
-            (completed.stderr or completed.stdout or "dotnet region capture failed").strip()
-        )
+        raise RuntimeError((completed.stderr or completed.stdout or "dotnet region capture failed").strip())
 
 
 def _locate_and_click_via_vision(element_desc: str) -> dict[str, Any]:

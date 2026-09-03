@@ -68,8 +68,7 @@ class ReminderSet(BaseTool):
 
         if not _RUNTIME.is_windows:
             return self._failure(
-                "Bu araç yalnızca Windows'ta çalışır. "
-                "Linux/macOS için 'crontab' veya 'at' komutunu kullanın."
+                "Bu araç yalnızca Windows'ta çalışır. Linux/macOS için 'crontab' veya 'at' komutunu kullanın."
             )
 
         if not task_name:
@@ -130,9 +129,7 @@ class ReminderSet(BaseTool):
             )
 
         stderr = (result.stderr or "").strip()
-        return self._failure(
-            f"schtasks hatası (kod {result.returncode}): {stderr or result.stdout}"
-        )
+        return self._failure(f"schtasks hatası (kod {result.returncode}): {stderr or result.stdout}")
 
 
 class ReminderList(BaseTool):
@@ -178,9 +175,7 @@ class ReminderDelete(BaseTool):
     """Delete an OmniCore reminder from Windows Task Scheduler."""
 
     name = "reminder_delete"
-    description = (
-        "Delete an OmniCore reminder from Windows Task Scheduler. Parameters: task_name (required)."
-    )
+    description = "Delete an OmniCore reminder from Windows Task Scheduler. Parameters: task_name (required)."
     is_destructive = True
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:

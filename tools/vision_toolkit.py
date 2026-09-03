@@ -20,8 +20,7 @@ from models.tools import ToolInput, ToolOutput
 from tools.base import BaseTool, resolve_user_path
 
 SCREEN_ANALYSIS_PROMPT = (
-    "Read all visible text on this screen exactly. If there is no readable text, "
-    "briefly describe the visible UI."
+    "Read all visible text on this screen exactly. If there is no readable text, briefly describe the visible UI."
 )
 TARGET_LOCATE_PROMPT = (
     "Find the target UI element described by the user. "
@@ -60,6 +59,7 @@ def _focus_window_by_title(title: str) -> bool:
         return False
     try:
         from tools.base import force_window_foreground
+
         result = force_window_foreground(title, timeout_seconds=3.0)
         return bool(result.get("activated", False))
     except Exception:
@@ -72,6 +72,7 @@ def _get_window_bbox(title: str) -> dict[str, int] | None:
         return None
     try:
         import pygetwindow as gw  # type: ignore[import-not-found]
+
         windows = gw.getWindowsWithTitle(title)
         if windows:
             w = windows[0]
@@ -90,19 +91,13 @@ class GuiAnalyzeScreen(BaseTool):
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
         # Default to Desktop/screenshot for easy access
-        output_path = str(
-            self._first_param(params, "output_path", "path", default="Desktop/screenshot.png")
-        )
+        output_path = str(self._first_param(params, "output_path", "path", default="Desktop/screenshot.png"))
         region = params.get("region")
         if isinstance(region, str):
             region = None
-        target = str(
-            self._first_param(params, "target", "element", "query", default="") or ""
-        ).strip()
+        target = str(self._first_param(params, "target", "element", "query", default="") or "").strip()
         # app_name: window title to focus BEFORE taking screenshot
-        app_name = str(
-            self._first_param(params, "app", "app_name", "application", "window", default="") or ""
-        ).strip()
+        app_name = str(self._first_param(params, "app", "app_name", "application", "window", default="") or "").strip()
         click = bool(params.get("click", False))
         verify_after_click = bool(params.get("verify_after_click", False))
         max_attempts = int(params.get("max_attempts", 2) or 2)
@@ -139,9 +134,7 @@ class GuiAnalyzeScreen(BaseTool):
                     await asyncio.to_thread(_focus_window_by_title, app_name)
                     await asyncio.to_thread(time.sleep, 0.3)
                 await asyncio.to_thread(_capture_screen, save_path, region)
-                text = await asyncio.to_thread(
-                    analyze_image_with_gemini, save_path, SCREEN_ANALYSIS_PROMPT
-                )
+                text = await asyncio.to_thread(analyze_image_with_gemini, save_path, SCREEN_ANALYSIS_PROMPT)
                 if len(text) > max_chars:
                     text = text[:max_chars] + "\n... (truncated)"
                 payload["text"] = text
@@ -252,8 +245,7 @@ def analyze_image_with_gemini(path: Path, prompt: str = SCREEN_ANALYSIS_PROMPT) 
                 continue
             if retryable:
                 raise RuntimeError(
-                    "Vision quota exhausted across all configured Gemini keys; "
-                    "fallback to GUI/CLI flow is required"
+                    "Vision quota exhausted across all configured Gemini keys; fallback to GUI/CLI flow is required"
                 ) from exc
             raise
 

@@ -51,9 +51,7 @@ class VideoGetInfo(BaseTool):
     """Get basic metadata about a YouTube video."""
 
     name = "video_get_info"
-    description = (
-        "Get YouTube video title and basic info using yt-dlp. Parameters: url (YouTube URL)."
-    )
+    description = "Get YouTube video title and basic info using yt-dlp. Parameters: url (YouTube URL)."
     is_destructive = False
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:

@@ -28,8 +28,7 @@ class SchedAddDynamicReminder(BaseTool):
             dt = datetime.fromisoformat(remind_at)
         except (ValueError, TypeError):
             return self._failure(
-                f"Invalid remind_at format: {remind_at}. "
-                "Use ISO format (e.g. 2025-07-15T10:00:00+03:00)."
+                f"Invalid remind_at format: {remind_at}. Use ISO format (e.g. 2025-07-15T10:00:00+03:00)."
             )
 
         if dt.tzinfo is None:

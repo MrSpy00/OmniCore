@@ -58,9 +58,7 @@ class RefactorGeneratePatch(BaseTool):
         params = self._params(tool_input)
         path_str = str(self._first_param(params, "file_path", "path", default="") or "").strip()
         target_text = str(self._first_param(params, "target_text", "target", default="") or "")
-        replacement_text = str(
-            self._first_param(params, "replacement_text", "replacement", default="") or ""
-        )
+        replacement_text = str(self._first_param(params, "replacement_text", "replacement", default="") or "")
 
         if not path_str or not target_text:
             return self._failure("file_path and target_text parameters are required.")

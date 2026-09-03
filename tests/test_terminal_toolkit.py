@@ -34,9 +34,7 @@ async def test_terminal_execute_sets_utf8_env(monkeypatch, tmp_path):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     tool = TerminalExecute()
-    result = await tool.execute(
-        ToolInput(tool_name="terminal_execute", parameters={"command": "dir", "cwd": "."})
-    )
+    result = await tool.execute(ToolInput(tool_name="terminal_execute", parameters={"command": "dir", "cwd": "."}))
 
     assert result.status == ToolStatus.SUCCESS
     assert recorded["env"]["PYTHONIOENCODING"] == "utf-8"
@@ -51,9 +49,7 @@ async def test_terminal_execute_blocks_dangerous_pattern(monkeypatch, tmp_path):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     tool = TerminalExecute()
-    result = await tool.execute(
-        ToolInput(tool_name="terminal_execute", parameters={"command": "rm -rf /"})
-    )
+    result = await tool.execute(ToolInput(tool_name="terminal_execute", parameters={"command": "rm -rf /"}))
 
     assert result.status == ToolStatus.FAILURE
     assert "blocked by safety policy" in result.error.lower()
@@ -96,9 +92,7 @@ async def test_terminal_execute_blocks_defensive_only_markers(monkeypatch, tmp_p
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     tool = TerminalExecute()
-    result = await tool.execute(
-        ToolInput(tool_name="terminal_execute", parameters={"command": "psexec -s cmd.exe"})
-    )
+    result = await tool.execute(ToolInput(tool_name="terminal_execute", parameters={"command": "psexec -s cmd.exe"}))
 
     assert result.status == ToolStatus.FAILURE
     assert "privilege-escalation pattern blocked" in result.error.lower()
@@ -109,9 +103,7 @@ async def test_terminal_execute_blocks_fodhelper_marker(monkeypatch, tmp_path):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     tool = TerminalExecute()
-    result = await tool.execute(
-        ToolInput(tool_name="terminal_execute", parameters={"command": "fodhelper.exe"})
-    )
+    result = await tool.execute(ToolInput(tool_name="terminal_execute", parameters={"command": "fodhelper.exe"}))
 
     assert result.status == ToolStatus.FAILURE
     assert "category: privilege_escalation" in result.error.lower()
@@ -138,9 +130,7 @@ async def test_terminal_execute_block_message_contains_category(monkeypatch, tmp
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     tool = TerminalExecute()
-    result = await tool.execute(
-        ToolInput(tool_name="terminal_execute", parameters={"command": "psexec -s cmd.exe"})
-    )
+    result = await tool.execute(ToolInput(tool_name="terminal_execute", parameters={"command": "psexec -s cmd.exe"}))
 
     assert result.status == ToolStatus.FAILURE
     assert "category: privilege_escalation" in result.error.lower()
@@ -169,9 +159,7 @@ async def test_terminal_execute_block_message_contains_kernel_category(monkeypat
 
     tool = TerminalExecute()
     command = "bpftrace -e 'tracepoint:syscalls:sys_enter_openat { printf(\"x\") }'"
-    result = await tool.execute(
-        ToolInput(tool_name="terminal_execute", parameters={"command": command})
-    )
+    result = await tool.execute(ToolInput(tool_name="terminal_execute", parameters={"command": command}))
 
     assert result.status == ToolStatus.FAILURE
     assert "category: kernel_manipulation" in result.error.lower()
@@ -183,9 +171,7 @@ async def test_terminal_execute_block_message_contains_raw_disk_category(monkeyp
 
     tool = TerminalExecute()
     command = "type \\\\.\\PhysicalDrive0"
-    result = await tool.execute(
-        ToolInput(tool_name="terminal_execute", parameters={"command": command})
-    )
+    result = await tool.execute(ToolInput(tool_name="terminal_execute", parameters={"command": command}))
 
     assert result.status == ToolStatus.FAILURE
     assert "category: raw_disk_access" in result.error.lower()

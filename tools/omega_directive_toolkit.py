@@ -87,9 +87,7 @@ class GuiAutonomousExplorer(BaseTool):
             return self._failure("url or query is required")
 
         try:
-            data = await asyncio.to_thread(
-                _gui_autonomous_explore_sync, url, query, max(1, max_steps)
-            )
+            data = await asyncio.to_thread(_gui_autonomous_explore_sync, url, query, max(1, max_steps))
             return self._success("GUI autonomous explorer completed", data=data)
         except Exception as exc:
             return self._failure(str(exc))
@@ -102,9 +100,7 @@ class DevAutoDebugger(BaseTool):
 
     async def execute(self, tool_input: ToolInput):
         params = self._params(tool_input)
-        command = str(
-            self._first_param(params, "command", "cmd", default="uv run pytest -v") or ""
-        ).strip()
+        command = str(self._first_param(params, "command", "cmd", default="uv run pytest -v") or "").strip()
         cwd_raw = str(self._first_param(params, "cwd", "path", default=".") or ".")
         timeout = int(self._first_param(params, "timeout", default=180) or 180)
         if not command:
@@ -129,15 +125,11 @@ class OsRegistryDeepTweak(BaseTool):
     async def execute(self, tool_input: ToolInput):
         params = self._params(tool_input)
         action = str(self._first_param(params, "action", default="read") or "read").lower()
-        hive = str(
-            self._first_param(params, "hive", default="HKEY_CURRENT_USER") or "HKEY_CURRENT_USER"
-        )
+        hive = str(self._first_param(params, "hive", default="HKEY_CURRENT_USER") or "HKEY_CURRENT_USER")
         key_path = str(self._first_param(params, "key_path", "path", default="") or "")
         value_name = str(self._first_param(params, "value_name", "name", default="") or "")
         value_data = self._first_param(params, "value_data", "value", default="")
-        value_type = str(
-            self._first_param(params, "value_type", "type", default="REG_SZ") or "REG_SZ"
-        )
+        value_type = str(self._first_param(params, "value_type", "type", default="REG_SZ") or "REG_SZ")
 
         if not key_path:
             return self._failure("key_path is required")
@@ -233,9 +225,7 @@ class OsCrossRootInventory(BaseTool):
         roots_raw = self._first_param(params, "roots", default=None)
         max_entries = int(self._first_param(params, "max_entries", default=2000) or 2000)
         try:
-            data = await asyncio.to_thread(
-                _cross_root_inventory_sync, roots_raw, max(100, max_entries)
-            )
+            data = await asyncio.to_thread(_cross_root_inventory_sync, roots_raw, max(100, max_entries))
             return self._success("Cross-root inventory completed", data=data)
         except Exception as exc:
             return self._failure(str(exc))
@@ -322,12 +312,8 @@ def _packet_sniffer_sync(
         ]
         if interface:
             cmd.extend(["-i", interface])
-        completed = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=max(20, duration + 15)
-        )
-        capture_path.write_text(
-            (completed.stdout or "") + "\n" + (completed.stderr or ""), encoding="utf-8"
-        )
+        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=max(20, duration + 15))
+        capture_path.write_text((completed.stdout or "") + "\n" + (completed.stderr or ""), encoding="utf-8")
         return {
             "backend": "tshark",
             "path": str(capture_path),
@@ -340,12 +326,8 @@ def _packet_sniffer_sync(
         cmd = ["tcpdump", "-n", "-c", str(packet_limit)]
         if interface:
             cmd.extend(["-i", interface])
-        completed = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=max(20, duration + 15)
-        )
-        capture_path.write_text(
-            (completed.stdout or "") + "\n" + (completed.stderr or ""), encoding="utf-8"
-        )
+        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=max(20, duration + 15))
+        capture_path.write_text((completed.stdout or "") + "\n" + (completed.stderr or ""), encoding="utf-8")
         return {
             "backend": "tcpdump",
             "path": str(capture_path),
@@ -603,16 +585,9 @@ def _platform_probe_sync() -> dict[str, object]:
 def _kill_connections_sync(host: str, port: int) -> dict[str, object]:
     if _RUNTIME.is_windows:
         base = ["powershell", "-NoProfile", "-Command"]
-        kill_expr = (
-            "| Select-Object -ExpandProperty OwningProcess "
-            "| ForEach-Object { Stop-Process -Id $_ -Force }"
-        )
+        kill_expr = "| Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }"
         if host and port > 0:
-            script = (
-                f"Get-NetTCPConnection -State Established "
-                f"-RemoteAddress '{host}' -RemotePort {port} "
-                f"{kill_expr}"
-            )
+            script = f"Get-NetTCPConnection -State Established -RemoteAddress '{host}' -RemotePort {port} {kill_expr}"
         elif host:
             script = f"Get-NetTCPConnection -State Established -RemoteAddress '{host}' {kill_expr}"
         else:

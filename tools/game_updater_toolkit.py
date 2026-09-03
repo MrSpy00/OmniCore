@@ -178,8 +178,7 @@ class GameUpdater(BaseTool):
             return await self._install_game(app_id=app_id)
 
         return self._failure(
-            f"Bilinmeyen action: '{action}'. "
-            "Geçerli: list, update, install, steam_status, epic_launch, download_status"
+            f"Bilinmeyen action: '{action}'. Geçerli: list, update, install, steam_status, epic_launch, download_status"
         )
 
     async def _steam_status(self) -> ToolOutput:
@@ -214,8 +213,7 @@ class GameUpdater(BaseTool):
         all_games.sort(key=lambda g: g["name"].lower())
 
         summary_lines = [
-            f"• [{g['platform'].upper()}] {g['name']} (ID: {g.get('app_id', '?')})"
-            for g in all_games[:40]
+            f"• [{g['platform'].upper()}] {g['name']} (ID: {g.get('app_id', '?')})" for g in all_games[:40]
         ]
         summary = (
             f"Toplam {len(all_games)} oyun bulundu "
@@ -301,19 +299,14 @@ class GameUpdater(BaseTool):
             list_result = await self._list_games()
             if list_result.status.value == "success":
                 games = list_result.data.get("games", [])
-                matches = [
-                    g
-                    for g in games
-                    if game_name.lower() in g["name"].lower() and g.get("platform") == "steam"
-                ]
+                matches = [g for g in games if game_name.lower() in g["name"].lower() and g.get("platform") == "steam"]
                 if matches:
                     app_id = matches[0]["app_id"]
                     game_name = matches[0]["name"]
 
         if not app_id:
             return self._failure(
-                f"'{game_name}' için Steam AppID bulunamadı. "
-                "Lütfen 'app_id' parametresini manuel olarak girin."
+                f"'{game_name}' için Steam AppID bulunamadı. Lütfen 'app_id' parametresini manuel olarak girin."
             )
 
         update_url = f"steam://run/{app_id}"
@@ -324,8 +317,7 @@ class GameUpdater(BaseTool):
                 shell=True,
             )
             return self._success(
-                f"Steam güncelleme başlatıldı: AppID={app_id}"
-                + (f" ({game_name})" if game_name else ""),
+                f"Steam güncelleme başlatıldı: AppID={app_id}" + (f" ({game_name})" if game_name else ""),
                 data={"app_id": app_id, "game_name": game_name, "method": "steam_url"},
             )
         except Exception as exc:
@@ -341,8 +333,7 @@ class GameUpdater(BaseTool):
                 shell=True,
             )
             return self._success(
-                f"Steam kurulum başlatıldı: AppID={app_id}. "
-                "Steam penceresi kurulum onayı isteyecek.",
+                f"Steam kurulum başlatıldı: AppID={app_id}. Steam penceresi kurulum onayı isteyecek.",
                 data={"app_id": app_id, "method": "steam_install_url"},
             )
         except Exception as exc:
@@ -397,6 +388,4 @@ class GameUpdater(BaseTool):
                 data={"method": "protocol_url"},
             )
         except Exception as exc:
-            return self._failure(
-                f"Epic Games Launcher bulunamadı. Lütfen kurulu olduğundan emin olun. Hata: {exc}"
-            )
+            return self._failure(f"Epic Games Launcher bulunamadı. Lütfen kurulu olduğundan emin olun. Hata: {exc}")

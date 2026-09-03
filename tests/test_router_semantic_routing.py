@@ -40,10 +40,7 @@ def test_error_classifiers_include_413_and_token_backpressure():
 
 def test_filter_relevant_tools_caps_to_12_and_keeps_always_on():
     router = _minimal_router()
-    tools = [
-        {"name": f"dev_tool_{i}", "description": "developer utility", "destructive": "False"}
-        for i in range(80)
-    ]
+    tools = [{"name": f"dev_tool_{i}", "description": "developer utility", "destructive": "False"} for i in range(80)]
     tools.extend(
         [
             {

@@ -34,9 +34,7 @@ class NetStealthPortScan(BaseTool):
             return self._failure("host is required")
         try:
             open_ports = await asyncio.to_thread(_scan_ports, host, ports)
-            return self._success(
-                "Port scan completed", data={"host": host, "open_ports": open_ports}
-            )
+            return self._success("Port scan completed", data={"host": host, "open_ports": open_ports})
         except Exception as exc:
             return self._failure(str(exc))
 
@@ -59,9 +57,7 @@ class NetTraceroute(BaseTool):
                 text=True,
                 timeout=60,
             )
-            return self._success(
-                "Traceroute completed", data={"output": completed.stdout or completed.stderr}
-            )
+            return self._success("Traceroute completed", data={"output": completed.stdout or completed.stderr})
         except Exception as exc:
             return self._failure(str(exc))
 
@@ -106,9 +102,7 @@ class NetFtpClient(BaseTool):
         if not host:
             return self._failure("host is required")
         try:
-            data = await asyncio.to_thread(
-                _ftp_action, host, username, password, action, remote_path
-            )
+            data = await asyncio.to_thread(_ftp_action, host, username, password, action, remote_path)
             return self._success("FTP action completed", data=data)
         except Exception as exc:
             return self._failure(str(exc))
@@ -194,18 +188,14 @@ class OsDeepSearch(BaseTool):
         if not filename:
             return self._failure("filename is required")
 
-        search_root_raw = str(
-            self._first_param(params, "search_root", "root", "path", default="")
-        ).strip()
+        search_root_raw = str(self._first_param(params, "search_root", "root", "path", default="")).strip()
         if search_root_raw:
             search_root, _ = resolve_user_path(search_root_raw)
         else:
             search_root = _default_search_root()
 
         limit = int(self._first_param(params, "limit", default=500) or 500)
-        timeout_seconds = int(
-            self._first_param(params, "timeout_seconds", "timeout", default=180) or 180
-        )
+        timeout_seconds = int(self._first_param(params, "timeout_seconds", "timeout", default=180) or 180)
         timeout_seconds = max(10, timeout_seconds)
 
         try:
@@ -219,8 +209,7 @@ class OsDeepSearch(BaseTool):
             )
         except TimeoutError:
             return self._failure(
-                "Search timed out after "
-                f"{timeout_seconds}s for root '{search_root}' and pattern '{filename}'"
+                f"Search timed out after {timeout_seconds}s for root '{search_root}' and pattern '{filename}'"
             )
         except Exception as exc:
             return self._failure(str(exc))
@@ -261,9 +250,7 @@ def _scan_ports(host: str, ports: list[int]) -> list[int]:
     return open_ports
 
 
-def _ftp_action(
-    host: str, username: str, password: str, action: str, remote_path: str
-) -> dict[str, object]:
+def _ftp_action(host: str, username: str, password: str, action: str, remote_path: str) -> dict[str, object]:
     with ftplib.FTP(host, timeout=15) as ftp:
         ftp.login(username, password)
         if action == "list":
@@ -272,9 +259,7 @@ def _ftp_action(
         raise ValueError("Unsupported FTP action")
 
 
-def _ssh_execute(
-    host: str, port: int, username: str, password: str, command: str
-) -> dict[str, str | int]:
+def _ssh_execute(host: str, port: int, username: str, password: str, command: str) -> dict[str, str | int]:
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
@@ -450,10 +435,7 @@ def _deep_search_windows(filename: str, search_root: Path, limit: int) -> dict[s
         "$opts.RecurseSubdirectories=$true; "
         "$opts.IgnoreInaccessible=$true; "
         "$opts.ReturnSpecialDirectories=$false; "
-        + (
-            "$opts.AttributesToSkip=[System.IO.FileAttributes]::System "
-            "-bor [System.IO.FileAttributes]::Offline; "
-        )
+        + ("$opts.AttributesToSkip=[System.IO.FileAttributes]::System -bor [System.IO.FileAttributes]::Offline; ")
         + "[System.IO.Directory]::EnumerateFiles($root,$name,$opts)"
     )
     completed = subprocess.run(

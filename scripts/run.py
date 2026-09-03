@@ -126,6 +126,7 @@ async def _run(mode: str, debug: bool = False) -> None:
 
     # Apply persisted approval mode
     from config.live_config import get_live_config
+
     saved_approval = get_live_config().get("approval_mode") or getattr(settings, "approval_mode", "ask")
     router._guardian.set_mode(saved_approval)
 
@@ -195,7 +196,6 @@ async def _run(mode: str, debug: bool = False) -> None:
             asyncio.get_event_loop().call_later(1.0, _auto_open_browser)
             await server.serve()
 
-
         elif mode == "mcp":
             from interfaces.mcp_gateway import MCPServerGateway
 
@@ -242,9 +242,7 @@ async def _run(mode: str, debug: bool = False) -> None:
             try:
                 while True:
                     try:
-                        result = await asyncio.to_thread(
-                            lambda: asyncio.run(voice.listen_and_respond())
-                        )
+                        result = await asyncio.to_thread(lambda: asyncio.run(voice.listen_and_respond()))
                     except Exception:
                         # Run in main loop if thread fails
                         result = await voice.listen_and_respond()
@@ -256,11 +254,13 @@ async def _run(mode: str, debug: bool = False) -> None:
                         # Play audio if possible
                         try:
                             import tempfile
+
                             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
                                 f.write(result["response_audio"])
                                 audio_path = f.name
                             # Try to play with system command
                             import subprocess
+
                             if sys.platform == "win32":
                                 subprocess.Popen(
                                     ["start", "", audio_path],

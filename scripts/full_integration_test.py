@@ -154,9 +154,7 @@ async def test_recovery_engine():
             return ToolOutput(tool_name="always_fail", status=ToolStatus.FAILURE, error="oops")
 
     step = TaskStep(description="test", tool_name="always_fail", max_retries=0)
-    result = await engine.execute_with_retry(
-        AlwaysFail(), ToolInput(tool_name="always_fail", parameters={}), step
-    )
+    result = await engine.execute_with_retry(AlwaysFail(), ToolInput(tool_name="always_fail", parameters={}), step)
     check("recovery_zero_retry_executes", result is not None)
     check("recovery_zero_retry_has_error", result.error is not None)
 

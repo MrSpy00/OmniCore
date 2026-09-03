@@ -36,6 +36,7 @@ try:
     from prompt_toolkit.output import create_output
     from prompt_toolkit.output.vt100 import Vt100_Output
     from prompt_toolkit.styles import Style
+
     _HAS_PROMPT_TOOLKIT = True
 except ImportError:
     _HAS_PROMPT_TOOLKIT = False
@@ -54,6 +55,7 @@ def _get_display_name() -> str:
     """Get the personalized user display name."""
     try:
         from config.live_config import get_live_config
+
         name = get_live_config().get("name")
         if name and name.strip():
             return name.strip()
@@ -67,6 +69,7 @@ def _get_display_name() -> str:
         pass
     import getpass
     import os
+
     try:
         return os.environ.get("OMNICORE_USER_NAME") or getpass.getuser() or "Operator"
     except Exception:
@@ -105,19 +108,22 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
 SLASH_COMMAND_NAMES = [c[0] for c in SLASH_COMMANDS]
 
 # High-contrast, crystal-clear dropdown styling — works on ANSI & TrueColor terminals
-_PROMPT_STYLE = Style.from_dict({
-    # Completion dropdown menu — high contrast for readability
-    "completion-menu": "bg:#1a1f2e #e2e8f0",
-    "completion-menu.completion": "bg:#1e293b #f8fafc",
-    "completion-menu.completion.current": "bg:#0ea5e9 #ffffff bold",
-    "completion-menu.meta.completion": "bg:#0f172a #cbd5e1",
-    "completion-menu.meta.completion.current": "bg:#0ea5e9 #ffffff bold",
-    "scrollbar.background": "bg:#0f172a",
-    "scrollbar.button": "bg:#38bdf8",
-})
+_PROMPT_STYLE = Style.from_dict(
+    {
+        # Completion dropdown menu — high contrast for readability
+        "completion-menu": "bg:#1a1f2e #e2e8f0",
+        "completion-menu.completion": "bg:#1e293b #f8fafc",
+        "completion-menu.completion.current": "bg:#0ea5e9 #ffffff bold",
+        "completion-menu.meta.completion": "bg:#0f172a #cbd5e1",
+        "completion-menu.meta.completion.current": "bg:#0ea5e9 #ffffff bold",
+        "scrollbar.background": "bg:#0f172a",
+        "scrollbar.button": "bg:#38bdf8",
+    }
+)
 
 
 if _HAS_PROMPT_TOOLKIT:
+
     class OmniCompleter(Completer):
         """Dropdown autocomplete completer for slash commands and subcommands."""
 
@@ -153,9 +159,7 @@ if _HAS_PROMPT_TOOLKIT:
                     ]
                     for opt, desc in options:
                         if opt.startswith(sub_text.lower()):
-                            yield Completion(
-                                opt, start_position=-len(sub_text), display=opt, display_meta=desc
-                            )
+                            yield Completion(opt, start_position=-len(sub_text), display=opt, display_meta=desc)
 
                 elif cmd == "/provider":
                     providers = [
@@ -170,9 +174,7 @@ if _HAS_PROMPT_TOOLKIT:
                     ]
                     for prov, desc in providers:
                         if prov.startswith(sub_text.lower()):
-                            yield Completion(
-                                prov, start_position=-len(sub_text), display=prov, display_meta=desc
-                            )
+                            yield Completion(prov, start_position=-len(sub_text), display=prov, display_meta=desc)
 
                 elif cmd == "/setmodel":
                     aliases = [
@@ -189,16 +191,12 @@ if _HAS_PROMPT_TOOLKIT:
                     ]
                     for alias, desc in aliases:
                         if alias.startswith(sub_text.lower()):
-                            yield Completion(
-                                alias, start_position=-len(sub_text), display=alias, display_meta=desc
-                            )
+                            yield Completion(alias, start_position=-len(sub_text), display=alias, display_meta=desc)
 
                 elif cmd == "/plan":
                     for opt, desc in [("on", "Plan modunu aç (dry-run zorunlu)"), ("off", "Plan modunu kapat")]:
                         if opt.startswith(sub_text.lower()):
-                            yield Completion(
-                                opt, start_position=-len(sub_text), display=opt, display_meta=desc
-                            )
+                            yield Completion(opt, start_position=-len(sub_text), display=opt, display_meta=desc)
 
                 elif cmd == "/config":
                     for opt, desc in [
@@ -207,9 +205,7 @@ if _HAS_PROMPT_TOOLKIT:
                         ("set", "Ayar değiştir: /config set <key> <val>"),
                     ]:
                         if opt.startswith(sub_text.lower()):
-                            yield Completion(
-                                opt, start_position=-len(sub_text), display=opt, display_meta=desc
-                            )
+                            yield Completion(opt, start_position=-len(sub_text), display=opt, display_meta=desc)
 
                 elif cmd == "/set":
                     for opt, desc in [
@@ -220,12 +216,11 @@ if _HAS_PROMPT_TOOLKIT:
                         ("name", "Görünen isim"),
                     ]:
                         if opt.startswith(sub_text.lower()):
-                            yield Completion(
-                                opt, start_position=-len(sub_text), display=opt, display_meta=desc
-                            )
+                            yield Completion(opt, start_position=-len(sub_text), display=opt, display_meta=desc)
             except Exception:
                 return
 else:
+
     class OmniCompleter:  # type: ignore[no-redef]
         pass
 
@@ -255,6 +250,7 @@ def _enable_ansi_windows() -> None:
         return
     try:
         import ctypes
+
         kernel32 = ctypes.windll.kernel32
         try:
             kernel32.SetConsoleOutputCP(65001)
@@ -277,13 +273,19 @@ def _enable_ansi_windows() -> None:
         # Last resort: try via PowerShell
         try:
             import subprocess
+
             subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "$p=[Console]::OutputEncoding; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
-                 "$h=[IntPtr]-11; $m=[u]int32(0); "
-                 "[Kernel32]::GetConsoleMode($h,[ref]$m) | Out-Null; "
-                 "[Kernel32]::SetConsoleMode($h,$m -bor 4) | Out-Null"],
-                capture_output=True, timeout=5
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "$p=[Console]::OutputEncoding; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
+                    "$h=[IntPtr]-11; $m=[u]int32(0); "
+                    "[Kernel32]::GetConsoleMode($h,[ref]$m) | Out-Null; "
+                    "[Kernel32]::SetConsoleMode($h,$m -bor 4) | Out-Null",
+                ],
+                capture_output=True,
+                timeout=5,
             )
         except Exception:
             pass
@@ -377,6 +379,7 @@ def _read_key_unix() -> str | None:
 def _read_key() -> str | None:
     """Read a single keypress, platform-aware."""
     import os
+
     if os.name == "nt":
         return _read_key_windows()
     return _read_key_unix()
@@ -385,11 +388,13 @@ def _read_key() -> str | None:
 def _supports_ansi() -> bool:
     """Check if the terminal supports ANSI escape codes."""
     import os
+
     if os.name != "nt":
         return True
     # Windows 10+ supports ANSI via VT processing
     try:
         import ctypes
+
         kernel32 = ctypes.windll.kernel32
         # ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
         handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
@@ -402,33 +407,48 @@ def _supports_ansi() -> bool:
 
 # Categorized slash commands for the interactive menu
 _SLASH_CATEGORIES: list[tuple[str, list[tuple[str, str]]]] = [
-    ("📊 Durum & Bilgi", [
-        ("/status", "Sistem durumu"),
-        ("/models", "Model listesi"),
-        ("/sysinfo", "CPU/RAM bilgisi"),
-        ("/doctor", "Teşhis aracı"),
-    ]),
-    ("⚙️ Ayarlar", [
-        ("/setmodel", "Model değiştir"),
-        ("/provider", "Provider değiştir"),
-        ("/perm", "İzin modu"),
-        ("/name", "Kullanıcı adı"),
-        ("/set", "Hızlı ayar değiştir"),
-        ("/config", "Detaylı ayarlar"),
-        ("/plan", "Plan modu"),
-    ]),
-    ("🧠 Hafıza & İşlem", [
-        ("/memory", "Bellek yönetimi"),
-        ("/reset", "Oturumu sıfırla"),
-        ("/commit", "Git commit"),
-        ("/hud", "HUD göster"),
-    ]),
-    ("🧬 Öğrenme", [
-        ("/taste", "Tercihleri gör/yonet"),
-    ]),
-    ("ℹ️ Yardım", [
-        ("/help", "Kullanım kılavuzu"),
-    ]),
+    (
+        "📊 Durum & Bilgi",
+        [
+            ("/status", "Sistem durumu"),
+            ("/models", "Model listesi"),
+            ("/sysinfo", "CPU/RAM bilgisi"),
+            ("/doctor", "Teşhis aracı"),
+        ],
+    ),
+    (
+        "⚙️ Ayarlar",
+        [
+            ("/setmodel", "Model değiştir"),
+            ("/provider", "Provider değiştir"),
+            ("/perm", "İzin modu"),
+            ("/name", "Kullanıcı adı"),
+            ("/set", "Hızlı ayar değiştir"),
+            ("/config", "Detaylı ayarlar"),
+            ("/plan", "Plan modu"),
+        ],
+    ),
+    (
+        "🧠 Hafıza & İşlem",
+        [
+            ("/memory", "Bellek yönetimi"),
+            ("/reset", "Oturumu sıfırla"),
+            ("/commit", "Git commit"),
+            ("/hud", "HUD göster"),
+        ],
+    ),
+    (
+        "🧬 Öğrenme",
+        [
+            ("/taste", "Tercihleri gör/yonet"),
+        ],
+    ),
+    (
+        "ℹ️ Yardım",
+        [
+            ("/help", "Kullanım kılavuzu"),
+        ],
+    ),
 ]
 
 
@@ -441,6 +461,7 @@ def _interactive_slash_menu() -> str | None:
     On Unix: uses tty/termios for arrow keys.
     """
     import os
+
     try:
         # Build flat list from categories
         flat_commands: list[tuple[str, str, str]] = []  # (cmd, desc, category)
@@ -654,6 +675,7 @@ class CLIGateway:
             return
         try:
             import shutil
+
             try:
                 out = create_output()
             except Exception:
@@ -832,9 +854,7 @@ class CLIGateway:
             if user_input.lower() == "/hud":
                 from interfaces.hud import generate_cyberpunk_hud_panel
 
-                tools_cnt = (
-                    len(self._router._registry) if hasattr(self._router, "_registry") else 40
-                )
+                tools_cnt = len(self._router._registry) if hasattr(self._router, "_registry") else 40
                 mem_nodes = getattr(self._router._long_term, "count", lambda: 0)()
                 print(generate_cyberpunk_hud_panel(tools_count=tools_cnt, memory_nodes=mem_nodes))
                 continue
@@ -875,9 +895,7 @@ class CLIGateway:
             )
 
             try:
-                reply = await self._router.handle_message(
-                    msg, conversation_id, on_progress=self._on_step_progress
-                )
+                reply = await self._router.handle_message(msg, conversation_id, on_progress=self._on_step_progress)
                 print(f"\n{reply}")
             except Exception as exc:
                 logger.error("cli.error", error=str(exc))
@@ -905,6 +923,7 @@ class CLIGateway:
         import platform
 
         import psutil
+
         live_config = get_live_config()
         settings = get_settings()
         provider = live_config.get("provider") or getattr(settings, "llm_provider", "groq")
@@ -914,9 +933,9 @@ class CLIGateway:
 
         cpu_pct = psutil.cpu_percent(interval=0.1)
         vm = psutil.virtual_memory()
-        total_gb = vm.total / (1024 ** 3)
-        used_gb = vm.used / (1024 ** 3)
-        free_gb = vm.available / (1024 ** 3)
+        total_gb = vm.total / (1024**3)
+        used_gb = vm.used / (1024**3)
+        free_gb = vm.available / (1024**3)
 
         print("\n" + "═" * 58)
         print("  💻 OMNICORE SİSTEM BİLGİSİ (SYSTEM INFO)")
@@ -984,7 +1003,6 @@ class CLIGateway:
                 return
             key = parts[1].strip()
             value = parts[2].strip()
-
 
             # Handle model aliases
             if key == "model":
@@ -1054,6 +1072,7 @@ class CLIGateway:
         """Refresh the router's settings and rebuild LLM after config changes."""
         try:
             from config.settings import invalidate_settings_cache
+
             invalidate_settings_cache()
             new_settings = get_settings().model_copy(update=self._get_live_overrides())
             self._router._settings = new_settings

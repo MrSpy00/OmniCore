@@ -290,8 +290,7 @@ class OsOpenBrowserVisible(BaseTool):
 class OsClipboardHistoryManager(BaseTool):
     name = "os_clipboard_history_manager"
     description = (
-        "Manage clipboard history: read current, store to history, list recent entries, "
-        "or restore a previous entry."
+        "Manage clipboard history: read current, store to history, list recent entries, or restore a previous entry."
     )
     is_destructive = True
 
@@ -350,10 +349,7 @@ async def _clipboard_store_action(tool: OsClipboardHistoryManager) -> ToolOutput
 def _clipboard_list_action(tool: OsClipboardHistoryManager) -> ToolOutput:
     history = _clipboard_history_load()
     recent = history[-10:] if history else []
-    entries = [
-        {"index": len(history) - len(recent) + i, "preview": entry[:100]}
-        for i, entry in enumerate(recent)
-    ]
+    entries = [{"index": len(history) - len(recent) + i, "preview": entry[:100]} for i, entry in enumerate(recent)]
     return tool._success(
         f"Clipboard history ({len(history)} total)",
         data={"entries": entries, "source": "windows+disk"},
@@ -388,11 +384,7 @@ class WebPlayYoutubeVideoVisible(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        query = str(
-            self._first_param(
-                params, "query", "search", "video", "song", "url", "value", default=""
-            )
-        )
+        query = str(self._first_param(params, "query", "search", "video", "song", "url", "value", default=""))
         if not query:
             return self._failure("query is required")
 
@@ -452,9 +444,7 @@ class SysForceForeground(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        title = str(
-            self._first_param(params, "window_title", "title", "name", "target", default="")
-        )
+        title = str(self._first_param(params, "window_title", "title", "name", "target", default=""))
         if not title:
             return self._failure("window_title is required")
         try:
@@ -505,9 +495,7 @@ class MediaControlSpotifyNative(MediaControlNative):
     """
 
     name = "media_control_spotify_native"
-    description = (
-        "Legacy alias for media control. Prefer media_control_native for universal control."
-    )
+    description = "Legacy alias for media control. Prefer media_control_native for universal control."
 
 
 class SysReadNotifications(BaseTool):
@@ -730,9 +718,7 @@ def _read_windows_notifications(limit: int) -> list[dict[str, str]]:
         timeout=30,
     )
     if completed.returncode != 0:
-        raise RuntimeError(
-            (completed.stderr or completed.stdout or "notification read failed").strip()
-        )
+        raise RuntimeError((completed.stderr or completed.stdout or "notification read failed").strip())
 
     raw = (completed.stdout or "").strip()
     if not raw:
@@ -789,9 +775,7 @@ def _collect_basic_diagnostics() -> dict[str, object]:
     }
 
 
-def _infer_diagnostic_findings(
-    symptom: str, diagnostics: dict[str, object]
-) -> list[dict[str, str]]:
+def _infer_diagnostic_findings(symptom: str, diagnostics: dict[str, object]) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     cpu = _to_float(diagnostics.get("cpu_percent"), 0.0)
     mem = _to_float(diagnostics.get("memory_used_percent"), 0.0)
@@ -938,9 +922,7 @@ def _launch_windows_app(app: str) -> None:
 
     # 4. PowerShell Get-StartApps fallback for UWP apps not in uri_map.
     command = (
-        "$pkg = Get-StartApps | Where-Object { $_.Name -like '*"
-        + app
-        + "*' } | Select-Object -First 1; "
+        "$pkg = Get-StartApps | Where-Object { $_.Name -like '*" + app + "*' } | Select-Object -First 1; "
         'if ($pkg) { Start-Process "shell:AppsFolder\\$($pkg.AppID)" } '
         "else { throw 'Uygulama bulunamadi: " + app + "' }"
     )

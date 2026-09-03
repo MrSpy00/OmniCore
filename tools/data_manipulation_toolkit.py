@@ -34,9 +34,7 @@ class DataBatchRename(BaseTool):
         if not pattern:
             return self._failure("pattern is required")
         try:
-            renamed = await asyncio.to_thread(
-                _batch_rename, _resolve_sandboxed(root), pattern, replacement
-            )
+            renamed = await asyncio.to_thread(_batch_rename, _resolve_sandboxed(root), pattern, replacement)
             return self._success("Batch rename completed", data={"renamed": renamed})
         except Exception as exc:
             return self._failure(str(exc))

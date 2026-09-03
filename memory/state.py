@@ -81,8 +81,7 @@ class StateTracker:
         """Fetch a task by ID."""
         db = self._require_db()
         async with db.execute(
-            "SELECT id, user_request, status, plan_json, created_at, updated_at "
-            "FROM tasks WHERE id = ?",
+            "SELECT id, user_request, status, plan_json, created_at, updated_at FROM tasks WHERE id = ?",
             (task_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -108,8 +107,7 @@ class StateTracker:
             params: tuple = (status, limit)
         else:
             query = (
-                "SELECT id, user_request, status, created_at, updated_at "
-                "FROM tasks ORDER BY updated_at DESC LIMIT ?"
+                "SELECT id, user_request, status, created_at, updated_at FROM tasks ORDER BY updated_at DESC LIMIT ?"
             )
             params = (limit,)
         async with db.execute(query, params) as cursor:
@@ -236,8 +234,7 @@ class StateTracker:
     ) -> None:
         """Append an entry to the audit log."""
         await self._execute_write(
-            "INSERT INTO audit_log (event_type, detail, user_id, metadata_json, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO audit_log (event_type, detail, user_id, metadata_json, created_at) VALUES (?, ?, ?, ?, ?)",
             (event_type, detail, user_id, json.dumps(metadata or {}), _now_iso()),
         )
 
@@ -245,8 +242,7 @@ class StateTracker:
         """Retrieve recent audit entries."""
         db = self._require_db()
         async with db.execute(
-            "SELECT id, event_type, detail, user_id, metadata_json, created_at "
-            "FROM audit_log ORDER BY id DESC LIMIT ?",
+            "SELECT id, event_type, detail, user_id, metadata_json, created_at FROM audit_log ORDER BY id DESC LIMIT ?",
             (limit,),
         ) as cursor:
             rows = await cursor.fetchall()
@@ -290,9 +286,7 @@ class StateTracker:
     async def list_scheduled_jobs(self, enabled_only: bool = True) -> list[dict]:
         """List scheduled jobs."""
         db = self._require_db()
-        query = (
-            "SELECT id, job_name, cron_expr, enabled, config_json, updated_at FROM scheduled_jobs"
-        )
+        query = "SELECT id, job_name, cron_expr, enabled, config_json, updated_at FROM scheduled_jobs"
         if enabled_only:
             query += " WHERE enabled = 1"
         async with db.execute(query) as cursor:

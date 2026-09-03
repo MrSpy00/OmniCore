@@ -33,9 +33,7 @@ def _is_within_root(path: Path, root: Path) -> bool:
 def _require_destructive_boundary(path: Path) -> None:
     root = _home_root()
     if not _is_within_root(path, root):
-        raise PermissionError(
-            f"Destructive operation is only allowed under user root: {root} (requested: {path})"
-        )
+        raise PermissionError(f"Destructive operation is only allowed under user root: {root} (requested: {path})")
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
@@ -60,10 +58,7 @@ def _is_literal_placeholder_path(path_str: str) -> bool:
 
 
 def _placeholder_path_error() -> str:
-    return (
-        "Literal/yer tutucu mutlak yol reddedildi. "
-        "Lutfen Desktop/dosya.txt gibi goreli bir yol kullanin."
-    )
+    return "Literal/yer tutucu mutlak yol reddedildi. Lutfen Desktop/dosya.txt gibi goreli bir yol kullanin."
 
 
 def _resolve_write_target(path_str: str) -> Path:
@@ -149,9 +144,7 @@ class OsWriteFile(BaseTool):
                 )
                 if not elevation_result.get("ok"):
                     elevate_error = elevation_result.get("error") or elevation_result
-                    return self._failure(
-                        f"Permission denied and elevation failed: {exc}; {elevate_error}"
-                    )
+                    return self._failure(f"Permission denied and elevation failed: {exc}; {elevate_error}")
             if not path.exists() or not path.is_file():
                 return self._failure(f"Write verification failed: {path}")
 
@@ -475,9 +468,7 @@ def _attempt_windows_elevation_write(path: Path, content: str) -> dict[str, obje
     escaped_path = str(path).replace("'", "''")
     escaped_content = content.replace("'", "''")
     py_code = (
-        "from pathlib import Path; "
-        f"Path(r'''{escaped_path}''').write_text(r'''{escaped_content}''', "
-        "encoding='utf-8')"
+        f"from pathlib import Path; Path(r'''{escaped_path}''').write_text(r'''{escaped_content}''', encoding='utf-8')"
     )
     command = (
         "$py = (Get-Command python).Source; "

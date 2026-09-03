@@ -157,9 +157,7 @@ class WebScreenshot(BaseTool):
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
         url = str(self._first_param(params, "url", "target", default=""))
-        output_path = str(
-            self._first_param(params, "output_path", "path", "file_path", default="screenshot.png")
-        )
+        output_path = str(self._first_param(params, "output_path", "path", "file_path", default="screenshot.png"))
         if not url:
             return self._failure("No URL provided")
         if not url.startswith("http"):
@@ -259,9 +257,7 @@ class WebExecuteJavaScript(BaseTool):
                     for _ in range(steps):
                         await page.mouse.wheel(0, step_size)
                         await page.wait_for_timeout(max(10, wait_ms // max(1, steps)))
-                    page_height = await page.evaluate(
-                        "document.body ? document.body.scrollHeight : 0"
-                    )
+                    page_height = await page.evaluate("document.body ? document.body.scrollHeight : 0")
                     viewport_y = await page.evaluate("window.scrollY")
                     if not script:
                         return self._success(

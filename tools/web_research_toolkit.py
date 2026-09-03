@@ -68,9 +68,7 @@ def _parse_crawl_options(tool: WebDeepCrawl, params: dict[str, Any]) -> dict[str
         start_url = "https://" + start_url
 
     max_pages = int(tool._first_param(params, "max_pages", default=20) or 20)
-    max_chars_per_page = int(
-        tool._first_param(params, "max_chars_per_page", default=10000) or 10000
-    )
+    max_chars_per_page = int(tool._first_param(params, "max_chars_per_page", default=10000) or 10000)
     scroll_steps = int(tool._first_param(params, "scroll_steps", default=14) or 14)
     scroll_delay_ms = int(tool._first_param(params, "scroll_delay_ms", default=120) or 120)
 
@@ -82,9 +80,7 @@ def _parse_crawl_options(tool: WebDeepCrawl, params: dict[str, Any]) -> dict[str
         "scroll_delay_ms": max(10, min(scroll_delay_ms, 2000)),
         "include_subdomains": bool(tool._first_param(params, "include_subdomains", default=False)),
         "save_to_desktop": bool(tool._first_param(params, "save_to_desktop", default=False)),
-        "output_path_raw": str(
-            tool._first_param(params, "output_path", "path", default="")
-        ).strip(),
+        "output_path_raw": str(tool._first_param(params, "output_path", "path", default="")).strip(),
     }
 
 
@@ -116,9 +112,7 @@ async def _run_deep_crawl(opts: dict[str, Any]) -> dict[str, Any]:
                 if not html and not text:
                     continue
 
-                prepared = _prepare_page_payload(
-                    url, html, title, text, int(opts["max_chars_per_page"])
-                )
+                prepared = _prepare_page_payload(url, html, title, text, int(opts["max_chars_per_page"]))
                 results.append({"url": url, "title": prepared["title"], "text": prepared["text"]})
 
                 for href in _extract_internal_links(
@@ -171,9 +165,7 @@ async def _close_playwright(pw, browser, context, page) -> None:
 
 async def _fetch_page_data(url: str, page, client: httpx.AsyncClient, opts: dict[str, Any]):
     if page is not None:
-        return await _fetch_with_browser(
-            url, page, int(opts["scroll_steps"]), int(opts["scroll_delay_ms"])
-        )
+        return await _fetch_with_browser(url, page, int(opts["scroll_steps"]), int(opts["scroll_delay_ms"]))
     return await _fetch_with_http(url, client)
 
 

@@ -12,11 +12,7 @@ def test_system_prompt_includes_hallucination_lockdown():
         type(
             "Registry",
             (),
-            {
-                "list_tools": lambda self: [
-                    {"name": "os_list_dir", "description": "list dir", "destructive": "False"}
-                ]
-            },
+            {"list_tools": lambda self: [{"name": "os_list_dir", "description": "list dir", "destructive": "False"}]},
         )(),
     )
 
