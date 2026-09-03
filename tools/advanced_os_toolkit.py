@@ -379,8 +379,9 @@ async def _clipboard_restore_action(tool: OsClipboardHistoryManager, index) -> T
 class WebPlayYoutubeVideoVisible(BaseTool):
     name = "web_play_youtube_video_visible"
     description = (
-        "Search YouTube for a video, find the first result, navigate to it and play it. "
-        "Uses Playwright for real browser interaction. "
+        "Search YouTube for a video, find the first result, navigate to it "
+        "and play it. Uses user's default browser (Chrome/Edge). "
+        "Handles ads automatically. "
         "Parameters: query (search term or YouTube URL)."
     )
     is_destructive = False
@@ -404,70 +405,42 @@ class WebPlayYoutubeVideoVisible(BaseTool):
         return await self._playwright_youtube_search_and_play(query)
 
     async def _playwright_open_url(self, url: str) -> ToolOutput:
-        """Open a YouTube URL directly in Playwright."""
+        """Open a YouTube URL in user's default browser."""
         try:
-            from playwright.async_api import async_playwright
+            from tools.browser_helpers import launch_user_browser
         except ImportError:
-            return self._failure("Playwright yuklu degil")
+            return self._failure("browser_helpers modulu bulunamadi")
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=False)
-                page = await browser.new_page()
-                try:
-                    await page.goto(url, timeout=30000)
-                    return self._success(f"YouTube acildi: {url}", data={"url": url})
-                finally:
-                    # Keep browser open — don't close
-                    pass
+            pw, browser, page = await launch_user_browser(headless=False)
+            try:
+                await page.goto(url, timeout=30000)
+                return self._success(f"YouTube acildi: {url}", data={"url": url})
+            finally:
+                pass  # Keep browser open
         except Exception as exc:
             return self._failure(f"YouTube acilamadi: {exc}")
 
     async def _playwright_youtube_search_and_play(self, query: str) -> ToolOutput:
-        """Search YouTube, find first video, navigate to it and play."""
-        import urllib.parse
+        """Search YouTube using user's browser, find video, play it."""
         try:
-            from playwright.async_api import async_playwright
+            from tools.browser_helpers import (
+                launch_user_browser,
+                smart_youtube_play,
+            )
         except ImportError:
-            return self._failure("Playwright yuklu degil")
-
-        search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}"
+            return self._failure("browser_helpers modulu bulunamadi")
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=False)
-                page = await browser.new_page()
-                try:
-                    # Navigate to search results
-                    await page.goto(search_url, timeout=30000)
-                    await page.wait_for_selector("ytd-video-renderer", timeout=15000)
-
-                    # Find first video
-                    first_video = await page.query_selector("ytd-video-renderer a#video-title")
-                    if first_video:
-                        href = await first_video.get_attribute("href")
-                        title = await first_video.inner_text()
-                        video_url = f"https://www.youtube.com{href}"
-
-                        # Navigate to the video
-                        await page.goto(video_url, timeout=30000)
-
-                        # Try to click play button
-                        try:
-                            play_btn = await page.query_selector("button.ytp-large-play-button")
-                            if play_btn:
-                                await asyncio.sleep(0.5)
-                                await play_btn.click()
-                        except Exception:
-                            pass
-
-                        return self._success(
-                            f"YouTube video baslatildi: '{title}'",
-                            data={"url": video_url, "title": title, "status": "playing"},
-                        )
-
-                    return self._failure(f"YouTube'da '{query}' icin video bulunamadi")
-                finally:
-                    # Keep browser open
-                    pass
+            pw, browser, page = await launch_user_browser(headless=False)
+            try:
+                result = await smart_youtube_play(page, query)
+                if result.get("success"):
+                    return self._success(
+                        f"YouTube video baslatildi: '{result['title']}'",
+                        data=result,
+                    )
+                return self._failure(result.get("error", "YouTube hatasi"))
+            finally:
+                pass  # Keep browser open
         except Exception as exc:
             return self._failure(f"YouTube hatasi: {exc}")
 

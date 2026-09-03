@@ -208,13 +208,14 @@ def _extract_clean_text_from_html(html: str) -> str:
 
 
 class BrowserPlaywrightInteract(BaseTool):
-    """Real browser automation via Playwright: navigate, click, fill, scroll, screenshot, YouTube search."""
+    """Real browser automation via Playwright using user's default browser."""
 
     name = "browser_interact"
     description = (
-        "Interact with web pages using Playwright browser automation. "
-        "Parameters: url, action (navigate|click|fill|scroll|screenshot|get_text|youtube_search|open_and_play), "
-        "selector (CSS/XPath for click/fill), value (for fill or scroll delta), save_path, timeout."
+        "Interact with web pages using user's default browser (Chrome/Edge). "
+        "Actions: navigate, click, fill, scroll, screenshot, get_text, "
+        "youtube_search, open_and_play, wait_for. "
+        "Parameters: url, action, selector, value, save_path, timeout."
     )
     is_destructive = False
 
@@ -228,58 +229,67 @@ class BrowserPlaywrightInteract(BaseTool):
         timeout = int(params.get("timeout", 30000))
 
         try:
-            from playwright.async_api import async_playwright
+            from tools.browser_helpers import launch_user_browser, smart_youtube_play
         except ImportError:
-            return self._failure(
-                "Playwright yuklu degil. Kurulum: pip install playwright && playwright install chromium"
-            )
+            return self._failure("browser_helpers modulu bulunamadi")
 
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=False)
-                page = await browser.new_page()
-
-                try:
-                    if action == "youtube_search" and value:
-                        return await self._youtube_search(page, value)
-                    elif action == "open_and_play" and value:
-                        return await self._youtube_open_and_play(page, value)
-                    elif url:
-                        await page.goto(url, timeout=timeout)
-
-                    if action == "navigate":
-                        return self._success(f"Sayfaya gidildi: {page.url}", data={"url": page.url})
-                    elif action == "click" and selector:
-                        await page.click(selector, timeout=timeout)
-                        return self._success(f"Tiklandi: {selector}")
-                    elif action == "fill" and selector:
-                        await page.fill(selector, value, timeout=timeout)
-                        return self._success(f"Dolduruldu: {selector}")
-                    elif action == "scroll":
-                        delta = int(value or "500")
-                        await page.mouse.wheel(0, delta)
-                        return self._success(f"Kaydirildi: {delta}px")
-                    elif action == "screenshot":
-                        await page.screenshot(path=save_path, full_page=False)
-                        return self._success(f"Ekran goruntusu kaydedildi: {save_path}")
-                    elif action == "get_text":
-                        text = await page.inner_text("body")
-                        return self._success(text[:4000], data={"url": page.url, "text": text[:4000]})
-                    elif action == "wait_for" and selector:
-                        await page.wait_for_selector(selector, timeout=timeout)
-                        return self._success(f"Element bulundu: {selector}")
-                    else:
-                        actions = (
-                            "navigate, click, fill, scroll, screenshot, "
-                            "get_text, youtube_search, open_and_play"
+            pw, browser, page = await launch_user_browser(headless=False)
+            try:
+                if action == "youtube_search" and value:
+                    result = await smart_youtube_play(page, value)
+                    if result.get("success"):
+                        return self._success(
+                            f"YouTube video: '{result['title']}'",
+                            data=result,
                         )
-                        return self._failure(
-                            f"Bilinmeyen action: {action}. Kullanılabilir: {actions}"
+                    return self._failure(result.get("error", "YouTube hatasi"))
+
+                if action == "open_and_play" and value:
+                    result = await smart_youtube_play(page, value)
+                    if result.get("success"):
+                        return self._success(
+                            f"YouTube baslatildi: '{result['title']}'",
+                            data=result,
                         )
-                finally:
-                    await browser.close()
+                    return self._failure(result.get("error", "YouTube hatasi"))
+
+                if url:
+                    await page.goto(url, timeout=timeout)
+
+                if action == "navigate":
+                    return self._success(f"Sayfaya gidildi: {page.url}", data={"url": page.url})
+                elif action == "click" and selector:
+                    await page.click(selector, timeout=timeout)
+                    return self._success(f"Tiklandi: {selector}")
+                elif action == "fill" and selector:
+                    await page.fill(selector, value, timeout=timeout)
+                    return self._success(f"Dolduruldu: {selector}")
+                elif action == "scroll":
+                    delta = int(value or "500")
+                    await page.mouse.wheel(0, delta)
+                    return self._success(f"Kaydirildi: {delta}px")
+                elif action == "screenshot":
+                    await page.screenshot(path=save_path, full_page=False)
+                    return self._success(f"Ekran goruntusu: {save_path}")
+                elif action == "get_text":
+                    text = await page.inner_text("body")
+                    return self._success(text[:4000], data={"url": page.url, "text": text[:4000]})
+                elif action == "wait_for" and selector:
+                    await page.wait_for_selector(selector, timeout=timeout)
+                    return self._success(f"Element bulundu: {selector}")
+                else:
+                    actions = (
+                        "navigate, click, fill, scroll, screenshot, "
+                        "get_text, youtube_search, open_and_play"
+                    )
+                    return self._failure(
+                        f"Bilinmeyen action: {action}. Kullanilabilir: {actions}"
+                    )
+            finally:
+                pass  # Keep browser open
         except Exception as exc:
-            return self._failure(f"Playwright hatasi: {exc}")
+            return self._failure(f"Tarayici hatasi: {exc}")
 
     async def _youtube_search(self, page, query: str) -> ToolOutput:
         """Search YouTube, find first video result, return URL."""
