@@ -539,19 +539,23 @@ def _get_banner() -> str:
     W = 86  # box inner width
 
     art = [
-        "                                ########    ######",
-        "                              ##          ##      ##",
-        "            ######            ########  ##          ##      ##  ########",
-        "         ##      ##          ##        ##          ##      ##  ##      ##",
-        "##      ##  ##      ##  ##      ##        ##        ##      ##  ##      ##  ##########",
-        "    ##      ##  ####  ####  ####    ##        ##        ##      ##  ########    ##",
-        "##      ##  ##  ##  ##  ##  ##  ##        ##  ########    ######    ##  ##      ##  ##",
-        "  ##      ##  ##      ##  ##    ####        ##                  ##    ##    ########",
-        "       ######    ##      ##  ##      ##  ##########                ##      ##  ##",
-        "                   ##      ##  ##      ##                                ##",
-        "               ##      ##  ##      ##                                ##########",
+        "                              ########    ######",
+        "                            ##          ##      ##",
+        "          ######            ########  ##          ##      ##  ########",
+        "       ##      ##          ##        ##          ##      ##  ##      ##",
+        "##    ##  ##      ##  ##      ##        ##        ##      ##  ##      ##  ##########",
+        "    ##    ##  ####  ####  ####    ##        ##        ##      ##  ########    ##",
+        "##    ##  ##  ##  ##  ##  ##  ##        ##  ########    ######    ##  ##      ##  ##",
+        "  ##    ##  ##      ##  ##    ####        ##                  ##    ##    ########",
+        "     ######    ##      ##  ##      ##  ##########                ##      ##  ##",
+        "                 ##      ##  ##      ##                                ##",
+        "             ##      ##  ##      ##                                ##########",
     ]
     max_w = max(len(a) for a in art)
+    # Art'i kutuya sigdir: gerekiyorsa kirp
+    if max_w > W:
+        art = [a[:W] for a in art]
+        max_w = W
     margin = max(0, (W - max_w) // 2)
 
     def _bl(text: str = "") -> str:
@@ -566,8 +570,9 @@ def _get_banner() -> str:
         _bb(),
     ]
     for a in art:
-        pad_r = W - margin - len(a)
-        lines.append(f"|{' ' * margin}{a}{' ' * pad_r}|")
+        # Sanati ortala
+        centered = a.center(W)
+        lines.append(f"|{centered}|")
     lines.append(_bl("SOVEREIGN AUTONOMOUS AI OPERATING SYSTEM"))
     lines.append(_bb())
     username = _get_display_name()

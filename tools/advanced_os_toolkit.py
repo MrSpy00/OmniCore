@@ -379,10 +379,11 @@ async def _clipboard_restore_action(tool: OsClipboardHistoryManager, index) -> T
 class WebPlayYoutubeVideoVisible(BaseTool):
     name = "web_play_youtube_video_visible"
     description = (
-        "Search YouTube for a video or channel query and open it in the user's "
-        "real default browser visibly. Physical browser opening is mandatory."
+        "Search YouTube for a video, find the first result, navigate to it and play it. "
+        "Uses Playwright for real browser interaction. "
+        "Parameters: query (search term or YouTube URL)."
     )
-    is_destructive = False  # Opening a media URL is safe
+    is_destructive = False
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
@@ -394,40 +395,81 @@ class WebPlayYoutubeVideoVisible(BaseTool):
         if not query:
             return self._failure("query is required")
 
-        # If it's already a YouTube URL, open directly.
+        # If it's already a YouTube URL, open directly
         if "youtube.com/" in query or "youtu.be/" in query:
             url = query if query.startswith("http") else f"https://{query}"
-            try:
-                await asyncio.to_thread(webbrowser.open_new_tab, url)
-                await asyncio.sleep(1.0)
-                fg = await asyncio.to_thread(self._focus_browser)
-                return self._success("Opened YouTube video in browser", data={"url": url, "foreground": fg})
-            except Exception as exc:
-                return self._failure(str(exc))
+            return await self._playwright_open_url(url)
 
-        # Otherwise construct a YouTube search URL and open it.
-        import urllib.parse
+        # Search YouTube, find first video, navigate and play
+        return await self._playwright_youtube_search_and_play(query)
 
-        search_url = (
-            f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}"
-        )
+    async def _playwright_open_url(self, url: str) -> ToolOutput:
+        """Open a YouTube URL directly in Playwright."""
         try:
-            await asyncio.to_thread(webbrowser.open_new_tab, search_url)
-            await asyncio.sleep(1.0)
-            fg = await asyncio.to_thread(self._focus_browser)
-            return self._success(
-                f"YouTube açıldı ve '{query}' için arama yapıldı",
-                data={"url": search_url, "query": query, "foreground": fg},
-            )
+            from playwright.async_api import async_playwright
+        except ImportError:
+            return self._failure("Playwright yuklu degil")
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=False)
+                page = await browser.new_page()
+                try:
+                    await page.goto(url, timeout=30000)
+                    return self._success(f"YouTube acildi: {url}", data={"url": url})
+                finally:
+                    # Keep browser open — don't close
+                    pass
         except Exception as exc:
-            return self._failure(str(exc))
+            return self._failure(f"YouTube acilamadi: {exc}")
 
-    def _focus_browser(self) -> dict:
-        for title in ("YouTube", "Chrome", "Edge", "Firefox", "Brave", "Opera"):
-            res = force_window_foreground(title, timeout_seconds=0.3)
-            if res.get("activated"):
-                return res
-        return {"activated": False}
+    async def _playwright_youtube_search_and_play(self, query: str) -> ToolOutput:
+        """Search YouTube, find first video, navigate to it and play."""
+        import urllib.parse
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            return self._failure("Playwright yuklu degil")
+
+        search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}"
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=False)
+                page = await browser.new_page()
+                try:
+                    # Navigate to search results
+                    await page.goto(search_url, timeout=30000)
+                    await page.wait_for_selector("ytd-video-renderer", timeout=15000)
+
+                    # Find first video
+                    first_video = await page.query_selector("ytd-video-renderer a#video-title")
+                    if first_video:
+                        href = await first_video.get_attribute("href")
+                        title = await first_video.inner_text()
+                        video_url = f"https://www.youtube.com{href}"
+
+                        # Navigate to the video
+                        await page.goto(video_url, timeout=30000)
+
+                        # Try to click play button
+                        try:
+                            play_btn = await page.query_selector("button.ytp-large-play-button")
+                            if play_btn:
+                                await asyncio.sleep(0.5)
+                                await play_btn.click()
+                        except Exception:
+                            pass
+
+                        return self._success(
+                            f"YouTube video baslatildi: '{title}'",
+                            data={"url": video_url, "title": title, "status": "playing"},
+                        )
+
+                    return self._failure(f"YouTube'da '{query}' icin video bulunamadi")
+                finally:
+                    # Keep browser open
+                    pass
+        except Exception as exc:
+            return self._failure(f"YouTube hatasi: {exc}")
 
 
 class SysForceForeground(BaseTool):
