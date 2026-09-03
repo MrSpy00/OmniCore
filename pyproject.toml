@@ -95,11 +95,16 @@ dev = [
 ]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"interfaces/dashboard.py" = ["E501"]  # HTML/CSS/JS inline — naturally long lines
+"config/settings.py" = ["E501"]  # Model ID dict entries are inherently long
+"tools/base.py" = ["E501"]  # PowerShell script strings
 
 [tool.mypy]
 python_version = "3.12"

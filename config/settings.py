@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import sys
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-import sys
 
 def _resolve_project_root() -> Path:
     if getattr(sys, "frozen", False):

@@ -12,6 +12,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+
 # Force UTF-8 encoding across Windows console streams
 if sys.platform == "win32":
     try:
@@ -28,7 +29,12 @@ if sys.platform == "win32":
 if getattr(sys, "frozen", False):
     _BUNDLE_ROOT = Path(sys._MEIPASS)
     _EXE_DIR = Path(sys.executable).resolve().parent
-    _PROJECT_ROOT = _EXE_DIR if (_EXE_DIR / "tools").exists() else (_EXE_DIR.parent if (_EXE_DIR.parent / "tools").exists() else _BUNDLE_ROOT)
+    if (_EXE_DIR / "tools").exists():
+        _PROJECT_ROOT = _EXE_DIR
+    elif (_EXE_DIR.parent / "tools").exists():
+        _PROJECT_ROOT = _EXE_DIR.parent
+    else:
+        _PROJECT_ROOT = _BUNDLE_ROOT
     if str(_BUNDLE_ROOT) not in sys.path:
         sys.path.insert(0, str(_BUNDLE_ROOT))
 else:
@@ -163,8 +169,9 @@ async def _run(mode: str, debug: bool = False) -> None:
             await server.serve()
 
         elif mode == "web":
-            import uvicorn
             import webbrowser
+
+            import uvicorn
 
             from interfaces.dashboard import create_dashboard_app, set_router
 

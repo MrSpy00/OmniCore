@@ -457,7 +457,7 @@ def _force_window_foreground_windows_native(
         found_hwnd: int | None = None
         found_title: str = ""
 
-        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        wnd_enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
         def _enum_cb(hwnd: Any, _lparam: Any) -> bool:
             nonlocal found_hwnd, found_title
@@ -474,7 +474,7 @@ def _force_window_foreground_windows_native(
                     return False
             return True
 
-        cb = WNDENUMPROC(_enum_cb)
+        cb = wnd_enum_proc(_enum_cb)
 
         while time.time() < deadline:
             user32.EnumWindows(cb, 0)
@@ -488,7 +488,7 @@ def _force_window_foreground_windows_native(
                 user32.SwitchToThisWindow(found_hwnd, True)
             except Exception:
                 pass
-            ok = bool(user32.SetForegroundWindow(found_hwnd))
+            user32.SetForegroundWindow(found_hwnd)
             return {
                 "activated": True,
                 "method": "win32_ctypes",

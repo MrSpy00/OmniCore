@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Query, Request
@@ -924,7 +922,7 @@ main.main-viewport {
   <!-- Navigation Sidebar -->
   <aside class="nav-sidebar">
     <div class="nav-heading" data-i18n="nav_heading">Gezinti</div>
-    
+
     <button class="nav-btn active" onclick="switchView('chat')">
       <span class="nav-icon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1309,14 +1307,14 @@ function appendMessage(text, role='bot') {
   const list = document.getElementById('messagesList');
   const row = document.createElement('div');
   row.className = 'message-row ' + role;
-  
+
   const avatar = document.createElement('div');
   avatar.className = 'message-avatar';
   avatar.textContent = role === 'user' ? 'YOU' : 'AI';
 
   const bubble = document.createElement('div');
   bubble.className = 'message-bubble';
-  
+
   // Format simple markdown
   bubble.innerHTML = formatMarkdown(text);
 
@@ -1586,7 +1584,6 @@ setInterval(fetchSysinfo, 2500);
 
 
 def _write_to_stderr(msg: str) -> None:
-    import sys
 
     sys.stderr.write(msg + "\n")
     sys.stderr.flush()

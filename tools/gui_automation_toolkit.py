@@ -11,11 +11,15 @@ try:
 except Exception:  # pragma: no cover - optional backend
     mss = None  # type: ignore[assignment]
 
-import pyautogui
+try:
+    import pyautogui
+except (ImportError, Exception):
+    pyautogui = None  # type: ignore[assignment]
+
 from PIL import Image  # type: ignore[import-not-found]
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool, resolve_user_path, resolve_desktop_path
+from tools.base import BaseTool, resolve_desktop_path, resolve_user_path
 from tools.os_adapters import runtime_adapter
 
 _RUNTIME = runtime_adapter()
@@ -219,7 +223,7 @@ class GuiTakeScreenshot(BaseTool):
                                     f"Screenshot of '{app_name}' saved to {save_path.name}",
                                     data={"path": str(save_path), "focused_app": app_name, "method": "win32_window"},
                                 )
-                        except Exception as win32_exc:
+                        except Exception:
                             pass  # Fall through to region/full-screen capture
 
                     # Fallback: try to get window bounds for region capture
@@ -492,8 +496,8 @@ def _find_window_by_title(title_partial: str) -> int | None:
                     result.append(hwnd)
         return True
 
-    ENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    user32.EnumWindows(ENUMPROC(enum_callback), 0)
+    enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows(enum_proc(enum_callback), 0)
     return result[0] if result else None
 
 

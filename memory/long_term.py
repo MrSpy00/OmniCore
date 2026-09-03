@@ -12,7 +12,7 @@ import math
 from typing import Any
 
 import chromadb
-from chromadb import EmbeddingFunction, Documents, Embeddings
+from chromadb import Documents, EmbeddingFunction, Embeddings
 from chromadb.config import Settings as ChromaSettings
 
 from config.logging import get_logger

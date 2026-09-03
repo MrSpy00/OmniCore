@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
 import pytest
 
 from models.tools import ToolInput, ToolStatus
-from tools.base import resolve_user_path, resolve_desktop_path
+from tools.base import resolve_desktop_path, resolve_user_path
 
 
 def test_turkish_path_aliases():

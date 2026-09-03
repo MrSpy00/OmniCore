@@ -148,8 +148,6 @@ class VoiceEngine:
         communicate = edge_tts.Communicate(text, self._tts_voice)
         buf = io.BytesIO()
 
-        loop = asyncio.get_event_loop()
-
         def _synthesize():
             import asyncio as _aio
 
@@ -161,7 +159,7 @@ class VoiceEngine:
 
             # Use the existing loop if possible, otherwise create one
             try:
-                loop = _aio.get_running_loop()
+                _aio.get_running_loop()
                 # We're already in an async context, need a different approach
                 pass
             except RuntimeError:

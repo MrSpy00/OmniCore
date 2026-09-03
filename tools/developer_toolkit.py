@@ -313,10 +313,21 @@ class AgentSpawnSubtask(BaseTool):
         subtasks: list[dict] = []
         for idx, chunk in enumerate(chunks[:max_subtasks], start=1):
             lowered = chunk.lower()
-            if any(w in lowered for w in ("browser", "tarayıcı", "tarayici", "youtube", "web", "internet", "google", "site")):
+            browser_words = (
+                "browser", "tarayıcı", "tarayici", "youtube",
+                "web", "internet", "google", "site"
+            )
+            file_words = (
+                "dosya", "file", "kod", "code", "glob", "dizin", "folder"
+            )
+            search_words = ("find", "search", "bul", "ara")
+            is_browser = any(w in lowered for w in browser_words)
+            is_file = any(w in lowered for w in file_words)
+            is_search = any(w in lowered for w in search_words)
+            if is_browser:
                 tool_name = "os_open_browser_visible"
                 parameters = {"url": chunk}
-            elif any(w in lowered for w in ("dosya", "file", "kod", "code", "glob", "dizin", "folder")) and any(w in lowered for w in ("find", "search", "bul", "ara")):
+            elif is_file and is_search:
                 tool_name = "dev_glob_search"
                 parameters = {"pattern": "**/*", "limit": 100}
             elif "grep" in lowered or "regex" in lowered or "match" in lowered:

@@ -1198,10 +1198,11 @@ class CognitiveRouter:
             return f"Plan mode {state}. Destructive steps will be dry-run enforced."
         if lowered.startswith("/doctor"):
             from config.live_config import get_live_config
+            from config.settings import get_settings as _get_settings
 
             provider = getattr(self, "_runtime_provider", "unknown")
             tools_count = len(self._registry) if hasattr(self, "_registry") else 0
-            settings = getattr(self, "_settings", None) or get_settings()
+            settings = getattr(self, "_settings", None) or _get_settings()
             live_config = get_live_config()
             groq_keys = len([k for k in getattr(settings, "groq_api_keys", []) if k])
             gemini_keys = len([k for k in getattr(settings, "google_api_keys", []) if k])
@@ -1233,8 +1234,8 @@ class CognitiveRouter:
             self._short_term.clear(user_message.user_id or "default")
             return "Konusma gecmisi temizlendi. \u267b\ufe0f Yeni konusmaya hazir!"
         if lowered.startswith("/models"):
-            from config.settings import get_available_models
             from config.live_config import get_live_config
+            from config.settings import get_available_models
 
             all_models = get_available_models()
             availability = self._settings.provider_availability
@@ -1283,13 +1284,13 @@ class CognitiveRouter:
             model_id = parts[1].strip()
             from config.live_config import get_live_config, resolve_model_alias
             from config.settings import (
-                AVAILABLE_GEMINI_MODELS,
-                AVAILABLE_GROQ_MODELS,
-                AVAILABLE_OPENAI_MODELS,
                 AVAILABLE_ANTHROPIC_MODELS,
                 AVAILABLE_DEEPSEEK_MODELS,
+                AVAILABLE_GEMINI_MODELS,
+                AVAILABLE_GROQ_MODELS,
                 AVAILABLE_MISTRAL_MODELS,
                 AVAILABLE_OLLAMA_MODELS,
+                AVAILABLE_OPENAI_MODELS,
             )
 
             # Resolve aliases
@@ -1314,7 +1315,9 @@ class CognitiveRouter:
                 return f"✅ Gemini modeli değiştirildi ve kaydedildi: {model_id}"
             if model_id in all_groq:
                 live_config.set_model_for_provider("groq", model_id)
-                self._settings = self._settings.model_copy(update={"groq_primary_model": model_id, "groq_llm_model": model_id})
+                self._settings = self._settings.model_copy(
+                    update={"groq_primary_model": model_id, "groq_llm_model": model_id}
+                )
                 if self._model_rotator is not None:
                     self._model_rotator = None
                 self._destroy_current_llm()
@@ -1487,6 +1490,7 @@ class CognitiveRouter:
         if lowered.startswith(("/sysinfo", "/info")):
 
             import platform
+
             import psutil
             cpu_pct = psutil.cpu_percent(interval=0.1)
             vm = psutil.virtual_memory()
@@ -1532,7 +1536,7 @@ class CognitiveRouter:
         # --- TASTE ENGINE ---
         if lowered == "/taste" or lowered.startswith("/taste "):
             try:
-                from memory.taste import get_taste_engine, CATEGORIES
+                from memory.taste import CATEGORIES, get_taste_engine
                 engine = get_taste_engine()
                 parts = content.split(" ", 2)
 
@@ -1540,7 +1544,11 @@ class CognitiveRouter:
                     # Tum tercihleri goster
                     all_prefs = engine.get_all()
                     if not all_prefs:
-                        return "🧠 Henuz ogrenilmis tercih yok. Kullandikca otomatik ogrenirim.\n\nKullanilabilir kategoriler: " + ", ".join(CATEGORIES.keys())
+                        cats = ", ".join(CATEGORIES.keys())
+                        return (
+                            "🧠 Henüz öğrenilmiş tercih yok. Kullandıkça otomatik öğrenirim.\n\n"
+                            f"Kullanılabilir kategoriler: {cats}"
+                        )
                     lines = ["🧠 **Ogrenilmis Tercihler:**\n"]
                     current_cat = ""
                     for p in all_prefs:

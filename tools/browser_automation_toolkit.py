@@ -123,6 +123,7 @@ def _launch_browser_process(url: str, browser_name: str = "default") -> dict:
     import os
     import subprocess
     import sys
+
     from tools.base import force_window_foreground
 
     if sys.platform != "win32":
@@ -268,7 +269,13 @@ class BrowserPlaywrightInteract(BaseTool):
                         await page.wait_for_selector(selector, timeout=timeout)
                         return self._success(f"Element bulundu: {selector}")
                     else:
-                        return self._failure(f"Bilinmeyen action: {action}. Kullanilabilir: navigate, click, fill, scroll, screenshot, get_text, youtube_search, open_and_play")
+                        actions = (
+                            "navigate, click, fill, scroll, screenshot, "
+                            "get_text, youtube_search, open_and_play"
+                        )
+                        return self._failure(
+                            f"Bilinmeyen action: {action}. Kullanılabilir: {actions}"
+                        )
                 finally:
                     await browser.close()
         except Exception as exc:

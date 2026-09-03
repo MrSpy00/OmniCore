@@ -31,17 +31,17 @@ except ImportError:
         readline = None  # type: ignore[assignment]
 
 try:
-    from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit import PromptSession
-    from prompt_toolkit.styles import Style
+    from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.output import create_output
     from prompt_toolkit.output.vt100 import Vt100_Output
+    from prompt_toolkit.styles import Style
     _HAS_PROMPT_TOOLKIT = True
 except ImportError:
     _HAS_PROMPT_TOOLKIT = False
 
+from config.live_config import CONFIG_SCHEMA, get_live_config, resolve_model_alias
 from config.logging import get_logger
-from config.live_config import get_live_config, CONFIG_SCHEMA, resolve_model_alias
 from config.settings import get_settings
 from core.guardian import ApprovalResult
 from core.router import CognitiveRouter
@@ -65,7 +65,8 @@ def _get_display_name() -> str:
             return settings.user_name.strip()
     except Exception:
         pass
-    import os, getpass
+    import getpass
+    import os
     try:
         return os.environ.get("OMNICORE_USER_NAME") or getpass.getuser() or "Operator"
     except Exception:
@@ -341,8 +342,8 @@ def _read_key_windows() -> str | None:
 def _read_key_unix() -> str | None:
     """Read a single keypress on Unix/macOS."""
     import sys
-    import tty
     import termios
+    import tty
 
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
@@ -476,7 +477,7 @@ def _interactive_slash_menu() -> str | None:
                     flat_idx += 1
 
             lines.append("  \033[1;36m├──────────────────────────────────────────────┤\033[0m")
-            lines.append("  \033[1;36m│\033[0m  \033[90m↑↓:geçiş  Enter:seç  Esc:iptal  1-{n}:hızlı\033[0m".format(n=total))
+            lines.append(f"  \033[1;36m│\033[0m  \033[90m↑↓:geçiş  Enter:seç  Esc:iptal  1-{total}:hızlı\033[0m")
             lines.append("  \033[1;36m└──────────────────────────────────────────────┘\033[0m")
             output = "\n".join(lines)
             sys.stdout.write(output)
@@ -531,16 +532,13 @@ def _get_banner() -> str:
     model = live_config.get("model") or (
         settings.omni_llm_model if provider == "gemini" else settings.groq_primary_model
     )
-    avail = settings.provider_availability
-    key_ok = "✅" if avail.get(provider) else "❌"
-
     approval = live_config.get("approval_mode") or getattr(settings, "approval_mode", "ask")
     perm_icon = "🔓 FULL" if approval in ("yes", "full") else "🔐 SAFE" if approval == "safe" else "🔒 ASK"
 
     scheduler_on = live_config.get("scheduler") != "false"
     sched_icon = "SCHED:ON" if scheduler_on else "SCHED:OFF"
 
-    W = 86  # box inner width
+    box_width = 86  # box inner width
 
     art = [
         "                              ########    ######",
@@ -557,17 +555,16 @@ def _get_banner() -> str:
     ]
     max_w = max(len(a) for a in art)
     # Art'i kutuya sigdir: gerekiyorsa kirp
-    if max_w > W:
-        art = [a[:W] for a in art]
-        max_w = W
-    margin = max(0, (W - max_w) // 2)
+    if max_w > box_width:
+        art = [a[:box_width] for a in art]
+        max_w = box_width
 
     def _bl(text: str = "") -> str:
-        inner = text.center(W) if text else " " * W
+        inner = text.center(box_width) if text else " " * box_width
         return f"|{inner}|"
 
     def _bb() -> str:
-        return f"+{'=' * W}+"
+        return f"+{'=' * box_width}+"
 
     lines = [
         "",
@@ -575,13 +572,13 @@ def _get_banner() -> str:
     ]
     for a in art:
         # Sanati ortala
-        centered = a.center(W)
+        centered = a.center(box_width)
         lines.append(f"|{centered}|")
     lines.append(_bl("SOVEREIGN AUTONOMOUS AI OPERATING SYSTEM"))
     lines.append(_bb())
     username = _get_display_name()
     lines.append(_bl(f"{username} | {provider.upper()} | {model} | {perm_icon} | {sched_icon}"))
-    lines.append(_bl(f"/ yaz -> komut menu  |  quit -> cikis"))
+    lines.append(_bl("/ yaz -> komut menu  |  quit -> cikis"))
     lines.append(_bb())
 
     return "\n".join(lines)
@@ -666,7 +663,6 @@ class CLIGateway:
                 )
 
             from prompt_toolkit.key_binding import KeyBindings
-            from prompt_toolkit.filters import completion_is_selected
 
             kb = KeyBindings()
 
@@ -769,7 +765,7 @@ class CLIGateway:
             sys.stdout.flush()
 
         elif event_type == "summarizing":
-            sys.stdout.write(f"  \033[36m▓▓▓▓▓▓▓▓▓▓\033[0m \033[95mSonuçlar toparlanıyor...\033[0m\n")
+            sys.stdout.write("  \033[36m▓▓▓▓▓▓▓▓▓▓\033[0m \033[95mSonuçlar toparlanıyor...\033[0m\n")
             sys.stdout.flush()
 
     async def run(self) -> None:
@@ -907,6 +903,7 @@ class CLIGateway:
     def _print_sysinfo(self) -> None:
         """Display comprehensive local system and hardware information."""
         import platform
+
         import psutil
         live_config = get_live_config()
         settings = get_settings()
@@ -1096,9 +1093,9 @@ class CLIGateway:
 
 async def cli_approval_callback(action_description: str, user_id: str) -> ApprovalResult:
     """Prompt the user for approval in the terminal."""
-    print(f"\n┌──────────────────────────────────────────────┐")
-    print(f"│  ⚠️  ONAY GEREKLİ                           │")
-    print(f"├──────────────────────────────────────────────┤")
+    print("\n┌──────────────────────────────────────────────┐")
+    print("│  ⚠️  ONAY GEREKLİ                           │")
+    print("├──────────────────────────────────────────────┤")
     # Wrap long descriptions
     desc_lines = []
     words = action_description.split()
@@ -1113,9 +1110,9 @@ async def cli_approval_callback(action_description: str, user_id: str) -> Approv
         desc_lines.append(current_line)
     for line in desc_lines[:5]:
         print(f"│{line:<46}│")
-    print(f"├──────────────────────────────────────────────┤")
-    print(f"│  Onaylıyor musunuz? (e/h)                    │")
-    print(f"└──────────────────────────────────────────────┘")
+    print("├──────────────────────────────────────────────┤")
+    print("│  Onaylıyor musunuz? (e/h)                    │")
+    print("└──────────────────────────────────────────────┘")
 
     def _ask() -> str:
         try:

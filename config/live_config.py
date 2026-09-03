@@ -300,7 +300,7 @@ class LiveConfig:
                     typed_value = "safe"
                 else:
                     typed_value = "ask"
-            elif schema["type"] == bool:
+            elif schema["type"] is bool:
                 normalized = value.lower().strip()
                 if normalized in ("true", "1", "yes", "evet", "ac", "on"):
                     typed_value = "true"
@@ -308,7 +308,7 @@ class LiveConfig:
                     typed_value = "false"
                 else:
                     return False, f"Geçersiz değer (true/false): {value}"
-            elif schema["type"] == int:
+            elif schema["type"] is int:
                 typed_value = str(int(value))
                 min_val = schema.get("min")
                 max_val = schema.get("max")
@@ -317,7 +317,7 @@ class LiveConfig:
                     return False, f"Değer çok düşük: {int_val} (min: {min_val})"
                 if max_val is not None and int_val > max_val:
                     return False, f"Değer çok yüksek: {int_val} (max: {max_val})"
-            elif schema["type"] == float:
+            elif schema["type"] is float:
                 typed_value = str(float(value))
                 min_val = schema.get("min")
                 max_val = schema.get("max")

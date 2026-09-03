@@ -12,7 +12,6 @@ Bu bilgiler SQLite'a kaydedilir ve her istekte system prompt'a enjekte edilir.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import time
 from pathlib import Path
@@ -73,7 +72,10 @@ class TasteEngine:
         conn.commit()
         conn.close()
 
-    def learn(self, category: str, key: str, value: str, confidence: float = 0.6, source: str = "auto") -> None:
+    def learn(
+        self, category: str, key: str, value: str,
+        confidence: float = 0.6, source: str = "auto"
+    ) -> None:
         """Yeni bir tercih öğren veya mevcut olanı güncelle."""
         now = time.time()
         conn = sqlite3.connect(str(self._db_path))
@@ -110,7 +112,8 @@ class TasteEngine:
         try:
             if category:
                 rows = conn.execute(
-                    "SELECT category, key, value, confidence, source FROM taste WHERE category = ? ORDER BY confidence DESC",
+                    "SELECT category, key, value, confidence, source "
+                    "FROM taste WHERE category = ? ORDER BY confidence DESC",
                     (category,)
                 ).fetchall()
             else:
@@ -201,13 +204,19 @@ class TasteEngine:
 
         return "\n".join(lines)
 
-    def auto_learn_from_interaction(self, user_message: str, assistant_response: str, tools_used: list[str] | None = None) -> None:
+    def auto_learn_from_interaction(
+        self, user_message: str, assistant_response: str,
+        tools_used: list[str] | None = None
+    ) -> None:
         """Otomatik öğrenme: kullanıcı mesajından tercih çıkar."""
         msg_lower = user_message.lower()
 
         # Dil tespiti
         turkish_chars = set("çğıöşüâîûêÇĞİÖŞÜ")
-        if any(c in user_message for c in turkish_chars) or any(w in msg_lower for w in ["merhaba", "selam", "nasıl", "edebilirim"]):
+        is_turkish = any(c in user_message for c in turkish_chars)
+        turkish_words = ["merhaba", "selam", "nasıl", "edebilirim"]
+        is_turkish = is_turkish or any(w in msg_lower for w in turkish_words)
+        if is_turkish:
             self.learn("language", "primary", "turkish", confidence=0.7, source="auto")
         elif any(w in msg_lower for w in ["hello", "hi", "how", "what", "can you"]):
             self.learn("language", "primary", "english", confidence=0.7, source="auto")

@@ -41,7 +41,10 @@ class WebBypassScraper(BaseTool):
                 try:
                     await page.goto(url, timeout=25000, wait_until="domcontentloaded")
                     html = await page.content()
-                    return self._success("HTML fetched (Playwright)", data={"url": url, "html": html[:20000], "method": "playwright"})
+                    return self._success(
+                        "HTML fetched (Playwright)",
+                        data={"url": url, "html": html[:20000], "method": "playwright"}
+                    )
                 finally:
                     await browser.close()
         except ImportError:
@@ -51,7 +54,11 @@ class WebBypassScraper(BaseTool):
 
         # Fallback: httpx with browser-like headers
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            )
         }
         try:
             async with httpx.AsyncClient(timeout=20, headers=headers, follow_redirects=True, verify=False) as client:
