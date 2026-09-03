@@ -1,11 +1,11 @@
-"""OmniCore Taste Engine — Kullanici tercihlerini ogrenen ve uygulayan akilli sistem.
+"""OmniCore Taste Engine — Kullanıcı tercihlerini öğrenen ve uygulayan akıllı sistem.
 
-Kullanici:
-- Gecmiste ne istedigi, nasil istedigi
-- Hangi dili kullandigi, hangi tarzda cevap bekledigi
-- Hangi tool'lari tercih ettigi, hangilerini begendigi
-- Provider/model tercihleri
-- Davranis kalıplari
+Kullanıcı:
+- Geçmişte ne istediğini, nasıl istediğini
+- Hangi dili kullandığını, hangi tarzda cevap beklediğini
+- Hangi tool'ları tercih ettiğini, hangilerini beğendiğini
+- Provider/model tercihlerini
+- Davranış kalıplarını
 
 Bu bilgiler SQLite'a kaydedilir ve her istekte system prompt'a enjekte edilir.
 """
@@ -22,21 +22,21 @@ from config.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Tum kategoriler
+# Tüm kategoriler
 CATEGORIES = {
-    "language": "Kullanicinin tercih ettigi dil ve karakter destegi",
-    "response_style": "Cevap formati ve uzunluk tercihleri",
-    "ui_preferences": "Arayuz gorunumu ve etkilesim tercihleri",
-    "tool_preferences": "Sik kullanilan ve tercih edilen araclar",
+    "language": "Kullanıcının tercih ettiği dil ve karakter desteği",
+    "response_style": "Cevap formatı ve uzunluk tercihleri",
+    "ui_preferences": "Arayüz görünümü ve etkileşim tercihleri",
+    "tool_preferences": "Sık kullanılan ve tercih edilen araçlar",
     "provider_preferences": "LLM provider ve model tercihleri",
-    "behavior": "Otonom davranis tercihleri (onay, izin, otomatik islem)",
-    "content": "Icerik tercihleri (konular, format, ton)",
-    "corrections": "Kullanici duzeltmeleri ve geri bildirimleri",
+    "behavior": "Otonom davranış tercihleri (onay, izin, otomatik işlem)",
+    "content": "İçerik tercihleri (konular, format, ton)",
+    "corrections": "Kullanıcı düzeltmeleri ve geri bildirimleri",
 }
 
 
 class TasteEngine:
-    """Kullanici tercihlerini ogrenen, saklayan ve uygulayan motor."""
+    """Kullanıcı tercihlerini öğrenen, saklayan ve uygulayan motor."""
 
     def __init__(self, db_path: Path | str | None = None) -> None:
         if db_path is None:
@@ -45,7 +45,7 @@ class TasteEngine:
         self._init_db()
 
     def _init_db(self) -> None:
-        """Taste tablosunu olustur."""
+        """Taste tablosunu oluştur."""
         conn = sqlite3.connect(str(self._db_path))
         conn.execute("""
             CREATE TABLE IF NOT EXISTS taste (
@@ -74,7 +74,7 @@ class TasteEngine:
         conn.close()
 
     def learn(self, category: str, key: str, value: str, confidence: float = 0.6, source: str = "auto") -> None:
-        """Yeni bir tercih ogren veya mevcut olanı guncelle."""
+        """Yeni bir tercih öğren veya mevcut olanı güncelle."""
         now = time.time()
         conn = sqlite3.connect(str(self._db_path))
         try:
@@ -105,7 +105,7 @@ class TasteEngine:
             conn.close()
 
     def get_all(self, category: str | None = None) -> list[dict[str, Any]]:
-        """Tum veya kategorili tercihleri al."""
+        """Tüm veya kategorili tercihleri al."""
         conn = sqlite3.connect(str(self._db_path))
         try:
             if category:
@@ -125,10 +125,9 @@ class TasteEngine:
             conn.close()
 
     def feedback(self, category: str, key: str, feedback_type: str, context: str = "") -> None:
-        """Kullanici geri bildirimi kaydet ve guven skorunu guncelle."""
+        """Kullanıcı geri bildirimi kaydet ve güven skorunu güncelle."""
         conn = sqlite3.connect(str(self._db_path))
         try:
-            # Taste ID al
             row = conn.execute(
                 "SELECT id, confidence FROM taste WHERE category = ? AND key = ?",
                 (category, key)
@@ -136,10 +135,10 @@ class TasteEngine:
 
             if row:
                 taste_id, current_conf = row
-                # Olumlu geri bildirim: guven artir
+                # Olumlu geri bildirim: güven artır
                 if feedback_type in ("positive", "thumbs_up", "correct"):
                     new_conf = min(1.0, current_conf + 0.15)
-                # Olumsuz: guven azalt
+                # Olumsuz: güven azalt
                 elif feedback_type in ("negative", "thumbs_down", "wrong"):
                     new_conf = max(0.0, current_conf - 0.2)
                 else:
@@ -150,7 +149,6 @@ class TasteEngine:
                     (new_conf, time.time(), taste_id)
                 )
 
-                # Feedback kaydet
                 conn.execute(
                     "INSERT INTO taste_feedback (taste_id, feedback_type, context, created_at) VALUES (?, ?, ?, ?)",
                     (taste_id, feedback_type, context, time.time())
@@ -178,12 +176,11 @@ class TasteEngine:
             conn.close()
 
     def format_for_system_prompt(self) -> str:
-        """Tum yuksek guvenlikli tercihleri system prompt'a eklenecek formatta dondur."""
+        """Tüm yüksek güvenli tercihleri system prompt'a eklenecek formatta döndür."""
         prefs = self.get_all()
         if not prefs:
             return ""
 
-        # Kategorilere gore grupla, guven > 0.4 olanlari dahil et
         groups: dict[str, list[str]] = {}
         for p in prefs:
             if p["confidence"] < 0.4:
@@ -196,7 +193,7 @@ class TasteEngine:
         if not groups:
             return ""
 
-        lines = ["\n## KULLANICI TERCİHLERİ (ogrenilmis)"]
+        lines = ["\n## KULLANICI TERCİHLERİ (öğrenilmiş)"]
         for cat, items in groups.items():
             cat_name = CATEGORIES.get(cat, cat)
             lines.append(f"\n### {cat_name}")
@@ -205,7 +202,7 @@ class TasteEngine:
         return "\n".join(lines)
 
     def auto_learn_from_interaction(self, user_message: str, assistant_response: str, tools_used: list[str] | None = None) -> None:
-        """Otomatik ogrenme: kullanici mesajindan tercih cikar."""
+        """Otomatik öğrenme: kullanıcı mesajından tercih çıkar."""
         msg_lower = user_message.lower()
 
         # Dil tespiti
@@ -246,7 +243,7 @@ _taste_engine: TasteEngine | None = None
 
 
 def get_taste_engine() -> TasteEngine:
-    """TasteEngine singleton'ini al veya olustur."""
+    """TasteEngine singleton'ini al veya oluştur."""
     global _taste_engine
     if _taste_engine is None:
         _taste_engine = TasteEngine()

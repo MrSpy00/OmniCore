@@ -87,7 +87,7 @@ def test_live_config_set_model_for_provider():
     success, msg = lc.set_model_for_provider("gemini", "gemini-2.5-flash")
     assert success is True
     assert "Gemini" in msg or "gemini" in msg.lower()
-    assert "guncellendi" in msg.lower() or "kaydedildi" in msg.lower()
+    assert "guncellendi" in msg.lower() or "güncellendi" in msg.lower() or "kaydedildi" in msg.lower()
 
 
 def test_settings_deprecated_model_validator():

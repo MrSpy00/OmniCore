@@ -101,7 +101,7 @@ AVAILABLE_GROQ_MODELS: list[dict[str, str]] = [
     {"id": "meta-llama/llama-4-scout-17b-16e-instruct", "name": "Llama 4 Scout 17B", "context": "128k", "speed": "fast"},
 ]
 
-# --- OpenAI-uyumlu hizli inference providerlari ---
+# --- OpenAI-uyumlu hızlı inference providerları ---
 AVAILABLE_FIREWORKS_MODELS: list[dict[str, str]] = [
     {"id": "accounts/fireworks/models/llama-v3p3-70b-instruct", "name": "Llama 3.3 70B", "context": "128k", "speed": "fast"},
     {"id": "accounts/fireworks/models/mixtral-8x22b-instruct", "name": "Mixtral 8x22B", "context": "64k", "speed": "medium"},
@@ -172,7 +172,7 @@ AVAILABLE_OPENROUTER_MODELS: list[dict[str, str]] = [
     {"id": "mistralai/mistral-large", "name": "Mistral Large (OpenRouter)", "context": "128k", "speed": "medium"},
 ]
 
-# --- Cin providerlari ---
+# --- Çin providerları ---
 AVAILABLE_MOONSHOT_MODELS: list[dict[str, str]] = [
     {"id": "moonshot-v1-128k", "name": "Moonshot 128K", "context": "128k", "speed": "medium"},
     {"id": "moonshot-v1-32k", "name": "Moonshot 32K", "context": "32k", "speed": "fast"},
@@ -212,7 +212,7 @@ AVAILABLE_OLLAMA_MODELS: list[dict[str, str]] = [
     {"id": "deepseek-r1", "name": "DeepSeek R1 (local)", "context": "64k", "speed": "varies"},
 ]
 
-# --- Tum provider'lari birlestir ---
+# --- Tüm provider'ları birleştir ---
 AVAILABLE_PROVIDERS: dict[str, list[dict[str, str]]] = {
     "gemini": AVAILABLE_GEMINI_MODELS,
     "openai": AVAILABLE_OPENAI_MODELS,
@@ -338,7 +338,7 @@ class Settings(BaseSettings):
     ai21_api_key: str = ""
     ai21_model: str = "jamba-1.5-mini"
 
-    # OpenAI-uyumlu hizli inference
+    # OpenAI-uyumlu hızlı inference
     fireworks_api_key: str = ""
     fireworks_model: str = "accounts/fireworks/models/llama-v3p3-70b-instruct"
     together_api_key: str = ""
@@ -366,7 +366,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_model: str = "meta-llama/llama-3.3-70b-instruct:free"
 
-    # Cin providerlari
+    # Çin providerları
     moonshot_api_key: str = ""
     moonshot_model: str = "moonshot-v1-128k"
     zhipu_api_key: str = ""

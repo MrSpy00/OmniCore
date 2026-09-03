@@ -33,12 +33,12 @@ def _resolve_project_root() -> Path:
 _PROJECT_ROOT = _resolve_project_root()
 _ENV_FILE = _PROJECT_ROOT / ".env"
 
-# Tum ayar anahtarlari: schema key -> env var, tip, aciklama
+# Tüm ayar anahtarları: schema key -> env var, tip, açıklama
 CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
     "model": {
         "env_var": "OMNI_LLM_MODEL",
         "type": str,
-        "description": "Aktif model (provider'a gore degisir)",
+        "description": "Aktif model (provider'a göre değişir)",
     },
     "provider": {
         "env_var": "LLM_PROVIDER",
@@ -48,19 +48,19 @@ CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
     "name": {
         "env_var": "USER_NAME",
         "type": str,
-        "description": "Gorunen ad",
+        "description": "Görünén ad",
     },
     "temperature": {
         "env_var": "LLM_TEMPERATURE",
         "type": float,
-        "description": "LLM sicaklik degeri (0.0-2.0)",
+        "description": "LLM sıcaklık değeri (0.0-2.0)",
         "min": 0.0,
         "max": 2.0,
     },
     "max_tokens": {
         "env_var": "LLM_MAX_OUTPUT_TOKENS",
         "type": int,
-        "description": "Maksimum output token sayisi",
+        "description": "Maksimum output token sayısı",
         "min": 256,
         "max": 1000000,
     },
@@ -87,42 +87,42 @@ CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
     "scheduler": {
         "env_var": "SCHEDULER_ENABLED",
         "type": bool,
-        "description": "Zamanlayici ac/kapat",
+        "description": "Zamanlayıcı aç/kapat",
     },
     "hybrid_fallback": {
         "env_var": "HYBRID_FALLBACK_ENABLED",
         "type": bool,
-        "description": "Hybrid fallback ac/kapat",
+        "description": "Hybrid fallback aç/kapat",
     },
     "hitl_timeout": {
         "env_var": "HITL_TIMEOUT_MINUTES",
         "type": int,
-        "description": "Onay zaman asimi (dakika)",
+        "description": "Onay zaman aşımı (dakika)",
         "min": 1,
         "max": 60,
     },
     "fallback_order": {
         "env_var": "LLM_FALLBACK_ORDER",
         "type": str,
-        "description": "Provider fallback sirasi",
+        "description": "Provider fallback sırası",
     },
     "short_term_memory": {
         "env_var": "SHORT_TERM_MAX_MESSAGES",
         "type": int,
-        "description": "Kisa vadeli bellek kapasitesi",
+        "description": "Kısa vadeli bellek kapasitesi",
         "min": 10,
         "max": 500,
     },
     "long_term_results": {
         "env_var": "LONG_TERM_N_RESULTS",
         "type": int,
-        "description": "Uzun vadeli bellek sonuc sayisi",
+        "description": "Uzun vadeli bellek sonuç sayısı",
         "min": 1,
         "max": 20,
     },
 }
 
-# Model kisa isimleri: alias -> gercek model ID
+# Model kısa isimleri: alias -> gerçek model ID
 MODEL_ALIASES: dict[str, dict[str, str]] = {
     "gemini": {
         "flash": "gemini-2.5-flash",
@@ -256,10 +256,10 @@ def resolve_model_alias(value: str, provider: str | None = None) -> str:
 
 
 class LiveConfig:
-    """Tek dosya tabanli runtime konfigurasyon.
+    """Tek dosya tabanlı runtime konfigürasyon.
 
     Oku: env vars -> .env
-    Yaz: .env (dogrudan)
+    Yaz: .env (doğrudan)
     """
 
     def __init__(self) -> None:
@@ -267,12 +267,12 @@ class LiveConfig:
         self._apply_env_overrides()
 
     def _apply_env_overrides(self) -> None:
-        """Override'lari process environment'a uygula."""
+        """Override'ları process environment'a uygula."""
         for key, value in self._overrides.items():
             os.environ[key] = value
 
     def get(self, key: str) -> str | None:
-        """Schema key ile deger al (ornegin 'model', 'provider')."""
+        """Schema key ile değer al (örneğin 'model', 'provider')."""
         if key == "approval_mode":
             return self._overrides.get("APPROVAL_MODE") or os.environ.get("APPROVAL_MODE", "ask")
         schema = CONFIG_SCHEMA.get(key)
@@ -284,13 +284,13 @@ class LiveConfig:
         return self._overrides.get(env_var) or os.environ.get(env_var, "")
 
     def set(self, key: str, value: str) -> tuple[bool, str]:
-        """Ayar degeri ata. (basari, mesaj) doner."""
+        """Ayar değeri ata. (başarı, mesaj) döner."""
         schema = CONFIG_SCHEMA.get(key)
         if not schema:
             valid_keys = ", ".join(CONFIG_SCHEMA.keys())
-            return False, f"Gecersiz anahtar: {key}\nGecerli anahtarlar: {valid_keys}"
+            return False, f"Geçersiz anahtar: {key}\nGeçerli anahtarlar: {valid_keys}"
 
-        # Tip dogrulama ve normalizasyon
+        # Tip doğrulama ve normalizasyon
         try:
             if key == "approval_mode":
                 norm = value.lower().strip()
@@ -307,29 +307,29 @@ class LiveConfig:
                 elif normalized in ("false", "0", "no", "hayir", "kapat", "off"):
                     typed_value = "false"
                 else:
-                    return False, f"Gecersiz deger (true/false): {value}"
+                    return False, f"Geçersiz değer (true/false): {value}"
             elif schema["type"] == int:
                 typed_value = str(int(value))
                 min_val = schema.get("min")
                 max_val = schema.get("max")
                 int_val = int(typed_value)
                 if min_val is not None and int_val < min_val:
-                    return False, f"Deger cok dusuk: {int_val} (min: {min_val})"
+                    return False, f"Değer çok düşük: {int_val} (min: {min_val})"
                 if max_val is not None and int_val > max_val:
-                    return False, f"Deger cok yuksek: {int_val} (max: {max_val})"
+                    return False, f"Değer çok yüksek: {int_val} (max: {max_val})"
             elif schema["type"] == float:
                 typed_value = str(float(value))
                 min_val = schema.get("min")
                 max_val = schema.get("max")
                 float_val = float(typed_value)
                 if min_val is not None and float_val < min_val:
-                    return False, f"Deger cok dusuk: {float_val} (min: {min_val})"
+                    return False, f"Değer çok düşük: {float_val} (min: {min_val})"
                 if max_val is not None and float_val > max_val:
-                    return False, f"Deger cok yuksek: {float_val} (max: {max_val})"
+                    return False, f"Değer çok yüksek: {float_val} (max: {max_val})"
             else:
                 typed_value = value.strip()
         except (ValueError, TypeError) as exc:
-            return False, f"Gecersiz deger tipi: {exc}"
+            return False, f"Geçersiz değer tipi: {exc}"
 
         env_var = schema["env_var"]
         if not env_var:
@@ -339,7 +339,7 @@ class LiveConfig:
         self._overrides[env_var] = typed_value
         os.environ[env_var] = typed_value
 
-        # Model degistirilirse provider'a gore ilgili degiskeni de guncelle
+        # Model değiştirilirse provider'a göre ilgili değişkeni de güncelle
         if key == "model":
             active_p = self._overrides.get("LLM_PROVIDER") or os.environ.get("LLM_PROVIDER", "gemini")
             if active_p == "groq" or "/" in typed_value or "llama" in typed_value.lower():
@@ -363,7 +363,7 @@ class LiveConfig:
         return True, f"✅ {key} = {typed_value}"
 
     def set_model_for_provider(self, provider: str, model_id: str) -> tuple[bool, str]:
-        """Belirli bir provider icin model ata ve .env'ye kaydet."""
+        """Belirli bir provider için model ata ve .env'ye kaydet."""
         p = provider.lower().strip()
         var_map = {
             "gemini": "OMNI_LLM_MODEL",
@@ -392,26 +392,26 @@ class LiveConfig:
             pass
 
         logger.info("config.provider_model_updated", provider=p, var=target_var, model=model_id)
-        return True, f"✅ {p.capitalize()} modeli '{model_id}' olarak guncellendi."
+        return True, f"✅ {p.capitalize()} modeli '{model_id}' olarak güncellendi."
 
     def show(self) -> str:
-        """Tum ayarlari goster."""
-        lines = ["⚙️  Yapilandirma Ayarlari:\n"]
+        """Tüm ayarları göster."""
+        lines = ["⚙️  Yapılandırma Ayarları:\n"]
         for key, schema in CONFIG_SCHEMA.items():
             env_var = schema.get("env_var")
             if not env_var:
                 continue
-            current = self._overrides.get(env_var) or os.environ.get(env_var, "(varsayilan)")
+            current = self._overrides.get(env_var) or os.environ.get(env_var, "(varsayılan)")
             desc = schema["description"]
             lines.append(f"  {key:<20} = {current:<25} # {desc}")
         lines.append(
-            "\n💡 Degistirmek icin: /config set <anahtar> <deger>\n"
-            "💡 Degeri gormek icin: /config get <anahtar>"
+            "\n💡 Değiştirmek için: /config set <anahtar> <değer>\n"
+            "💡 Değeri görmek için: /config get <anahtar>"
         )
         return "\n".join(lines)
 
     def get_env_value(self, env_var: str) -> str | None:
-        """Ham environment variable degeri al."""
+        """Ham environment variable değeri al."""
         return self._overrides.get(env_var) or os.environ.get(env_var)
 
 
@@ -420,7 +420,7 @@ _live_config: LiveConfig | None = None
 
 
 def get_live_config() -> LiveConfig:
-    """LiveConfig singleton'ini al veya olustur."""
+    """LiveConfig singleton'ini al veya oluştur."""
     global _live_config
     if _live_config is None:
         _live_config = LiveConfig()
