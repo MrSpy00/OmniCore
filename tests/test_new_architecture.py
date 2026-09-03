@@ -284,8 +284,9 @@ def test_router_hardware_adaptive_routing():
     # Test GPU VRAM protection: GPU VRAM > 85% -> switches away from local ollama
     mock_plugged = MagicMock(percent=90, power_plugged=True)
     mock_gpu = {"available": True, "vram_total_mb": "8192", "vram_used_mb": "7500"}
-    with patch("psutil.sensors_battery", return_value=mock_plugged), \
-         patch("tools.hardware_telemetry_toolkit._get_nvidia_gpu_info", return_value=mock_gpu):
+    with (
+        patch("psutil.sensors_battery", return_value=mock_plugged),
+        patch("tools.hardware_telemetry_toolkit._get_nvidia_gpu_info", return_value=mock_gpu),
+    ):
         route = CognitiveRouter._power_and_hardware_adaptive_route(router)
         assert route in ("gemini", "groq")
-

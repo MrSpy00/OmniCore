@@ -454,9 +454,8 @@ class WebPlayYoutubeVideoVisible(BaseTool):
                 "yayin tarihi",
                 "video bilgisi",
             )
-            is_metadata_query = (
-                action in ("metadata", "bilgi", "info", "tarih", "kac_gun_once", "kaç_gün_önce")
-                or (lower_q and any(kw in lower_q for kw in meta_triggers))
+            is_metadata_query = action in ("metadata", "bilgi", "info", "tarih", "kac_gun_once", "kaç_gün_önce") or (
+                lower_q and any(kw in lower_q for kw in meta_triggers)
             )
             if is_metadata_query:
                 meta = await youtube_get_video_metadata(page)
@@ -469,10 +468,13 @@ class WebPlayYoutubeVideoVisible(BaseTool):
 
             # 2. Notifications action
             notif_triggers = ("bildirimleri aç", "bildirimleri ac", "zili aç", "zili ac", "tüm bildirimler")
-            is_notifications_query = (
-                action in ("notifications", "bildirim", "bildirimleri_ac", "bildirimleri_aç", "bell")
-                or (lower_q and any(kw in lower_q for kw in notif_triggers))
-            )
+            is_notifications_query = action in (
+                "notifications",
+                "bildirim",
+                "bildirimleri_ac",
+                "bildirimleri_aç",
+                "bell",
+            ) or (lower_q and any(kw in lower_q for kw in notif_triggers))
             if is_notifications_query:
                 bell_result = await youtube_enable_notifications(page)
                 if bell_result.get("success"):
@@ -662,7 +664,6 @@ class SpotifyControl(MediaControlSpotifyNative):
         "previous/toggle/seek), query (song name), "
         "seek_seconds (int)."
     )
-
 
 
 class SysReadNotifications(BaseTool):

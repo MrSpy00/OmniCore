@@ -14,6 +14,7 @@ from tools.base import BaseTool, force_window_foreground, resolve_user_path
 
 logger = get_logger(__name__)
 
+
 # Shared browser instance management (unified with browser_helpers._GlobalBrowserSession)
 async def _get_browser():
     """Lazily return the shared browser context from the global browser session."""

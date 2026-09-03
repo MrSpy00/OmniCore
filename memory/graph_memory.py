@@ -156,13 +156,15 @@ class GraphMemory:
                 if name not in nodes:
                     nodes[name] = {"id": name, "label": name}
 
-            edges.append({
-                "id": f"{s}_{p}_{o}",
-                "source": s,
-                "target": o,
-                "label": p,
-                "confidence": conf,
-            })
+            edges.append(
+                {
+                    "id": f"{s}_{p}_{o}",
+                    "source": s,
+                    "target": o,
+                    "label": p,
+                    "confidence": conf,
+                }
+            )
 
         return {
             "nodes": list(nodes.values()),
@@ -174,6 +176,7 @@ class GraphMemory:
         """Metinden otomatik olarak varlık-ilişki çıkarır ve grafa ekler."""
         try:
             from memory.graph_extractor import extract_entities_and_relations
+
             triples = extract_entities_and_relations(text)
             count = 0
             for triple in triples:
@@ -187,4 +190,3 @@ class GraphMemory:
             return count
         except Exception:
             return 0
-

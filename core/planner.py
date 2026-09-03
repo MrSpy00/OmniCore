@@ -441,10 +441,7 @@ class TreeOfThoughtPlanner:
         destructive_ratio = destructive_count / step_count
 
         risk_weights = {"LOW": 0.1, "MEDIUM": 0.3, "HIGH": 0.6, "CRITICAL": 0.9}
-        risk_sum = sum(
-            risk_weights.get(str(getattr(s, "risk_level", "MEDIUM")), 0.3)
-            for s in steps
-        )
+        risk_sum = sum(risk_weights.get(str(getattr(s, "risk_level", "MEDIUM")), 0.3) for s in steps)
         avg_risk = risk_sum / step_count
 
         unique_tools = len({getattr(s, "tool_name", "") for s in steps})
@@ -470,4 +467,3 @@ class TreeOfThoughtPlanner:
         best = max(branches, key=lambda b: b.heuristic_score)
         best.selected = True
         return best
-

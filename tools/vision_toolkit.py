@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import mss  # type: ignore[import-not-found]
-import pyautogui
+
+try:
+    import pyautogui
+except (ImportError, Exception):
+    pyautogui = None  # type: ignore[assignment]
+
 from google import genai
 from google.genai import types
 from PIL import Image  # type: ignore[import-not-found]
@@ -160,7 +165,8 @@ class GuiAnalyzeScreen(BaseTool):
                     break
 
                 if attempt < attempts:
-                    await asyncio.to_thread(pyautogui.scroll, scroll_clicks)
+                    if pyautogui is not None:
+                        await asyncio.to_thread(pyautogui.scroll, scroll_clicks)
                     await asyncio.to_thread(time.sleep, 0.25)
 
             if target:
@@ -294,7 +300,8 @@ def _click_with_self_correction(
     current_y = y
 
     for attempt in range(1, max_attempts + 1):
-        pyautogui.click(current_x, current_y)
+        if pyautogui is not None:
+            pyautogui.click(current_x, current_y)
         entry: dict[str, object] = {"attempt": attempt, "x": current_x, "y": current_y}
 
         if not verify_after_click:
@@ -427,11 +434,13 @@ class VisionSetOfMarkAnnotate(BaseTool):
                         draw.rectangle([bx1, by1, bx1 + 36, by1 + 24], fill="#000000", outline="#FF007F", width=2)
                         draw.text((bx1 + 8, by1 + 4), f"#{mark_id}", fill="#FFFFFF")
 
-                        marks.append({
-                            "id": mark_id,
-                            "box": [bx1, by1, bx2, by2],
-                            "center": (cx, cy),
-                        })
+                        marks.append(
+                            {
+                                "id": mark_id,
+                                "box": [bx1, by1, bx2, by2],
+                                "center": (cx, cy),
+                            }
+                        )
                         mark_id += 1
 
                 img.save(output_file)
@@ -449,4 +458,3 @@ class VisionSetOfMarkAnnotate(BaseTool):
             f"{res['marks_count']} bölge). Dosya: {res['output_path']}",
             data=res,
         )
-

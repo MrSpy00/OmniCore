@@ -216,18 +216,33 @@ _QUERY_TOOL_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("resim", ("gui_take_screenshot", "media_", "image", "vision")),
     ("ses", ("media_", "audio")),
     ("spotify", ("spotify_control", "media_control_spotify_native", "os_launch_application", "media_control_native")),
-    ("muzik", (
-        "spotify_control", "media_control_spotify_native",
-        "media_control_native", "web_play_youtube_video_visible",
-    )),
-    ("music", (
-        "spotify_control", "media_control_spotify_native",
-        "media_control_native", "web_play_youtube_video_visible",
-    )),
-    ("oynat", (
-        "web_play_youtube_video_visible", "spotify_control",
-        "media_control_spotify_native", "media_control_native",
-    )),
+    (
+        "muzik",
+        (
+            "spotify_control",
+            "media_control_spotify_native",
+            "media_control_native",
+            "web_play_youtube_video_visible",
+        ),
+    ),
+    (
+        "music",
+        (
+            "spotify_control",
+            "media_control_spotify_native",
+            "media_control_native",
+            "web_play_youtube_video_visible",
+        ),
+    ),
+    (
+        "oynat",
+        (
+            "web_play_youtube_video_visible",
+            "spotify_control",
+            "media_control_spotify_native",
+            "media_control_native",
+        ),
+    ),
     ("uygulama", ("os_launch_application", "os_list_processes", "sys_")),
     ("program", ("os_launch_application", "os_list_processes", "sys_")),
     ("guvenlik", ("security", "encrypt", "decrypt", "audit")),
@@ -1001,6 +1016,7 @@ class CognitiveRouter:
         clipboard_context = ""
         try:
             from tools.clipboard_watcher import get_clipboard_watcher
+
             latest = get_clipboard_watcher().get_latest()
             if latest and latest.get("content_type", {}).get("category") == "error":
                 clipboard_context = (
@@ -1254,8 +1270,12 @@ class CognitiveRouter:
             tr_sample = ("ve", "bir", "bu", "ile", "için", "ne", "nasıl", "aç", "bul", "oynat", "bak")
             if any(tc in u_text for tc in turkish_chars) or any(w in u_text.lower().split() for w in tr_sample):
                 pm.learn_from_interaction("language", "tr", confidence=0.9, context="user_text_turkish")
-            elif len(u_text.split()) >= 3 and all(ord(c) < 128 for c in u_text) and any(
-                w in u_text.lower().split() for w in ("the", "and", "is", "for", "open", "play", "find", "show")
+            elif (
+                len(u_text.split()) >= 3
+                and all(ord(c) < 128 for c in u_text)
+                and any(
+                    w in u_text.lower().split() for w in ("the", "and", "is", "for", "open", "play", "find", "show")
+                )
             ):
                 pm.learn_from_interaction("language", "en", confidence=0.85, context="user_text_english")
         except Exception:
@@ -1740,13 +1760,23 @@ class CognitiveRouter:
         """Ask the LLM to decide: plan or direct answer."""
         lowered = user_text.lower().strip()
         spotify_triggers = (
-            "çal", "cal", "aç", "ac", "oynat", "dinle",
-            "başlat", "baslat", "play", "seek", "atla",
+            "çal",
+            "cal",
+            "aç",
+            "ac",
+            "oynat",
+            "dinle",
+            "başlat",
+            "baslat",
+            "play",
+            "seek",
+            "atla",
         )
         if "spotify" in lowered and any(k in lowered for k in spotify_triggers):
             seek_sec = 0
             seek_match = re.search(
-                r"(\d+)\s*(?:\.|\s)*(?:sn|saniye|sec|second)", lowered,
+                r"(\d+)\s*(?:\.|\s)*(?:sn|saniye|sec|second)",
+                lowered,
             )
             if seek_match:
                 try:
@@ -1756,11 +1786,15 @@ class CognitiveRouter:
 
             cleaned_query = re.sub(
                 r"\bspotify(?:'?(?:dan|den|da|de|ta|te|ten|tan))?\b",
-                "", user_text, flags=re.IGNORECASE,
+                "",
+                user_text,
+                flags=re.IGNORECASE,
             )
             cleaned_query = re.sub(
                 r"\b\d+\.?\s*(?:sn|saniye|sec|second)(?:'?(?:sini|sine|sinde))?\b",
-                "", cleaned_query, flags=re.IGNORECASE,
+                "",
+                cleaned_query,
+                flags=re.IGNORECASE,
             )
             turkish_music_words = (
                 r"şarkısının|sarkisinin|şarkısını|sarkisini|şarkısı"
@@ -1770,30 +1804,23 @@ class CognitiveRouter:
             )
             cleaned_query = re.sub(
                 rf"\b(?:{turkish_music_words})\b",
-                "", cleaned_query, flags=re.IGNORECASE,
+                "",
+                cleaned_query,
+                flags=re.IGNORECASE,
             )
             cleaned_query = cleaned_query.strip(" '\".,:-")
             if not cleaned_query:
                 cleaned_query = "top tracks"
 
-            tool_name = (
-                "spotify_control"
-                if self._registry.get("spotify_control")
-                else "media_control_spotify_native"
-            )
-            seek_desc = (
-                f" ve {seek_sec}. saniyeye atla" if seek_sec > 0 else ""
-            )
+            tool_name = "spotify_control" if self._registry.get("spotify_control") else "media_control_spotify_native"
+            seek_desc = f" ve {seek_sec}. saniyeye atla" if seek_sec > 0 else ""
             return {
                 "needs_plan": True,
                 "steps": [
                     {
                         "step": 1,
                         "tool_name": tool_name,
-                        "description": (
-                            f"Spotify'da '{cleaned_query}' arat, çal"
-                            f"{seek_desc}"
-                        ),
+                        "description": (f"Spotify'da '{cleaned_query}' arat, çal{seek_desc}"),
                         "parameters": {
                             "action": "search_and_play",
                             "query": cleaned_query,

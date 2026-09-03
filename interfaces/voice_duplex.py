@@ -354,15 +354,17 @@ def _calculate_rms(chunk: bytes) -> float:
     if not chunk or len(chunk) < 2:
         return 0.0
     import audioop
+
     try:
         return float(audioop.rms(chunk, 2))
     except Exception:
         # Fallback if audioop is unavailable (e.g. Python 3.13+)
         import struct
+
         count = len(chunk) // 2
         format_str = f"<{count}h"
         try:
-            shorts = struct.unpack(format_str, chunk[:count * 2])
+            shorts = struct.unpack(format_str, chunk[: count * 2])
             sum_squares = sum(s * s for s in shorts)
             return (sum_squares / count) ** 0.5
         except Exception:
@@ -386,6 +388,7 @@ class DuplexVoiceEngine:
         self._vad: Any = None
         try:
             from interfaces.vad_engine import VADEngine
+
             self._vad = VADEngine()
             self._vad.initialize()
         except Exception:
@@ -488,4 +491,3 @@ class DuplexVoiceEngine:
                 break
             except Exception as exc:
                 logger.error("voice_duplex.processing_error", error=str(exc))
-

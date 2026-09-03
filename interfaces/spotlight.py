@@ -134,8 +134,11 @@ class SpotlightOverlay:
         self._apply_cyberpunk_theme()
 
         container = ctk.CTkFrame(
-            self._root, fg_color="#0A0E17",
-            corner_radius=16, border_color="#7C4DFF", border_width=2,
+            self._root,
+            fg_color="#0A0E17",
+            corner_radius=16,
+            border_color="#7C4DFF",
+            border_width=2,
         )
         container.pack(fill="both", expand=True, padx=4, pady=4)
 

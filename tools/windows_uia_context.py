@@ -200,9 +200,7 @@ if _WIN32_AVAILABLE:
             ctypes.c_ulong,
         )
 
-        def _foreground_handler(
-            event: int, hwnd: int, *_: Any
-        ) -> None:
+        def _foreground_handler(event: int, hwnd: int, *_: Any) -> None:
             if event == EVENT_SYSTEM_FOREGROUND and hwnd:
                 observer = get_active_context_observer()
                 observer._on_event(hwnd)

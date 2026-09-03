@@ -105,7 +105,7 @@ class ClipboardWatcher:
                     with self._lock:
                         self._history.append(entry)
                         if len(self._history) > self._max_history:
-                            self._history = self._history[-self._max_history:]
+                            self._history = self._history[-self._max_history :]
 
                     for cb in self._callbacks:
                         try:

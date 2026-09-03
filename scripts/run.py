@@ -137,6 +137,7 @@ async def _run(mode: str, debug: bool = False) -> None:
     # Start background daemons (VRAM monitor, clipboard watcher, active context observer)
     try:
         from core.vram_monitor import get_vram_monitor
+
         vram = get_vram_monitor()
         vram.start()
     except Exception:
@@ -144,6 +145,7 @@ async def _run(mode: str, debug: bool = False) -> None:
 
     try:
         from tools.clipboard_watcher import get_clipboard_watcher
+
         cw = get_clipboard_watcher()
         cw.start()
     except Exception:
@@ -151,6 +153,7 @@ async def _run(mode: str, debug: bool = False) -> None:
 
     try:
         from tools.windows_uia_context import get_active_context_observer
+
         ctx_obs = get_active_context_observer()
         ctx_obs.start()
     except Exception:

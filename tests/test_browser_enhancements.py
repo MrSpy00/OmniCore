@@ -67,12 +67,14 @@ async def test_global_browser_session_singleton():
 async def test_youtube_seek_relative_middle():
     mock_page = MagicMock()
     # Mock duration evaluate
-    mock_page.evaluate = AsyncMock(side_effect=[
-        120.0,  # wait_for duration
-        120.0,  # duration query
-        None,   # seek execution
-        False,  # ad showing check
-    ])
+    mock_page.evaluate = AsyncMock(
+        side_effect=[
+            120.0,  # wait_for duration
+            120.0,  # duration query
+            None,  # seek execution
+            False,  # ad showing check
+        ]
+    )
     mock_page.query_selector = AsyncMock(return_value=None)
 
     result = await youtube_seek(mock_page, "orta")
@@ -131,8 +133,10 @@ async def test_web_play_youtube_video_visible_metadata_action():
         "view_count": "100K",
     }
 
-    with patch("tools.browser_helpers.get_browser_session") as mock_get_sess, \
-         patch("tools.browser_helpers.youtube_get_video_metadata", AsyncMock(return_value=mock_meta)):
+    with (
+        patch("tools.browser_helpers.get_browser_session") as mock_get_sess,
+        patch("tools.browser_helpers.youtube_get_video_metadata", AsyncMock(return_value=mock_meta)),
+    ):
         mock_session = MagicMock()
         mock_session.get_or_create_page = AsyncMock(return_value=mock_page)
         mock_get_sess.return_value = mock_session
@@ -162,8 +166,10 @@ async def test_web_play_youtube_video_visible_channel_latest_intent():
         "days_ago": 1.0,
     }
 
-    with patch("tools.browser_helpers.get_browser_session") as mock_get_sess, \
-         patch("tools.browser_helpers.smart_youtube_channel_and_play", AsyncMock(return_value=mock_channel_res)):
+    with (
+        patch("tools.browser_helpers.get_browser_session") as mock_get_sess,
+        patch("tools.browser_helpers.smart_youtube_channel_and_play", AsyncMock(return_value=mock_channel_res)),
+    ):
         mock_session = MagicMock()
         mock_session.get_or_create_page = AsyncMock(return_value=mock_page)
         mock_get_sess.return_value = mock_session
@@ -192,8 +198,10 @@ async def test_web_play_youtube_video_visible_seek_intent():
         "seconds": 89.0,
     }
 
-    with patch("tools.browser_helpers.get_browser_session") as mock_get_sess, \
-         patch("tools.browser_helpers.youtube_seek", AsyncMock(return_value=mock_seek_res)):
+    with (
+        patch("tools.browser_helpers.get_browser_session") as mock_get_sess,
+        patch("tools.browser_helpers.youtube_seek", AsyncMock(return_value=mock_seek_res)),
+    ):
         mock_session = MagicMock()
         mock_session.get_or_create_page = AsyncMock(return_value=mock_page)
         mock_get_sess.return_value = mock_session
@@ -241,4 +249,3 @@ async def test_dashboard_assets_and_favicon():
     asset_resp = client.get("/assets/OmniCore-bounce.png")
     assert asset_resp.status_code == 200
     assert asset_resp.headers.get("content-type") == "image/png"
-

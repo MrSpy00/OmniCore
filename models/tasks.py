@@ -105,6 +105,6 @@ class ThoughtBranch(BaseModel):
     description: str
     steps: list[TaskStep] = Field(default_factory=list)
     heuristic_score: float = 0.0  # 0.0 - 1.0, yüksek = iyi
-    estimated_cost: float = 0.0   # Token/zaman maliyet tahmini
-    risk_score: float = 0.0       # Adımların toplam riski
+    estimated_cost: float = 0.0  # Token/zaman maliyet tahmini
+    risk_score: float = 0.0  # Adımların toplam riski
     selected: bool = False

@@ -1,6 +1,5 @@
 """Unit tests for OmniCore Persona & Self-Learning System."""
 
-
 from config.persona_system import get_persona_manager
 
 

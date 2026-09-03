@@ -51,9 +51,7 @@ class VADEngine:
             model_path = model_dir / "silero_vad.onnx"
 
             if not model_path.exists():
-                url = (
-                    "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx"
-                )
+                url = "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx"
                 logger.info("vad.downloading_model")
                 urllib.request.urlretrieve(url, model_path)
 

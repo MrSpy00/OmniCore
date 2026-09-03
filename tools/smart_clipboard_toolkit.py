@@ -149,9 +149,7 @@ class SmartClipboardAnalyzeTraceback(BaseTool):
                 "is_error": True,
                 "exception_type": exc_type,
                 "exception_message": exc_msg,
-                "call_stack": [
-                    {"file": f, "line": int(line_num), "function": fn} for f, line_num, fn in files_lines
-                ],
+                "call_stack": [{"file": f, "line": int(line_num), "function": fn} for f, line_num, fn in files_lines],
             }
             return diagnosis
 
@@ -184,6 +182,7 @@ class SmartClipboardGetHistory(BaseTool):
 
         try:
             from tools.clipboard_watcher import get_clipboard_watcher
+
             watcher = get_clipboard_watcher()
             history = watcher.get_history(limit=limit)
 
@@ -192,12 +191,14 @@ class SmartClipboardGetHistory(BaseTool):
 
             entries = []
             for entry in history:
-                entries.append({
-                    "timestamp": entry.get("timestamp"),
-                    "preview": entry.get("content_preview", "")[:100],
-                    "type": entry.get("content_type", {}).get("category", "unknown"),
-                    "length": entry.get("content_length", 0),
-                })
+                entries.append(
+                    {
+                        "timestamp": entry.get("timestamp"),
+                        "preview": entry.get("content_preview", "")[:100],
+                        "type": entry.get("content_type", {}).get("category", "unknown"),
+                        "length": entry.get("content_length", 0),
+                    }
+                )
 
             summary = f"Son {len(entries)} pano değişikliği:"
             for i, e in enumerate(entries, 1):
@@ -280,4 +281,3 @@ class ClipboardAnalyze(BaseTool):
                 "length": len(content),
             },
         )
-

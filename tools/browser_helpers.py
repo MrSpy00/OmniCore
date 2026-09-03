@@ -711,10 +711,7 @@ def _parse_relative_date_to_days(text: str) -> float | None:
     if "bugün" in cleaned or "today" in cleaned:
         return 0.0
 
-    units = (
-        "saat|hour|hours|gün|gun|day|days|hafta|week|weeks|"
-        "ay|month|months|yıl|yil|year|years|dakika|minute|minutes"
-    )
+    units = "saat|hour|hours|gün|gun|day|days|hafta|week|weeks|ay|month|months|yıl|yil|year|years|dakika|minute|minutes"
     m = re.search(rf"(\d+(?:[.,]\d+)?)\s*({units})", cleaned)
     if not m:
         return None
@@ -1003,9 +1000,7 @@ async def smart_youtube_channel_and_play(
     else:
         # Search with channel filter
         search_url = (
-            f"https://www.youtube.com/results"
-            f"?search_query={urllib.parse.quote_plus(cleaned_name)}"
-            "&sp=EgIQAg%3D%3D"
+            f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(cleaned_name)}&sp=EgIQAg%3D%3D"
         )
         await page.goto(search_url, timeout=30000, wait_until="domcontentloaded")
 

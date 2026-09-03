@@ -85,9 +85,14 @@ class SystemTrayCompanion:
 
             try:
                 result = subprocess.run(
-                    ["nvidia-smi", "--query-gpu=name,memory.used,memory.total,temperature.gpu",
-                     "--format=csv,noheader,nounits"],
-                    capture_output=True, text=True, timeout=3,
+                    [
+                        "nvidia-smi",
+                        "--query-gpu=name,memory.used,memory.total,temperature.gpu",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     gpu_info = result.stdout.strip().split(", ")
@@ -118,6 +123,7 @@ class SystemTrayCompanion:
         """İzin modunu değiştirir."""
         try:
             from config.live_config import get_live_config
+
             get_live_config().set("approval_mode", mode)
             logger.info("tray.permission_changed", mode=mode)
         except Exception as exc:
@@ -176,9 +182,7 @@ class SystemTrayCompanion:
             pystray.MenuItem("❌ Çıkış", lambda icon: icon.stop()),
         )
 
-        self._icon = pystray.Icon(
-            "OmniCore", image, "OmniCore Sovereign AI OS", menu=menu
-        )
+        self._icon = pystray.Icon("OmniCore", image, "OmniCore Sovereign AI OS", menu=menu)
         self._running = True
         logger.info("tray.started")
 

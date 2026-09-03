@@ -20,9 +20,7 @@ class DynamicCodeSynthesizeAndRun(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        task_description = str(
-            self._first_param(params, "task", "description", "goal", "query") or ""
-        )
+        task_description = str(self._first_param(params, "task", "description", "goal", "query") or "")
 
         if not task_description:
             return self._failure("task parametresi gerekli — ne yapılmak istendiğini açıklayın.")

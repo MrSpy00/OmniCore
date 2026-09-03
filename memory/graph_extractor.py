@@ -107,11 +107,13 @@ def extract_entities_and_relations(text: str) -> list[dict[str, str]]:
         key = (entity.lower(), "mentioned_in", "conversation")
         if key not in seen:
             seen.add(key)
-            triples.append({
-                "subject": entity,
-                "predicate": "mentioned_in",
-                "object": "conversation",
-            })
+            triples.append(
+                {
+                    "subject": entity,
+                    "predicate": "mentioned_in",
+                    "object": "conversation",
+                }
+            )
 
     return triples
 

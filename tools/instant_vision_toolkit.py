@@ -83,13 +83,7 @@ def _capture_active_window_image(save_path: Path | None = None) -> Path:
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     with mss.mss() as sct:
-        if (
-            rect
-            and rect["width"] > 80
-            and rect["height"] > 80
-            and rect["left"] >= -500
-            and rect["top"] >= -500
-        ):
+        if rect and rect["width"] > 80 and rect["height"] > 80 and rect["left"] >= -500 and rect["top"] >= -500:
             monitor = {
                 "top": rect["top"],
                 "left": rect["left"],
@@ -127,9 +121,7 @@ class GetActiveWindowContext(BaseTool):
                 if _bridge.available:
                     root = await asyncio.to_thread(_bridge.find_foreground_window)
                     if root:
-                        tree = await asyncio.to_thread(
-                            _bridge.get_element_tree, root, max_depth=3, max_elements=40
-                        )
+                        tree = await asyncio.to_thread(_bridge.get_element_tree, root, max_depth=3, max_elements=40)
                         for elem in tree:
                             name = elem.get("name", "").strip()
                             if name:
@@ -172,9 +164,7 @@ class InstantScreenContext(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        prompt = str(
-            self._first_param(params, "query", "prompt", "question", default="") or ""
-        ).strip()
+        prompt = str(self._first_param(params, "query", "prompt", "question", default="") or "").strip()
         if not prompt:
             prompt = (
                 "Şu an ekranda/aktif pencerede ne görünüyor? "
@@ -205,9 +195,7 @@ class InstantScreenContext(BaseTool):
                         {
                             "type": "text",
                             "text": (
-                                "Görsel bağlamı: Aktif pencere "
-                                f"'{window_info.get('title')}'.\n"
-                                f"Soru/Talep: {prompt}"
+                                f"Görsel bağlamı: Aktif pencere '{window_info.get('title')}'.\nSoru/Talep: {prompt}"
                             ),
                         },
                         {

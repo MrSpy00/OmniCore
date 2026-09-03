@@ -27,10 +27,10 @@ class RootCauseAnalyzer:
 
     RECOVERY_SUGGESTIONS: dict[str, list[tuple[str, dict[str, Any]]]] = {
         "permission": [
-            ("terminal_execute", {
-                "command": "Start-Process powershell -Verb RunAs "
-                           "-ArgumentList '-Command \"echo elevated\"'"
-            }),
+            (
+                "terminal_execute",
+                {"command": "Start-Process powershell -Verb RunAs -ArgumentList '-Command \"echo elevated\"'"},
+            ),
         ],
         "timeout": [
             ("terminal_execute", {"command": "echo Timeout detected, retrying with extended timeout"}),
@@ -66,9 +66,7 @@ class RootCauseAnalyzer:
         return "unknown"
 
     @classmethod
-    def suggest_recovery(
-        cls, root_cause: str, failed_tool: str
-    ) -> tuple[str, dict[str, Any]]:
+    def suggest_recovery(cls, root_cause: str, failed_tool: str) -> tuple[str, dict[str, Any]]:
         """Kök neden ve başarısız araca göre kurtarma eylemi önerir."""
         suggestions = cls.RECOVERY_SUGGESTIONS.get(root_cause, [])
         if suggestions:

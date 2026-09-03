@@ -27,20 +27,67 @@ class ASTSafetyFilter:
     - Maksimum AST düğüm sayısı
     """
 
-    SAFE_BUILTINS = frozenset({
-        "abs", "all", "any", "bool", "dict", "enumerate", "filter",
-        "float", "format", "frozenset", "getattr", "hasattr", "hash",
-        "hex", "id", "int", "isinstance", "issubclass", "iter", "len",
-        "list", "map", "max", "min", "next", "oct", "ord", "pow",
-        "print", "range", "repr", "reversed", "round", "set", "sorted",
-        "str", "sum", "super", "tuple", "type", "zip",
-    })
+    SAFE_BUILTINS = frozenset(
+        {
+            "abs",
+            "all",
+            "any",
+            "bool",
+            "dict",
+            "enumerate",
+            "filter",
+            "float",
+            "format",
+            "frozenset",
+            "getattr",
+            "hasattr",
+            "hash",
+            "hex",
+            "id",
+            "int",
+            "isinstance",
+            "issubclass",
+            "iter",
+            "len",
+            "list",
+            "map",
+            "max",
+            "min",
+            "next",
+            "oct",
+            "ord",
+            "pow",
+            "print",
+            "range",
+            "repr",
+            "reversed",
+            "round",
+            "set",
+            "sorted",
+            "str",
+            "sum",
+            "super",
+            "tuple",
+            "type",
+            "zip",
+        }
+    )
 
-    BLOCKED_MODULES = frozenset({
-        "os", "subprocess", "sys", "shutil", "socket",
-        "ctypes", "importlib", "__import__",
-        "compile", "exec", "eval",
-    })
+    BLOCKED_MODULES = frozenset(
+        {
+            "os",
+            "subprocess",
+            "sys",
+            "shutil",
+            "socket",
+            "ctypes",
+            "importlib",
+            "__import__",
+            "compile",
+            "exec",
+            "eval",
+        }
+    )
 
     MAX_AST_NODES = 200
 
@@ -157,11 +204,7 @@ class DynamicCodeSynthesizer:
     def _execute_sandboxed(self, code: str, context: dict[str, Any]) -> Any:
         """Kodu kısıtlı bir isim alanında çalıştırır."""
         safe_globals: dict[str, Any] = {
-            "__builtins__": {
-                k: __builtins__[k]
-                for k in ASTSafetyFilter.SAFE_BUILTINS
-                if k in __builtins__
-            },
+            "__builtins__": {k: __builtins__[k] for k in ASTSafetyFilter.SAFE_BUILTINS if k in __builtins__},
         }
         safe_globals.update(context)
         safe_globals["result"] = None

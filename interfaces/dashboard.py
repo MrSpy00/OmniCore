@@ -229,12 +229,14 @@ def create_dashboard_app() -> FastAPI:
             try:
                 info = p.info
                 if info.get("name"):
-                    procs.append({
-                        "pid": info["pid"],
-                        "name": info["name"],
-                        "cpu": round(info.get("cpu_percent") or 0.0, 1),
-                        "ram": round(info.get("memory_percent") or 0.0, 1),
-                    })
+                    procs.append(
+                        {
+                            "pid": info["pid"],
+                            "name": info["name"],
+                            "cpu": round(info.get("cpu_percent") or 0.0, 1),
+                            "ram": round(info.get("memory_percent") or 0.0, 1),
+                        }
+                    )
             except Exception:
                 pass
         procs.sort(key=lambda x: (x["cpu"], x["ram"]), reverse=True)

@@ -70,13 +70,8 @@ class AudioSessionMonitor:
                 current = self._scan_audio_processes()
                 current_pids = {s["pid"] for s in current}
 
-                new_sessions = [
-                    s for s in current if s["pid"] not in self._last_sessions
-                ]
-                ended_pids = [
-                    pid for pid in self._last_sessions
-                    if pid not in current_pids
-                ]
+                new_sessions = [s for s in current if s["pid"] not in self._last_sessions]
+                ended_pids = [pid for pid in self._last_sessions if pid not in current_pids]
 
                 if new_sessions or ended_pids:
                     for cb in self._callbacks:
@@ -96,8 +91,18 @@ class AudioSessionMonitor:
             return []
 
         audio_keywords = [
-            "chrome", "firefox", "edge", "spotify", "discord", "vlc",
-            "zoom", "teams", "skype", "obs", "audacity", "media",
+            "chrome",
+            "firefox",
+            "edge",
+            "spotify",
+            "discord",
+            "vlc",
+            "zoom",
+            "teams",
+            "skype",
+            "obs",
+            "audacity",
+            "media",
         ]
 
         sessions: list[dict[str, Any]] = []
@@ -106,11 +111,13 @@ class AudioSessionMonitor:
                 info = proc.info
                 name = (info.get("name") or "").lower()
                 if any(kw in name for kw in audio_keywords):
-                    sessions.append({
-                        "pid": info["pid"],
-                        "name": info.get("name", ""),
-                        "status": info.get("status", ""),
-                    })
+                    sessions.append(
+                        {
+                            "pid": info["pid"],
+                            "name": info.get("name", ""),
+                            "status": info.get("status", ""),
+                        }
+                    )
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
         return sessions

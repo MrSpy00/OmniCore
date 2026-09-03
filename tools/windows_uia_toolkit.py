@@ -42,8 +42,8 @@ except Exception:
 class _UIAutomationBridge:
     """IUIAutomation COM arayüzü için thread-safe sarmalayıcı.
 
-    Windows UI Automation API'sine erişerek uygulama arayüzlerindeki
-   但on元素leri AutomationId, ControlType, Name gibi güvenilir tanımlayıcılarla bulur.
+     Windows UI Automation API'sine erişerek uygulama arayüzlerindeki
+    但on元素leri AutomationId, ControlType, Name gibi güvenilir tanımlayıcılarla bulur.
     """
 
     def __init__(self) -> None:
@@ -53,9 +53,7 @@ class _UIAutomationBridge:
 
         if _COM_AVAILABLE:
             try:
-                self._uia = comtypes.client.CreateObject(
-                    "{FF48DBA4-60EF-4201-AA87-54103EEF594E}"
-                )
+                self._uia = comtypes.client.CreateObject("{FF48DBA4-60EF-4201-AA87-54103EEF594E}")
                 self._root = self._uia.GetRootElement()
                 self._initialized = True
             except Exception:
@@ -90,9 +88,7 @@ class _UIAutomationBridge:
         except Exception:
             return None
 
-    def get_element_tree(
-        self, root: Any, max_depth: int = 4, max_elements: int = 80
-    ) -> list[dict[str, Any]]:
+    def get_element_tree(self, root: Any, max_depth: int = 4, max_elements: int = 80) -> list[dict[str, Any]]:
         """UIA ağaç yapısını递归 olarak gezer ve eleman listesi döndürür.
 
         Her eleman için şunları içerir:
@@ -239,9 +235,7 @@ class _UIAutomationBridge:
             name_lower = name_contains.lower()
             for el in elements:
                 if name_lower in el.get("name", "").lower():
-                    return self.find_element_by(
-                        root, name=el["name"]
-                    )
+                    return self.find_element_by(root, name=el["name"])
 
         if control_type:
             condition = self._uia.CreatePropertyCondition(30003, control_type)
@@ -265,6 +259,7 @@ class _UIAutomationBridge:
                     hwnd = element.CurrentNativeWindowHandle
                     if hwnd:
                         import win32con
+
                         win32gui.SendMessage(int(hwnd), win32con.BM_CLICK, 0, 0)
                         return True
             except Exception:
@@ -284,6 +279,7 @@ class _UIAutomationBridge:
                 hwnd = element.CurrentNativeWindowHandle
                 if hwnd and win32gui:
                     import win32con
+
                     win32gui.SendMessage(int(hwnd), win32con.WM_SETTEXT, 0, value)
                     return True
             except Exception:
@@ -320,7 +316,7 @@ def _get_bridge() -> _UIAutomationBridge:
 
 
 class WindowsInspectUIElements(BaseTool):
-    """ penceresindeki etkileşimli UI elemanlarını IUIAutomation ile inceler."""
+    """penceresindeki etkileşimli UI elemanlarını IUIAutomation ile inceler."""
 
     name = "windows_inspect_ui_elements"
     description = (
@@ -392,8 +388,7 @@ class WindowsInspectUIElements(BaseTool):
             return self._failure(str(res.get("error", "UI elemanları incelenemedi.")))
 
         summary = (
-            f"Pencere: '{res['window']['title']}' — "
-            f"{res['element_count']} etkileşimli eleman bulundu (IUIAutomation)."
+            f"Pencere: '{res['window']['title']}' — {res['element_count']} etkileşimli eleman bulundu (IUIAutomation)."
         )
         return self._success(summary, data=res)
 
@@ -413,9 +408,7 @@ class WindowsClickUIElement(BaseTool):
             return self._failure("Bu araç yalnızca Windows'ta desteklenir.")
 
         params = self._params(tool_input)
-        element_name = str(
-            self._first_param(params, "element_name", "element", "label", "button") or ""
-        ).strip()
+        element_name = str(self._first_param(params, "element_name", "element", "label", "button") or "").strip()
         automation_id = str(self._first_param(params, "automation_id", "auto_id") or "").strip()
         control_type = str(self._first_param(params, "control_type", "type") or "").strip()
         window_title = self._first_param(params, "window_title", "window") or ""
@@ -456,9 +449,7 @@ class WindowsClickUIElement(BaseTool):
                 }
 
             try:
-                force_window_foreground(
-                    int(getattr(target, "CurrentNativeWindowHandle", 0) or 0)
-                )
+                force_window_foreground(int(getattr(target, "CurrentNativeWindowHandle", 0) or 0))
             except Exception:
                 pass
 
