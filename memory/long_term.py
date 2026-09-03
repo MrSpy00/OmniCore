@@ -66,12 +66,8 @@ class LongTermMemory:
         settings = get_settings()
         self._persist_dir = persist_dir or str(settings.chroma_persist_dir)
 
-        # Check if onnxruntime is installed; if not, use FastLightweightEmbedding
-        embedding_fn = None
-        try:
-            import onnxruntime  # noqa: F401
-        except Exception:
-            embedding_fn = FastLightweightEmbedding()
+        # Always use lightweight embedding to avoid onnxruntime dependency issues
+        embedding_fn = FastLightweightEmbedding()
 
         try:
             self._client = chromadb.PersistentClient(

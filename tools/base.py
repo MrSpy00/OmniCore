@@ -214,8 +214,13 @@ def _resolve_alias_path(
 ) -> Path | None:
     alias_map = {
         "desktop": desktop,
+        "masaüstü": desktop,
+        "masaustu": desktop,
         "downloads": downloads,
+        "indirilenler": downloads,
         "documents": documents,
+        "belgeler": documents,
+        "belgelerim": documents,
     }
     lower_normalized = normalized.lower()
     for alias, base_path in alias_map.items():
@@ -226,6 +231,31 @@ def _resolve_alias_path(
             remainder = normalized[len(alias_prefix) :]
             return base_path / remainder
     return None
+
+
+def resolve_desktop_path(path_str: str | None = None, default_filename: str = "screenshot.png") -> Path:
+    """Resolve a target path ensuring it defaults to the user's Desktop directory."""
+    home = _host_user_home()
+    special = _windows_special_folders() if _is_windows() else {}
+    desktop = special.get("desktop") or (home / "Desktop")
+
+    raw = (path_str or "").strip()
+    if not raw:
+        return desktop / default_filename
+
+    lower_raw = raw.lower().replace("\\", "/")
+    if lower_raw in {"desktop", "masaüstü", "masaustu"}:
+        return desktop / default_filename
+
+    target, _ = resolve_user_path(raw)
+    if target.exists() and target.is_dir():
+        return target / default_filename
+
+    # If the user passed just a single filename without parent folder (e.g. "screenshot.png")
+    if Path(raw).name == raw and not (Path(raw).is_absolute() or "/" in raw or "\\" in raw):
+        return desktop / raw
+
+    return target
 
 
 def _expand_windows_user_placeholder(

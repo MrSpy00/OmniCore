@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 import sys
@@ -177,6 +178,18 @@ class Settings(BaseSettings):
     google_api_key_3: str = ""
     # Default to gemini-2.5-flash (gemini-2.0-flash was deprecated)
     omni_llm_model: str = "gemini-2.5-flash"
+
+    @field_validator("omni_llm_model", mode="before")
+    @classmethod
+    def _validate_omni_llm_model(cls, v: object) -> str:
+        if not v:
+            return "gemini-2.5-flash"
+        val = str(v).strip().lower()
+        if val in ("gemini-2.0-flash", "gemini-2.0-flash-exp", "2.0-flash"):
+            return "gemini-2.5-flash"
+        if val in ("gemini-2.0-flash-lite", "2.0-flash-lite"):
+            return "gemini-2.5-flash-lite"
+        return str(v).strip()
 
     # Groq
     groq_api_key: str = ""
@@ -352,6 +365,11 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return a cached singleton of the application settings."""
     return Settings()
+
+
+def invalidate_settings_cache() -> None:
+    """Clear the cached Settings singleton so next get_settings() re-reads env."""
+    get_settings.cache_clear()
 
 
 def get_available_models(provider: str | None = None) -> dict[str, list[dict[str, str]]]:

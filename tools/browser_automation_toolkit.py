@@ -46,21 +46,120 @@ class BrowserTakeScreenshot(BaseTool):
     name = "browser_take_screenshot"
     description = (
         "Capture a visual screenshot of the current screen or web browser window. "
-        "Parameters: save_path (optional target PNG file path)."
+        "Parameters: save_path (optional target PNG file path, defaults to Desktop/screenshot.png)."
     )
     is_destructive = False
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        save_path = str(self._first_param(params, "save_path", "path", default="") or "").strip()
+        save_path = str(self._first_param(params, "save_path", "output_path", "path", default="") or "").strip()
 
-        from tools.computer_use_toolkit import ScreenCapture
+        from tools.gui_automation_toolkit import GuiTakeScreenshot
 
         sub_input = ToolInput(
-            tool_name="screen_capture",
-            parameters={"output_path": save_path} if save_path else {},
+            tool_name="gui_take_screenshot",
+            parameters={"output_path": save_path or "Desktop/screenshot.png"},
         )
-        return await ScreenCapture().execute(sub_input)
+        return await GuiTakeScreenshot().execute(sub_input)
+
+
+class BrowserLaunch(BaseTool):
+    """Launch a real desktop browser (Chrome, Edge, Brave, or system default) visibly."""
+
+    name = "browser_launch"
+    description = (
+        "Launch a visible browser process on the host OS. "
+        "Parameters: url (optional URL or search term to open), browser (optional: chrome|edge|brave|default)."
+    )
+    is_destructive = False
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        url = str(self._first_param(params, "url", "target", "query", default="https://www.google.com") or "").strip()
+        browser_choice = str(self._first_param(params, "browser", "app", default="default") or "default").lower()
+
+        if not url:
+            url = "https://www.google.com"
+        elif not url.startswith(("http://", "https://")):
+            if "." in url and " " not in url:
+                url = f"https://{url}"
+            else:
+                import urllib.parse
+                url = f"https://www.google.com/search?q={urllib.parse.quote(url)}"
+
+        launched = await asyncio.to_thread(_launch_browser_process, url, browser_choice)
+        if launched.get("success"):
+            return self._success(
+                f"Browser launched visibly with URL: {url}",
+                data={"url": url, **launched},
+            )
+        return self._failure(f"Failed to launch browser: {launched.get('error')}")
+
+
+def _launch_browser_process(url: str, browser_name: str = "default") -> dict:
+    import os
+    import subprocess
+    import sys
+    from tools.base import force_window_foreground
+
+    if sys.platform != "win32":
+        import webbrowser
+        webbrowser.open_new(url)
+        return {"success": True, "method": "webbrowser.open_new"}
+
+    # Common Windows executable paths
+    chrome_paths = [
+        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+    ]
+    edge_paths = [
+        os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+        os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+    ]
+    brave_paths = [
+        os.path.expandvars(r"%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+        os.path.expandvars(r"%LocalAppData%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+    ]
+
+    exe_path = None
+    if browser_name in ("chrome", "google-chrome"):
+        exe_path = next((p for p in chrome_paths if os.path.exists(p)), None)
+    elif browser_name in ("edge", "msedge"):
+        exe_path = next((p for p in edge_paths if os.path.exists(p)), None)
+    elif browser_name == "brave":
+        exe_path = next((p for p in brave_paths if os.path.exists(p)), None)
+
+    # Fallback to any installed modern browser if default
+    if not exe_path and browser_name == "default":
+        for candidate in chrome_paths + edge_paths + brave_paths:
+            if os.path.exists(candidate):
+                exe_path = candidate
+                break
+
+    try:
+        if exe_path and os.path.exists(exe_path):
+            proc = subprocess.Popen([exe_path, url], close_fds=True)
+            import time
+            time.sleep(1.0)
+            for title in ("Chrome", "Edge", "Brave", "Browser"):
+                force_window_foreground(title, timeout_seconds=1.5)
+            return {"success": True, "method": "subprocess", "exe": exe_path, "pid": proc.pid}
+
+        # OS default shell open fallback
+        os.startfile(url)
+        import time
+        time.sleep(1.0)
+        for title in ("Chrome", "Edge", "Brave", "Browser"):
+            force_window_foreground(title, timeout_seconds=1.5)
+        return {"success": True, "method": "os.startfile"}
+    except Exception as exc:
+        try:
+            import webbrowser
+            webbrowser.open_new(url)
+            return {"success": True, "method": "webbrowser_fallback"}
+        except Exception as fallback_exc:
+            return {"success": False, "error": f"{exc} (fallback: {fallback_exc})"}
 
 
 def _fetch_url_html(url: str) -> str:
@@ -82,3 +181,114 @@ def _extract_clean_text_from_html(html: str) -> str:
     # Normalize whitespace
     clean = re.sub(r"\s+", " ", clean).strip()
     return clean
+
+
+class BrowserPlaywrightInteract(BaseTool):
+    """Real browser automation via Playwright: navigate, click, fill, scroll, screenshot, YouTube search."""
+
+    name = "browser_interact"
+    description = (
+        "Interact with web pages using Playwright browser automation. "
+        "Parameters: url, action (navigate|click|fill|scroll|screenshot|get_text|youtube_search|open_and_play), "
+        "selector (CSS/XPath for click/fill), value (for fill or scroll delta), save_path, timeout."
+    )
+    is_destructive = False
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        params = self._params(tool_input)
+        url = str(self._first_param(params, "url", "target", default="") or "").strip()
+        action = str(self._first_param(params, "action", default="navigate") or "navigate").lower()
+        selector = str(self._first_param(params, "selector", "css", "xpath", default="") or "")
+        value = str(self._first_param(params, "value", "text", default="") or "")
+        save_path = str(self._first_param(params, "save_path", "path", default="Desktop/browser_screenshot.png") or "")
+        timeout = int(params.get("timeout", 30000))
+
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            return self._failure(
+                "Playwright yuklu degil. Kurulum: pip install playwright && playwright install chromium"
+            )
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=False)
+                page = await browser.new_page()
+
+                try:
+                    if action == "youtube_search" and value:
+                        return await self._youtube_search(page, value)
+                    elif action == "open_and_play" and value:
+                        return await self._youtube_open_and_play(page, value)
+                    elif url:
+                        await page.goto(url, timeout=timeout)
+
+                    if action == "navigate":
+                        return self._success(f"Sayfaya gidildi: {page.url}", data={"url": page.url})
+                    elif action == "click" and selector:
+                        await page.click(selector, timeout=timeout)
+                        return self._success(f"Tiklandi: {selector}")
+                    elif action == "fill" and selector:
+                        await page.fill(selector, value, timeout=timeout)
+                        return self._success(f"Dolduruldu: {selector}")
+                    elif action == "scroll":
+                        delta = int(value or "500")
+                        await page.mouse.wheel(0, delta)
+                        return self._success(f"Kaydirildi: {delta}px")
+                    elif action == "screenshot":
+                        await page.screenshot(path=save_path, full_page=False)
+                        return self._success(f"Ekran goruntusu kaydedildi: {save_path}")
+                    elif action == "get_text":
+                        text = await page.inner_text("body")
+                        return self._success(text[:4000], data={"url": page.url, "text": text[:4000]})
+                    elif action == "wait_for" and selector:
+                        await page.wait_for_selector(selector, timeout=timeout)
+                        return self._success(f"Element bulundu: {selector}")
+                    else:
+                        return self._failure(f"Bilinmeyen action: {action}. Kullanilabilir: navigate, click, fill, scroll, screenshot, get_text, youtube_search, open_and_play")
+                finally:
+                    await browser.close()
+        except Exception as exc:
+            return self._failure(f"Playwright hatasi: {exc}")
+
+    async def _youtube_search(self, page, query: str) -> ToolOutput:
+        """Search YouTube, find first video result, return URL."""
+        import urllib.parse
+        search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
+        await page.goto(search_url, timeout=30000)
+        await page.wait_for_selector("ytd-video-renderer", timeout=15000)
+        first_video = await page.query_selector("ytd-video-renderer a#video-title")
+        if first_video:
+            href = await first_video.get_attribute("href")
+            title = await first_video.inner_text()
+            video_url = f"https://www.youtube.com{href}"
+            return self._success(
+                f"YouTube arama sonucu: '{title}'",
+                data={"url": video_url, "title": title, "search_query": query},
+            )
+        return self._failure(f"YouTube'da '{query}' icin sonuc bulunamadi")
+
+    async def _youtube_open_and_play(self, page, query: str) -> ToolOutput:
+        """Search YouTube, navigate to first video, and play it."""
+        import urllib.parse
+        search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
+        await page.goto(search_url, timeout=30000)
+        await page.wait_for_selector("ytd-video-renderer", timeout=15000)
+        first_video = await page.query_selector("ytd-video-renderer a#video-title")
+        if first_video:
+            href = await first_video.get_attribute("href")
+            title = await first_video.inner_text()
+            video_url = f"https://www.youtube.com{href}"
+            await page.goto(video_url, timeout=30000)
+            # Try to click play button if video doesn't auto-play
+            try:
+                play_btn = await page.query_selector("button.ytp-large-play-button")
+                if play_btn:
+                    await play_btn.click()
+            except Exception:
+                pass
+            return self._success(
+                f"YouTube video baslatildi: '{title}'",
+                data={"url": video_url, "title": title, "status": "playing"},
+            )
+        return self._failure(f"YouTube'da '{query}' icin video bulunamadi")

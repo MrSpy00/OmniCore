@@ -129,7 +129,8 @@ MODEL_ALIASES: dict[str, dict[str, str]] = {
         "2.5-flash": "gemini-2.5-flash",
         "2.5-lite": "gemini-2.5-flash-lite",
         "2.5-pro": "gemini-2.5-pro",
-        "2.0-flash": "gemini-2.0-flash",
+        "2.0-flash": "gemini-2.5-flash",
+        "2.0-flash-lite": "gemini-2.5-flash-lite",
     },
     "groq": {
         "20b": "openai/gpt-oss-20b",
@@ -290,10 +291,16 @@ class LiveConfig:
 
         _write_env_local(self._overrides)
 
+        try:
+            from config.settings import invalidate_settings_cache
+            invalidate_settings_cache()
+        except Exception:
+            pass
+
         logger.info("config.updated", key=key, env_var=env_var, value=typed_value)
         return True, f"✅ {key} = {typed_value} (kaydedildi: .env.local)"
 
-    def set_model_for_provider(self, provider: str, model_id: str) -> None:
+    def set_model_for_provider(self, provider: str, model_id: str) -> tuple[bool, str]:
         """Set and persist the model for a specific provider in .env.local."""
         p = provider.lower().strip()
         var_map = {
@@ -311,8 +318,20 @@ class LiveConfig:
         if p == "groq":
             self._overrides["GROQ_LLM_MODEL"] = model_id
             os.environ["GROQ_LLM_MODEL"] = model_id
+        elif p == "gemini":
+            self._overrides["OMNI_LLM_MODEL"] = model_id
+            os.environ["OMNI_LLM_MODEL"] = model_id
         _write_env_local(self._overrides)
+
+        try:
+            from config.settings import invalidate_settings_cache
+            invalidate_settings_cache()
+        except Exception:
+            pass
+
         logger.info("config.provider_model_updated", provider=p, var=target_var, model=model_id)
+        msg = f"✅ {p.capitalize()} modeli '{model_id}' olarak güncellendi ve .env.local dosyasına kalıcı olarak kaydedildi."
+        return True, msg
 
     def show(self) -> str:
         """Show all configurable settings with current values."""

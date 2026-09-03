@@ -16,7 +16,7 @@ from typing import Any
 
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from config.logging import get_logger
 from config.settings import get_settings
@@ -46,6 +46,10 @@ def create_dashboard_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index():
         return DASHBOARD_HTML
+
+    @app.get("/favicon.ico")
+    async def favicon():
+        return Response(content=b"", media_type="image/x-icon")
 
     @app.get("/api/status")
     async def api_status():
@@ -175,7 +179,7 @@ def create_dashboard_app() -> FastAPI:
 
     @app.get("/api/sysinfo")
     @app.get("/api/telemetry")
-    async def api_telemetry():
+    async def api_sysinfo():
         import psutil
 
         cpu = psutil.cpu_percent(interval=0.05)
@@ -911,6 +915,7 @@ main.main-viewport {
       <span id="headerProviderModel">Bağlanıyor...</span>
     </div>
     <div class="authority-pill" id="headerAuthority">🔓 TAM YETKİ</div>
+    <button class="btn-lang" id="btnHeaderVoice" onclick="toggleVoiceInput()" title="Sesli Asistan & Mikrofon">🎙️ Ses</button>
     <button class="btn-lang" id="btnLangToggle" onclick="toggleLanguage()">🇹🇷 TR</button>
   </div>
 </header>
@@ -927,6 +932,18 @@ main.main-viewport {
         </svg>
       </span>
       <span data-i18n="nav_chat">Yapay Zeka Sohbet</span>
+    </button>
+
+    <button class="nav-btn" onclick="toggleVoiceInput()" id="btnNavVoice" title="Sesli Asistan (Voice Duplex)">
+      <span class="nav-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+      </span>
+      <span data-i18n="nav_voice">Sesli Asistan</span>
     </button>
 
     <button class="nav-btn" onclick="switchView('settings')">
@@ -948,7 +965,7 @@ main.main-viewport {
           <line x1="6" y1="18" x2="6.01" y2="18"></line>
         </svg>
       </span>
-      <span data-i18n="nav_resources">Donanım & Araçlar</span>
+      <span data-i18n="nav_resources">Sistem Bilgisi & Araçlar</span>
     </button>
 
     <div class="sidebar-spacer"></div>
@@ -961,7 +978,7 @@ main.main-viewport {
         <span data-i18n="privacy_title">%100 Yerel Gizlilik</span>
       </div>
       <div class="privacy-text" data-i18n="privacy_desc">
-        OmniCore tamamen cihazınızda çalışır. Donanım telemetrisi ve kullanım verileriniz dış sunuculara kesinlikle aktarılmaz.
+        OmniCore tamamen cihazınızda çalışır. Donanım bilgisi ve kullanım verileriniz dış sunuculara kesinlikle aktarılmaz.
       </div>
     </div>
   </aside>
@@ -1126,7 +1143,7 @@ main.main-viewport {
             <div style="font-size:0.84rem; color:var(--text-secondary); line-height:1.6;">
               <p>• <strong>Sıfır Dış Veri Gönderimi:</strong> OmniCore sistem durumu ve donanım bilgisi harici hiçbir şirkete (Google, Meta, bulut servisleri) gönderilmez.</p>
               <p style="margin-top:6px;">• <strong>Lokal psutil Ölçümü:</strong> Tüm CPU ve RAM değerleri doğrudan işletim sistemi çekirdeğinden okunur.</p>
-              <p style="margin-top:6px;">• <strong>Vektör Bellek Güvenliği:</strong> ChromaDB üçüncü taraf telemetrisi kod düzeyinde kapatılmıştır.</p>
+              <p style="margin-top:6px;">• <strong>Vektör Bellek Güvenliği:</strong> ChromaDB üçüncü taraf veri toplama kod düzeyinde kapatılmıştır.</p>
             </div>
           </div>
         </div>
@@ -1149,20 +1166,17 @@ main.main-viewport {
 <script>
 // --- State & Localization ---
 let currentLang = 'tr';
-let voiceActive = false;
-let speechRecognition = null;
-let speechVoice = null;
-let allTools = [];
+let currentView = 'chat';
 
 const I18N = {
   tr: {
     nav_heading: "Gezinti",
     nav_chat: "Yapay Zeka Sohbet",
+    nav_voice: "Sesli Asistan",
     nav_settings: "Sistem & Yetki Ayarları",
-    nav_resources: "Donanım & Araçlar",
+    nav_resources: "Sistem Bilgisi & Araçlar",
     privacy_title: "%100 Yerel Gizlilik",
-    privacy_desc: "OmniCore tamamen cihazınızda çalışır. Donanım kaynak bilgisi ve kullanım verileriniz dış sunuculara kesinlikle aktarılmaz.",
-
+    privacy_desc: "OmniCore tamamen cihazınızda çalışır. Sistem bilgisi ve kullanım verileriniz dış sunuculara kesinlikle aktarılmaz.",
     welcome_msg: "OmniCore Yapay Zeka İşletim Sistemine Hoş Geldiniz. Doğal dilde talimat verin.",
     mic_blocked_msg: "🎙️ Mikrofon izni engellendi: Tarayıcı adres çubuğundaki kilit simgesine (🔒) tıklayıp Mikrofona izin verin.",
     settings_title: "Model & Güvenlik Yönetimi",
@@ -1171,18 +1185,19 @@ const I18N = {
     active_model_desc: "Kullanmak istediğiniz birincil yapay zeka modelini seçin.",
     perm_mode_title: "İzin & Yetki Modu",
     perm_mode_desc: "Otonom araçların çalışma onay politikasını yapılandırın.",
-    resources_title: "Yerel Donanım & Araç Havuzu",
-    resources_subtitle: "Cihazınızın sistem kaynakları ve kayıtlı 192+ otonom araç kataloğu.",
-    hw_monitor_title: "Donanım Kaynakları",
+    resources_title: "Sistem Bilgisi & Otonom Araç Havuzu",
+    resources_subtitle: "Cihazınızın sistem kaynakları, bellek durumu ve kayıtlı 192+ otonom araç kataloğu.",
+    hw_monitor_title: "Sistem Bilgisi (CPU & RAM)",
     tools_title: "Kayıtlı Otonom Araçlar",
   },
   en: {
     nav_heading: "Navigation",
     nav_chat: "AI Chat Assistant",
+    nav_voice: "Voice Assistant",
     nav_settings: "System & Authority",
-    nav_resources: "Hardware & Tools",
+    nav_resources: "System Info & Tools",
     privacy_title: "100% Local Privacy",
-    privacy_desc: "OmniCore runs entirely on your device. Hardware telemetry and usage metrics are never transmitted externally.",
+    privacy_desc: "OmniCore runs entirely on your device. Hardware metrics and usage data are never transmitted externally.",
     welcome_msg: "Welcome to OmniCore Autonomous AI OS. Provide natural instructions.",
     mic_blocked_msg: "🎙️ Microphone permission blocked: Click the lock icon (🔒) in your browser address bar to allow microphone access.",
     settings_title: "Model & Security Management",
@@ -1191,32 +1206,38 @@ const I18N = {
     active_model_desc: "Select the primary artificial intelligence model.",
     perm_mode_title: "Authority & Permission Policy",
     perm_mode_desc: "Configure autonomous execution authorization policies.",
-    resources_title: "Local Hardware & Tool Catalog",
-    resources_subtitle: "System hardware health and registered 192+ autonomous tools.",
-    hw_monitor_title: "Hardware Resources",
+    resources_title: "System Info & Tool Catalog",
+    resources_subtitle: "Device system health, memory status, and registered 192+ autonomous tools.",
+    hw_monitor_title: "System Info (CPU & RAM)",
     tools_title: "Registered Autonomous Tools",
   }
 };
 
 function toggleLanguage() {
   currentLang = currentLang === 'tr' ? 'en' : 'tr';
-  document.getElementById('btnLangToggle').textContent = currentLang === 'tr' ? '🇹🇷 TR' : '🇬🇧 EN';
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const key = el.getAttribute('data-i18n');
-    if (I18N[currentLang][key]) {
-      el.textContent = I18N[currentLang][key];
-    }
+    if (I18N[currentLang][key]) el.textContent = I18N[currentLang][key];
   });
 }
 
 function switchView(viewName) {
-  document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+  currentView = viewName;
   document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-  document.getElementById('view-' + viewName).classList.add('active');
-  event.currentTarget.classList.add('active');
+  document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+
+  const btn = document.querySelector(`button[onclick="switchView('${viewName}')"]`);
+  if (btn) btn.classList.add('active');
+
+  const sec = document.getElementById(`view-${viewName}`);
+  if (sec) sec.classList.add('active');
 }
 
-// --- Text-to-Speech & Speech-to-Text ---
+// --- Voice & Speech Features ---
+let speechRecognition = null;
+let speechVoice = null;
+let voiceActive = false;
+
 if ('speechSynthesis' in window) {
   window.speechSynthesis.onvoiceschanged = () => {
     const voices = window.speechSynthesis.getVoices();
@@ -1226,7 +1247,7 @@ if ('speechSynthesis' in window) {
 
 function speakText(text) {
   if (!window.speechSynthesis) return;
-  const clean = text.replace(/[*_#`~\[\]]/g, '').replace(/http\S+/g, '');
+  const clean = text.replace(/[*_#`~[\]]/g, '').replace(/http\S+/g, '');
   const utter = new SpeechSynthesisUtterance(clean);
   utter.lang = currentLang === 'tr' ? 'tr-TR' : 'en-US';
   if (speechVoice) utter.voice = speechVoice;
@@ -1440,7 +1461,7 @@ function handleProgressEvent(event, titleEl, stepsEl) {
   }
 }
 
-// --- Live Telemetry & Status ---
+// --- Live System Info & Status ---
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');
@@ -1463,18 +1484,18 @@ async function fetchStatus() {
       const radio = opt.querySelector('input');
       if (radio) radio.checked = true;
     }
-  } catch(e) {}
+  } catch(e) { console.error('Status fetch failed:', e); }
 }
 
-async function fetchTelemetry() {
+async function fetchSysinfo() {
   try {
-    const res = await fetch('/api/telemetry');
+    const res = await fetch('/api/sysinfo');
     const d = await res.json();
     document.getElementById('txtCpuUsage').textContent = d.cpu_percent + '%';
     document.getElementById('barCpu').style.width = Math.min(100, d.cpu_percent) + '%';
     document.getElementById('txtRamUsage').textContent = `${d.ram_percent}% (${d.ram_used_gb} / ${d.ram_total_gb} GB)`;
     document.getElementById('barRam').style.width = Math.min(100, d.ram_percent) + '%';
-  } catch(e) {}
+  } catch(e) { console.error('Sysinfo fetch failed:', e); }
 }
 
 async function loadModels() {
@@ -1494,15 +1515,17 @@ async function loadModels() {
       }
       sel.appendChild(grp);
     }
-  } catch(e) {}
+  } catch(e) { console.error('Models load failed:', e); }
 }
+
+let allTools = [];
 
 async function loadTools() {
   try {
     const res = await fetch('/api/tools');
     allTools = await res.json();
     renderTools(allTools);
-  } catch(e) {}
+  } catch(e) { console.error('Tools load failed:', e); }
 }
 
 function renderTools(tools) {
@@ -1551,11 +1574,11 @@ async function setAuthorityMode(mode) {
 
 // Init
 fetchStatus();
-fetchTelemetry();
+fetchSysinfo();
 loadModels();
 loadTools();
 setInterval(fetchStatus, 4000);
-setInterval(fetchTelemetry, 2500);
+setInterval(fetchSysinfo, 2500);
 </script>
 </body>
 </html>

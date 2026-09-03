@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from pathlib import Path
 
@@ -14,7 +15,7 @@ import pyautogui
 from PIL import Image  # type: ignore[import-not-found]
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool, resolve_user_path
+from tools.base import BaseTool, resolve_user_path, resolve_desktop_path
 from tools.os_adapters import runtime_adapter
 
 _RUNTIME = runtime_adapter()
@@ -26,13 +27,20 @@ def _resolve_sandboxed(path_str: str) -> Path:
 
 
 def _resolve_output_target(path_str: str) -> Path:
+    """Always resolve to Desktop directory. Ignores any CWD-relative paths."""
     raw = (path_str or "").strip()
-    candidate = Path(raw).expanduser()
-    if candidate.is_absolute():
-        return candidate.resolve()
-
-    target, _ = resolve_user_path(raw)
-    return target
+    if not raw:
+        return resolve_desktop_path(None, "screenshot.png")
+    # Force Desktop prefix for ANY bare filename
+    if not any(sep in raw for sep in ("\\", "/", ":")):
+        raw = f"Desktop/{raw}"
+    result = resolve_desktop_path(raw, "screenshot.png")
+    # Safety: if resolved path is NOT under Desktop, force it
+    desktop = resolve_desktop_path(None, "screenshot.png").parent
+    if not str(result).lower().startswith(str(desktop).lower()):
+        filename = Path(raw).name or "screenshot.png"
+        result = desktop / filename
+    return result
 
 
 class GuiMouseMoveClick(BaseTool):
@@ -143,17 +151,27 @@ class GuiScrollMouse(BaseTool):
 class GuiTakeScreenshot(BaseTool):
     name = "gui_take_screenshot"
     description = (
-        "Take a screenshot of the entire screen or a specific application window and save "
-        "directly to file (e.g., Desktop/screenshot.png). "
-        "Parameters: output_path (default 'Desktop/screenshot.png'), app_name (optional app/window to focus)."
+        "Take a screenshot of the entire screen or a specific application "
+        "window and save directly to Desktop (e.g., Desktop/screenshot.png). "
+        "Parameters: output_path, app_name (optional window to focus)."
     )
     is_destructive = False  # Read-only operation
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        output_path = self._first_param(
-            params, "output_path", "file_path", "path", default="Desktop/screenshot.png"
-        )
+        raw_path = str(self._first_param(
+            params, "output_path", "file_path", "path", default=""
+        ) or "").strip()
+
+        # Always ensure Desktop prefix for bare filenames
+        if not raw_path:
+            raw_path = "Desktop/screenshot.png"
+        elif not any(sep in raw_path for sep in ("\\", "/", ":")):
+            raw_path = f"Desktop/{raw_path}"
+        elif raw_path.lower() in ("desktop", "masaüstü", "masaustu"):
+            raw_path = "Desktop/screenshot.png"
+
+        output_path = raw_path
         region = params.get("region")
         if isinstance(region, str):
             region = None
@@ -189,8 +207,22 @@ class GuiTakeScreenshot(BaseTool):
                 try:
                     from tools.base import force_window_foreground
                     await asyncio.to_thread(force_window_foreground, app_name, timeout_seconds=4.0)
-                    await asyncio.sleep(1.2)  # Allow window to come to foreground and repaint
-                    # Try to get window bounds for region capture
+                    await asyncio.sleep(1.2)
+
+                    # Try Win32 direct window capture first (captures only the window)
+                    if _RUNTIME.is_windows:
+                        try:
+                            hwnd = await asyncio.to_thread(_find_window_by_title, app_name)
+                            if hwnd:
+                                await asyncio.to_thread(_capture_window_win32, hwnd, save_path)
+                                return self._success(
+                                    f"Screenshot of '{app_name}' saved to {save_path.name}",
+                                    data={"path": str(save_path), "focused_app": app_name, "method": "win32_window"},
+                                )
+                        except Exception as win32_exc:
+                            pass  # Fall through to region/full-screen capture
+
+                    # Fallback: try to get window bounds for region capture
                     if region is None:
                         try:
                             import pygetwindow as gw  # type: ignore[import-not-found]
@@ -440,3 +472,67 @@ def _key_to_vk(key: str) -> int | None:
         if "A" <= ch <= "Z" or "0" <= ch <= "9":
             return ord(ch)
     return None
+
+
+def _find_window_by_title(title_partial: str) -> int | None:
+    """Find a window handle by partial title match using Win32 API."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    result: list[int] = []
+
+    def enum_callback(hwnd: int, _: int) -> bool:
+        if user32.IsWindowVisible(hwnd):
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                if title_partial.lower() in buf.value.lower():
+                    result.append(hwnd)
+        return True
+
+    ENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows(ENUMPROC(enum_callback), 0)
+    return result[0] if result else None
+
+
+def _capture_window_win32(hwnd: int, save_path: Path) -> None:
+    """Capture a specific window's content using Win32 GDI DC."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+
+    rect = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    width = rect.right - rect.left
+    height = rect.bottom - rect.top
+
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Window has invalid dimensions: {width}x{height}")
+
+    hdc_window = user32.GetDC(hwnd)
+    hdc_mem = gdi32.CreateCompatibleDC(hdc_window)
+    hbitmap = gdi32.CreateCompatibleBitmap(hdc_window, width, height)
+    gdi32.SelectObject(hdc_mem, hbitmap)
+    gdi32.BitBlt(hdc_mem, 0, 0, width, height, hdc_window, 0, 0, 0x00CC0020)  # SRCCOPY
+
+    bmp_info = wintypes.BITMAPINFOHEADER()
+    bmp_info.biSize = ctypes.sizeof(wintypes.BITMAPINFOHEADER)
+    bmp_info.biWidth = width
+    bmp_info.biHeight = -height  # Top-down
+    bmp_info.biPlanes = 1
+    bmp_info.biBitCount = 32
+    bmp_info.biCompression = 0
+
+    buf = ctypes.create_string_buffer(width * height * 4)
+    gdi32.GetDIBits(hdc_mem, hbitmap, 0, height, buf, ctypes.byref(bmp_info), 0)
+    img = Image.frombuffer("RGBA", (width, height), buf, "raw", "BGRA", 0, 1)
+    img = img.convert("RGB")
+    img.save(str(save_path))
+
+    gdi32.DeleteObject(hbitmap)
+    gdi32.DeleteDC(hdc_mem)
+    user32.ReleaseDC(hwnd, hdc_window)

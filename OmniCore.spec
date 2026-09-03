@@ -52,8 +52,8 @@ for pkg in ["config", "core", "interfaces", "memory", "models", "scheduler", "to
     if pkg_path.exists():
         datas.append((str(pkg_path), pkg))
 
-# Comprehensive collection of 3rd party packages with data and submodules
-packages_to_collect = [
+# Comprehensive collection — use targeted collection for heavy packages
+packages_to_collect_selectively = [
     "pydantic",
     "pydantic_settings",
     "pydantic_core",
@@ -63,15 +63,13 @@ packages_to_collect = [
     "fastapi",
     "uvicorn",
     "starlette",
-    "chromadb",
-    "posthog",
     "apscheduler",
     "langchain_core",
     "langchain_groq",
     "langchain_google_genai",
 ]
 
-for pkg in packages_to_collect:
+for pkg in packages_to_collect_selectively:
     try:
         d, b, h = collect_all(pkg)
         datas.extend(d)
@@ -79,6 +77,19 @@ for pkg in packages_to_collect:
         hiddenimports.extend(h)
     except Exception as e:
         print(f"Warning: collect_all({pkg}) error: {e}")
+
+# ChromaDB: use selective collection (collect_all pulls too much — tests, internals, telemetry)
+try:
+    hiddenimports.extend(collect_submodules("chromadb"))
+    datas.extend(copy_metadata("chromadb"))
+except Exception as e:
+    print(f"Warning: chromadb selective collection error: {e}")
+
+# Posthog: only submodules, skip data files
+try:
+    hiddenimports.extend(collect_submodules("posthog"))
+except Exception:
+    pass
 
 # Copy metadata
 metadata_packages = [
@@ -119,6 +130,26 @@ a = Analysis(
         "curses",
         "IPython",
         "imageio_ffmpeg",
+        "numpy.tests",
+        "pandas",
+        "PIL.tests",
+        "pyttsx3",
+        "nose",
+        "unittest",
+        "xmlrpc",
+        "pydoc",
+        "doctest",
+        "argparse",
+        "distutils",
+        "setuptools",
+        "pip",
+        "wheel",
+        "pkg_resources",
+        "lib2to3",
+        "tcl",
+        "tk",
+        "test",
+        "_pytest",
     ],
 
     noarchive=False,
@@ -135,6 +166,9 @@ for b in a.binaries:
         continue
     # Exclude macOS and Linux platform drivers
     if "selenium-manager" in name_l and ("macos" in name_l or "linux" in name_l):
+        continue
+    # Exclude Playwright browser binaries (chromium/firefox/webkit — too heavy, use system browser)
+    if "playwright" in name_l and any(x in name_l for x in ("chrome", "firefox", "webkit", "headless_shell")):
         continue
     filtered_binaries.append(b)
 
@@ -153,6 +187,20 @@ for d in a.datas:
     # Exclude unused 25MB discovery cache json files
     if "googleapiclient" in name_l and "discovery_cache" in name_l:
         continue
+    # Exclude test files and documentation
+    if "/test" in name_l or "/tests" in name_l:
+        continue
+    if name_l.endswith((".md", ".rst", ".txt")) and ("test" in name_l or "example" in name_l):
+        continue
+    # Exclude chromadb telemetry/analytics
+    if "chromadb" in name_l and ("telemetry" in name_l or "analytics" in name_l):
+        continue
+    # Exclude chromadb test/internal files
+    if "chromadb" in name_l and ("test" in name_l or "segment" in name_l or "hnswlib" in name_l):
+        continue
+    # Exclude Playwright browser driver data
+    if "playwright" in name_l and any(x in name_l for x in ("driver", "package", "registry")):
+        continue
     filtered_datas.append(d)
 
 pyz = PYZ(a.pure, optimize=1)
@@ -167,10 +215,14 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,
-    upx_exclude=[],
+    upx=True,
+    upx_exclude=[
+        "vcruntime140.dll",
+        "python312.dll",
+        "python3.dll",
+    ],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

@@ -28,13 +28,41 @@ import pyautogui
 from PIL import Image  # type: ignore[import-not-found]
 
 from models.tools import ToolInput, ToolOutput
-from tools.base import BaseTool, resolve_user_path
+from tools.base import BaseTool, resolve_user_path, resolve_desktop_path
 from tools.vision_toolkit import REGION_TEXT_PROMPT, analyze_image_with_gemini
 
 
 def _resolve_sandboxed(path_str: str) -> Path:
-    target, _ = resolve_user_path(path_str)
-    return target
+    raw = (path_str or "").strip()
+    if not raw:
+        return resolve_desktop_path()
+    # Always ensure Desktop prefix for bare filenames (e.g. "screenshot.png")
+    if not any(sep in raw for sep in ("\\", "/", ":")):
+        raw = f"Desktop/{raw}"
+    return resolve_desktop_path(raw)
+
+
+class GuiScreenshot(BaseTool):
+    """Capture desktop screenshot, defaulting directly to user's Desktop folder."""
+
+    name = "gui_screenshot"
+    description = (
+        "Capture a screenshot of the entire desktop or window and save to file. "
+        "Defaults to Desktop (Desktop/screenshot.png). "
+        "Parameters: output_path (optional save path), app_name (optional window title to focus)."
+    )
+    is_destructive = False
+
+    async def execute(self, tool_input: ToolInput) -> ToolOutput:
+        from tools.gui_automation_toolkit import GuiTakeScreenshot
+
+        return await GuiTakeScreenshot().execute(tool_input)
+
+
+class ScreenCapture(GuiScreenshot):
+    """Alias for GuiScreenshot for compatibility."""
+
+    name = "screen_capture"
 
 
 def _is_opencv_missing(exc: Exception) -> bool:

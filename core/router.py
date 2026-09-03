@@ -190,8 +190,8 @@ _QUERY_TOOL_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ag", ("net_", "api_", "dns", "socket", "ping")),
     ("internet", ("net_", "api_", "web_")),
     ("web", ("web_", "browser", "http", "api_")),
-    ("tarayici", ("web_play_youtube_video_visible", "os_open_browser_visible", "web_")),
-    ("browser", ("web_play_youtube_video_visible", "os_open_browser_visible", "web_")),
+    ("tarayici", ("web_play_youtube_video_visible", "os_open_browser_visible", "browser_launch", "web_")),
+    ("browser", ("web_play_youtube_video_visible", "os_open_browser_visible", "browser_launch", "web_")),
     ("youtube", ("web_play_youtube_video_visible", "media_", "web_")),
     ("video", ("web_play_youtube_video_visible", "media_", "web_")),
     ("kanal", ("web_play_youtube_video_visible", "os_open_browser_visible", "web_")),
@@ -847,17 +847,19 @@ class CognitiveRouter:
             "KURAL 10: Dogrudan arac calistir. agent_spawn_subtask sadece dosya sistemi "
             "taramasi icin kullanilir. Web, tarayici, youtube, gui islerinde ASLA "
             "delegasyon yapma, dogrudan ilgili araci cagir. "
-            "KURAL 11: Ekran görüntüsü (screenshot) alınırken HER ZAMAN doğrudan gui_take_screenshot "
-            "aracını kullan ve output_path parametresine doğrudan masaüstü dosya yolunu ver "
-            "(örn: 'Desktop/screenshot.png' veya 'Desktop/spotify_anasayfa.png'). "
-            "ASLA ekran görüntüsü aldıktan sonra terminalden mv/move komutu çalıştırma! "
-            "Eğer belirli bir uygulamanın (örn: Spotify, Chrome) ekran görüntüsü istenmişse, "
-            "önce os_launch_application ile uygulamayı başlat, ardından gui_take_screenshot "
-            "aracına app_name parametresini ver (örn: app_name='Spotify'). "
-            "KURAL 12: YouTube'da video açmak, oynatmak veya aratmak istendiğinde HER ZAMAN "
-            "doğrudan web_play_youtube_video_visible aracını kullan (query='aranacak video veya kanal'). "
-            "Tarayıcı otomatik olarak kullanıcının ekranında görünür açılacaktır. "
-            "KURAL 13: Genel web siteleri açılmak istendiğinde doğrudan os_open_browser_visible aracını kullan."
+            "KURAL 11: Ekran goruntusu alirken ASLA agent_spawn_subtask KULLANMA! "
+            "DOGHRUDAN gui_take_screenshot aracini cagir. "
+            "output_path parametresine masaustu dosya adi ver (orn: 'Desktop/screenshot.png'). "
+            "ASLA terminalde mv/move/kopyalama komutu calistirma! "
+            "Dosya otomatik olarak masaustune kaydedilir. "
+            "Eger belirli bir uygulamanin goruntusu istenirse once uygulamayi baslat, "
+            "sonra gui_take_screenshot'a app_name parametresi ver (orn: app_name='Spotify'). "
+            "KURAL 12: YouTube'da video acmak icin ASLA agent_spawn_subtask KULLANMA! "
+            "DOGHRUDAN web_play_youtube_video_visible aracini cagir (query='video adi veya kanal'). "
+            "Tarayici otomatik acilir ve video oynatilir. "
+            "KURAL 13: Tarayici acmak icin ASLA agent_spawn_subtask KULLANMA! "
+            "DOGHRUDAN os_open_browser_visible veya browser_launch aracini cagir. "
+            "Asla dev_glob_search ile tarayici acmaya calisma - bu dosya arama aracidir!"
         )
         return (
             f"{mandated}\n\n"
@@ -1477,6 +1479,16 @@ class CognitiveRouter:
             key = parts[1].strip()
             val = parts[2].strip()
             success, msg = get_live_config().set(key, val)
+            if success and key in ("model", "provider", "approval_mode"):
+                try:
+                    from config.settings import get_settings, invalidate_settings_cache
+                    invalidate_settings_cache()
+                    new_settings = get_settings()
+                    self._settings = new_settings
+                    self._destroy_current_llm()
+                    self._llm = self._build_llm(new_settings)
+                except Exception:
+                    pass
             return msg
 
         return None
@@ -1697,6 +1709,16 @@ class CognitiveRouter:
         user_id: str,
         results_summary: list[str],
     ) -> bool:
+        # Fast path: if guardian is in YES (full) mode, auto-approve everything
+        if self._guardian.mode == ApprovalMode.YES:
+            await self._state.log_audit(
+                "auto_approved_full_mode",
+                f"{step.tool_name}: {step.description}",
+                user_id=user_id,
+                metadata={"approval_mode": self._guardian.mode.value},
+            )
+            return True
+
         if (
             RiskLevel(step.risk_level) == RiskLevel.CRITICAL
             and self._guardian.mode == ApprovalMode.YES

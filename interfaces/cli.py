@@ -104,12 +104,12 @@ SLASH_COMMAND_NAMES = [c[0] for c in SLASH_COMMANDS]
 
 # High-contrast, crystal-clear dropdown styling — works on ANSI & TrueColor terminals
 _PROMPT_STYLE = Style.from_dict({
-    # Completion dropdown menu
-    "completion-menu": "bg:#111827 #f9fafb",
-    "completion-menu.completion": "bg:#1e293b #f1f5f9",
-    "completion-menu.completion.current": "bg:#0284c7 #ffffff bold",
-    "completion-menu.meta.completion": "bg:#0f172a #94a3b8 italic",
-    "completion-menu.meta.completion.current": "bg:#0284c7 #fef08a bold",
+    # Completion dropdown menu — high contrast for readability
+    "completion-menu": "bg:#1a1f2e #e2e8f0",
+    "completion-menu.completion": "bg:#1e293b #f8fafc",
+    "completion-menu.completion.current": "bg:#0ea5e9 #ffffff bold",
+    "completion-menu.meta.completion": "bg:#0f172a #cbd5e1",
+    "completion-menu.meta.completion.current": "bg:#0ea5e9 #ffffff bold",
     "scrollbar.background": "bg:#0f172a",
     "scrollbar.button": "bg:#38bdf8",
 })
@@ -120,107 +120,109 @@ if _HAS_PROMPT_TOOLKIT:
         """Dropdown autocomplete completer for slash commands and subcommands."""
 
         def get_completions(self, document, complete_event):
-            text = document.text_before_cursor
-            if not text.startswith("/"):
+            try:
+                text = document.text_before_cursor
+                if not text.startswith("/"):
+                    return
+
+                parts = text.split(maxsplit=1)
+                cmd = parts[0].lower()
+
+                # Main slash command completion
+                if len(parts) == 1 and not text.endswith(" "):
+                    for cmd_name, desc in SLASH_COMMANDS:
+                        if cmd_name.startswith(cmd):
+                            insert_text = f"{cmd_name} " if cmd_name in COMMANDS_REQUIRING_ARGS else cmd_name
+                            yield Completion(
+                                insert_text,
+                                start_position=-len(cmd),
+                                display=cmd_name,
+                                display_meta=desc,
+                            )
+                    return
+
+                # Subcommand completion
+                sub_text = parts[1] if len(parts) > 1 else ""
+                if cmd == "/perm":
+                    options = [
+                        ("full", "🔓 Tam Yetki (tüm işlemler otomatik onaylanır, kalıcı)"),
+                        ("safe", "🔐 Güvenli Mod (zararsız işlemler otomatik, kritik olanlar sorar)"),
+                        ("ask", "🔒 Sorarak Onay (her işlemde onay sorar)"),
+                    ]
+                    for opt, desc in options:
+                        if opt.startswith(sub_text.lower()):
+                            yield Completion(
+                                opt, start_position=-len(sub_text), display=opt, display_meta=desc
+                            )
+
+                elif cmd == "/provider":
+                    providers = [
+                        ("gemini", "Google Gemini (2.5-flash / pro)"),
+                        ("groq", "Groq (Llama-3.3-70b / Mixtral / Qwen)"),
+                        ("openai", "OpenAI (GPT-4o / GPT-4.1)"),
+                        ("anthropic", "Anthropic Claude"),
+                        ("deepseek", "DeepSeek"),
+                        ("mistral", "Mistral AI"),
+                        ("ollama", "Yerel Offline LLM"),
+                        ("auto", "Otomatik sağlayıcı geçişi"),
+                    ]
+                    for prov, desc in providers:
+                        if prov.startswith(sub_text.lower()):
+                            yield Completion(
+                                prov, start_position=-len(sub_text), display=prov, display_meta=desc
+                            )
+
+                elif cmd == "/setmodel":
+                    aliases = [
+                        ("flash", "gemini-2.5-flash (Google)"),
+                        ("lite", "gemini-2.5-flash-lite (Google)"),
+                        ("pro", "gemini-2.5-pro (Google)"),
+                        ("20b", "openai/gpt-oss-20b (Groq)"),
+                        ("120b", "openai/gpt-oss-120b (Groq)"),
+                        ("mixtral", "mixtral-8x7b-32768 (Groq)"),
+                        ("llama70b", "llama-3.3-70b-versatile (Groq)"),
+                        ("llama8b", "llama-3.1-8b-instant (Groq)"),
+                        ("deepseek", "deepseek-r1-distill-llama-70b (Groq)"),
+                        ("qwen", "qwen-qwq-32b (Groq)"),
+                    ]
+                    for alias, desc in aliases:
+                        if alias.startswith(sub_text.lower()):
+                            yield Completion(
+                                alias, start_position=-len(sub_text), display=alias, display_meta=desc
+                            )
+
+                elif cmd == "/plan":
+                    for opt, desc in [("on", "Plan modunu aç (dry-run zorunlu)"), ("off", "Plan modunu kapat")]:
+                        if opt.startswith(sub_text.lower()):
+                            yield Completion(
+                                opt, start_position=-len(sub_text), display=opt, display_meta=desc
+                            )
+
+                elif cmd == "/config":
+                    for opt, desc in [
+                        ("show", "Tüm yapılandırma ayarlarını göster"),
+                        ("get", "Ayar oku: /config get <key>"),
+                        ("set", "Ayar değiştir: /config set <key> <val>"),
+                    ]:
+                        if opt.startswith(sub_text.lower()):
+                            yield Completion(
+                                opt, start_position=-len(sub_text), display=opt, display_meta=desc
+                            )
+
+                elif cmd == "/set":
+                    for opt, desc in [
+                        ("model", "Aktif model"),
+                        ("provider", "Aktif sağlayıcı"),
+                        ("approval_mode", "Onay modu (full/safe/ask)"),
+                        ("temperature", "LLM sıcaklığı (0.0-2.0)"),
+                        ("name", "Görünen isim"),
+                    ]:
+                        if opt.startswith(sub_text.lower()):
+                            yield Completion(
+                                opt, start_position=-len(sub_text), display=opt, display_meta=desc
+                            )
+            except Exception:
                 return
-
-            parts = text.split(maxsplit=1)
-            cmd = parts[0].lower()
-
-            # Main slash command completion
-            if len(parts) == 1 and not text.endswith(" "):
-                for cmd_name, desc in SLASH_COMMANDS:
-                    if cmd_name.startswith(cmd):
-                        insert_text = f"{cmd_name} " if cmd_name in COMMANDS_REQUIRING_ARGS else cmd_name
-                        yield Completion(
-                            insert_text,
-                            start_position=-len(cmd),
-                            display=cmd_name,
-                            display_meta=desc,
-                        )
-                return
-
-
-            # Subcommand completion
-            sub_text = parts[1] if len(parts) > 1 else ""
-            if cmd == "/perm":
-                options = [
-                    ("full", "🔓 Tam Yetki (tüm işlemler otomatik onaylanır, kalıcı)"),
-                    ("safe", "🔐 Güvenli Mod (zararsız işlemler otomatik, kritik olanlar sorar)"),
-                    ("ask", "🔒 Sorarak Onay (her işlemde onay sorar)"),
-                ]
-                for opt, desc in options:
-                    if opt.startswith(sub_text.lower()):
-                        yield Completion(
-                            opt, start_position=-len(sub_text), display=opt, display_meta=desc
-                        )
-
-            elif cmd == "/provider":
-                providers = [
-                    ("gemini", "Google Gemini (2.5-flash / pro)"),
-                    ("groq", "Groq (Llama-3.3-70b / Mixtral / Qwen)"),
-                    ("openai", "OpenAI (GPT-4o / GPT-4.1)"),
-                    ("anthropic", "Anthropic Claude"),
-                    ("deepseek", "DeepSeek"),
-                    ("mistral", "Mistral AI"),
-                    ("ollama", "Yerel Offline LLM"),
-                    ("auto", "Otomatik sağlayıcı geçişi"),
-                ]
-                for prov, desc in providers:
-                    if prov.startswith(sub_text.lower()):
-                        yield Completion(
-                            prov, start_position=-len(sub_text), display=prov, display_meta=desc
-                        )
-
-            elif cmd == "/setmodel":
-                aliases = [
-                    ("flash", "gemini-2.5-flash (Google)"),
-                    ("lite", "gemini-2.5-flash-lite (Google)"),
-                    ("pro", "gemini-2.5-pro (Google)"),
-                    ("20b", "openai/gpt-oss-20b (Groq)"),
-                    ("120b", "openai/gpt-oss-120b (Groq)"),
-                    ("mixtral", "mixtral-8x7b-32768 (Groq)"),
-                    ("llama70b", "llama-3.3-70b-versatile (Groq)"),
-                    ("llama8b", "llama-3.1-8b-instant (Groq)"),
-                    ("deepseek", "deepseek-r1-distill-llama-70b (Groq)"),
-                    ("qwen", "qwen-qwq-32b (Groq)"),
-                ]
-                for alias, desc in aliases:
-                    if alias.startswith(sub_text.lower()):
-                        yield Completion(
-                            alias, start_position=-len(sub_text), display=alias, display_meta=desc
-                        )
-
-            elif cmd == "/plan":
-                for opt, desc in [("on", "Plan modunu aç (dry-run zorunlu)"), ("off", "Plan modunu kapat")]:
-                    if opt.startswith(sub_text.lower()):
-                        yield Completion(
-                            opt, start_position=-len(sub_text), display=opt, display_meta=desc
-                        )
-
-            elif cmd == "/config":
-                for opt, desc in [
-                    ("show", "Tüm yapılandırma ayarlarını göster"),
-                    ("get", "Ayar oku: /config get <key>"),
-                    ("set", "Ayar değiştir: /config set <key> <val>"),
-                ]:
-                    if opt.startswith(sub_text.lower()):
-                        yield Completion(
-                            opt, start_position=-len(sub_text), display=opt, display_meta=desc
-                        )
-
-            elif cmd == "/set":
-                for opt, desc in [
-                    ("model", "Aktif model"),
-                    ("provider", "Aktif sağlayıcı"),
-                    ("approval_mode", "Onay modu (full/safe/ask)"),
-                    ("temperature", "LLM sıcaklığı (0.0-2.0)"),
-                    ("name", "Görünen isim"),
-                ]:
-                    if opt.startswith(sub_text.lower()):
-                        yield Completion(
-                            opt, start_position=-len(sub_text), display=opt, display_meta=desc
-                        )
 else:
     class OmniCompleter:  # type: ignore[no-redef]
         pass
@@ -241,11 +243,22 @@ def _enable_ansi_windows() -> None:
         except Exception:
             pass
 
+    if hasattr(sys.stdin, "reconfigure"):
+        try:
+            sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     if os.name != "nt":
         return
     try:
         import ctypes
         kernel32 = ctypes.windll.kernel32
+        try:
+            kernel32.SetConsoleOutputCP(65001)
+            kernel32.SetConsoleCP(65001)
+        except Exception:
+            pass
         # Try stdout (STD_OUTPUT_HANDLE = -11)
         handle_out = kernel32.GetStdHandle(-11)
         mode_out = ctypes.c_ulong()
@@ -385,6 +398,35 @@ def _supports_ansi() -> bool:
         return False
 
 
+# Categorized slash commands for the interactive menu
+_SLASH_CATEGORIES: list[tuple[str, list[tuple[str, str]]]] = [
+    ("📊 Durum & Bilgi", [
+        ("/status", "Sistem durumu"),
+        ("/models", "Model listesi"),
+        ("/sysinfo", "CPU/RAM bilgisi"),
+        ("/doctor", "Teşhis aracı"),
+    ]),
+    ("⚙️ Ayarlar", [
+        ("/setmodel", "Model değiştir"),
+        ("/provider", "Provider değiştir"),
+        ("/perm", "İzin modu"),
+        ("/name", "Kullanıcı adı"),
+        ("/set", "Hızlı ayar değiştir"),
+        ("/config", "Detaylı ayarlar"),
+        ("/plan", "Plan modu"),
+    ]),
+    ("🧠 Hafıza & İşlem", [
+        ("/memory", "Bellek yönetimi"),
+        ("/reset", "Oturumu sıfırla"),
+        ("/commit", "Git commit"),
+        ("/hud", "HUD göster"),
+    ]),
+    ("ℹ️ Yardım", [
+        ("/help", "Kullanım kılavuzu"),
+    ]),
+]
+
+
 def _interactive_slash_menu() -> str | None:
     """Show interactive arrow-key menu for slash commands.
 
@@ -395,30 +437,43 @@ def _interactive_slash_menu() -> str | None:
     """
     import os
     try:
-        # On Windows, check if we can do arrow-key rendering
+        # Build flat list from categories
+        flat_commands: list[tuple[str, str, str]] = []  # (cmd, desc, category)
+        for cat_name, cmds in _SLASH_CATEGORIES:
+            for cmd, desc in cmds:
+                flat_commands.append((cmd, desc, cat_name))
+        total = len(flat_commands)
+
         if os.name == "nt" and not _supports_ansi():
             return _show_slash_menu()
 
         idx = 0
-        total = len(SLASH_COMMANDS)
         printed_lines = 0
 
         def _render():
             nonlocal printed_lines
-            # Move cursor up to overwrite previous render
             if printed_lines > 0:
                 sys.stdout.write(f"\r\033[{printed_lines}A")
             lines = []
             lines.append("")
-            lines.append("┌──────────────────────────────────────────────┐")
-            lines.append("│  📋 Slash Komutları                          │")
-            lines.append("├──────────────────────────────────────────────┤")
-            for i, (cmd, desc) in enumerate(SLASH_COMMANDS):
-                marker = " ▸ " if i == idx else "   "
-                lines.append(f"│{marker}{cmd:<13} {desc:<24}│")
-            lines.append("├──────────────────────────────────────────────┤")
-            lines.append("│  ↑↓:geçiş  Enter:seç  Esc:iptal  1-9:hızlı  │")
-            lines.append("└──────────────────────────────────────────────┘")
+            lines.append("  \033[1;36m┌──────────────────────────────────────────────┐\033[0m")
+            lines.append("  \033[1;36m│  📋 Komut Menüsü                             │\033[0m")
+            lines.append("  \033[1;36m├──────────────────────────────────────────────┤\033[0m")
+
+            flat_idx = 0
+            for cat_name, cmds in _SLASH_CATEGORIES:
+                lines.append(f"  \033[1;36m│\033[0m  \033[1;33m{cat_name}\033[0m")
+                for cmd, desc in cmds:
+                    if flat_idx == idx:
+                        marker = "\033[1;46m \033[0m\033[1;97m ▸\033[0m"
+                    else:
+                        marker = "  "
+                    lines.append(f"  \033[1;36m│\033[0m{marker} {cmd:<12} \033[90m{desc}\033[0m")
+                    flat_idx += 1
+
+            lines.append("  \033[1;36m├──────────────────────────────────────────────┤\033[0m")
+            lines.append("  \033[1;36m│\033[0m  \033[90m↑↓:geçiş  Enter:seç  Esc:iptal  1-{n}:hızlı\033[0m".format(n=total))
+            lines.append("  \033[1;36m└──────────────────────────────────────────────┘\033[0m")
             output = "\n".join(lines)
             sys.stdout.write(output)
             sys.stdout.flush()
@@ -445,7 +500,7 @@ def _interactive_slash_menu() -> str | None:
                 idx = (idx + 1) % total
             elif key == "ENTER":
                 _cleanup()
-                return SLASH_COMMANDS[idx][0]
+                return flat_commands[idx][0]
             elif key == "ESC" or key == "CTRL_C":
                 _cleanup()
                 return None
@@ -454,7 +509,7 @@ def _interactive_slash_menu() -> str | None:
                 if 1 <= num <= total:
                     idx = num - 1
                     _cleanup()
-                    return SLASH_COMMANDS[idx][0]
+                    return flat_commands[idx][0]
             elif key == "q":
                 _cleanup()
                 return None
@@ -484,13 +539,17 @@ def _get_banner() -> str:
     W = 86  # box inner width
 
     art = [
-        " #######  ##     ## ##    ## ####  ######   #######  ########  ######## ",
-        "##     ## ###   ### ###   ##  ##  ##    ## ##     ## ##     ## ##       ",
-        "##     ## #### #### ####  ##  ##  ##       ##     ## ##     ## ##       ",
-        "##     ## ## ### ## ## ## ##  ##  ##       ##     ## ########  ######   ",
-        "##     ## ##     ## ##  ####  ##  ##       ##     ## ##   ##   ##       ",
-        "##     ## ##     ## ##   ###  ##  ##    ## ##     ## ##    ##  ##       ",
-        " #######  ##     ## ##    ## ####  ######   #######  ##     ## ######## ",
+        "                                ########    ######",
+        "                              ##          ##      ##",
+        "            ######            ########  ##          ##      ##  ########",
+        "         ##      ##          ##        ##          ##      ##  ##      ##",
+        "##      ##  ##      ##  ##      ##        ##        ##      ##  ##      ##  ##########",
+        "    ##      ##  ####  ####  ####    ##        ##        ##      ##  ########    ##",
+        "##      ##  ##  ##  ##  ##  ##  ##        ##  ########    ######    ##  ##      ##  ##",
+        "  ##      ##  ##      ##  ##    ####        ##                  ##    ##    ########",
+        "       ######    ##      ##  ##      ##  ##########                ##      ##  ##",
+        "                   ##      ##  ##      ##                                ##",
+        "               ##      ##  ##      ##                                ##########",
     ]
     max_w = max(len(a) for a in art)
     margin = max(0, (W - max_w) // 2)
@@ -509,9 +568,11 @@ def _get_banner() -> str:
     for a in art:
         pad_r = W - margin - len(a)
         lines.append(f"|{' ' * margin}{a}{' ' * pad_r}|")
+    lines.append(_bl("SOVEREIGN AUTONOMOUS AI OPERATING SYSTEM"))
     lines.append(_bb())
-    lines.append(_bl(f"{key_ok} {provider} | {model[:36]} | Yetki: {perm_icon} | {sched_icon}"))
-    lines.append(_bl("💡 / yaz -> açılır komut menüsü  |  ↑↓ ile gezin  |  quit -> çıkış"))
+    username = _get_display_name()
+    lines.append(_bl(f"{username} | {provider.upper()} | {model} | {perm_icon} | {sched_icon}"))
+    lines.append(_bl(f"/ yaz -> komut menu  |  quit -> cikis"))
     lines.append(_bb())
 
     return "\n".join(lines)
@@ -600,24 +661,55 @@ class CLIGateway:
 
             kb = KeyBindings()
 
-            @kb.add("enter", filter=completion_is_selected)
+            @kb.add("/")
             def _(event):
-                """When a completion is highlighted in dropdown, Enter applies it instead of submitting premature commands."""
+                """Insert / and immediately show all slash commands."""
                 buf = event.current_buffer
-                selected = buf.complete_state.current_completion
-                if selected:
-                    buf.apply_completion(selected)
-                    text = buf.text.strip()
-                    cmd_root = text.split()[0] if text else ""
-                    if cmd_root in COMMANDS_REQUIRING_ARGS:
-                        if not buf.text.endswith(" "):
-                            buf.insert_text(" ")
-                        return
+                buf.insert_text("/")
+                try:
+                    buf.start_completion()
+                except Exception:
+                    pass
+
+            @kb.add("tab")
+            def _(event):
+                """Trigger completion on slash commands."""
+                buf = event.current_buffer
+                text = buf.text_before_cursor
+                if text.startswith("/"):
+                    if buf.complete_state:
+                        buf.complete_next()
+                    else:
+                        try:
+                            buf.start_completion(select_first=False)
+                        except Exception:
+                            pass
+                else:
+                    buf.insert_text("    ")
+
+            @kb.add("enter")
+            def _(event):
+                """Apply selected completion or retain argument cursor for parameter-requiring commands."""
+                buf = event.current_buffer
+                if buf.complete_state and buf.complete_state.current_completion:
+                    buf.apply_completion(buf.complete_state.current_completion)
+
+                text = buf.text.strip()
+                cmd_root = text.split()[0] if text else ""
+                if cmd_root in COMMANDS_REQUIRING_ARGS and len(text.split()) <= 1:
+                    try:
+                        buf.cancel_completion()
+                    except Exception:
+                        pass
+                    if not buf.text.endswith(" "):
+                        buf.insert_text(" ")
+                    return
+
                 buf.validate_and_handle()
 
             self._prompt_session = PromptSession(
                 completer=OmniCompleter(),
-                complete_while_typing=True,
+                complete_while_typing=False,
                 style=_PROMPT_STYLE,
                 key_bindings=kb,
                 output=out,
@@ -631,13 +723,13 @@ class CLIGateway:
         """Display real-time step execution progress to the user."""
         if event_type == "thinking":
             text = data.get("text", "İstek analiz ediliyor...")
-            sys.stdout.write(f"\r\033[K  🌀 \033[96m{text}\033[0m\n")
+            sys.stdout.write(f"  🌀 \033[96m{text}\033[0m\n")
             sys.stdout.flush()
 
         elif event_type == "plan_created":
             total = data.get("total", 0)
             steps = data.get("steps", [])
-            sys.stdout.write(f"  📋 \033[1;33m{total} Adımlı Plan Hazırlandı:\033[0m\n")
+            sys.stdout.write(f"\n  📋 \033[1;33m{total} Adımlık Plan Hazırlandı:\033[0m\n")
             for s in steps:
                 s_idx = s.get("step", 1)
                 s_desc = s.get("description", "")
@@ -650,7 +742,9 @@ class CLIGateway:
             tot = data.get("total", 1)
             tool = data.get("tool", "")
             desc = data.get("description", "")
-            sys.stdout.write(f"\n  ⚡ \033[1;36m[{idx}/{tot}]\033[0m {desc} \033[90m({tool})\033[0m...\n")
+            bar = "█" * idx + "░" * (tot - idx)
+            sys.stdout.write(f"\n  ⚡ \033[1;36m[{idx}/{tot}]\033[0m \033[1;37m{desc}\033[0m \033[90m({tool})\033[0m\n")
+            sys.stdout.write(f"     \033[36m{bar}\033[0m\n")
             sys.stdout.flush()
 
         elif event_type == "step_end":
@@ -658,15 +752,15 @@ class CLIGateway:
             tot = data.get("total", 1)
             status = data.get("status", "ok")
             res = str(data.get("result", ""))
-            res_short = (res[:90] + "...") if len(res) > 90 else res
+            res_short = (res[:80] + "...") if len(res) > 80 else res
             if status in ("ok", "success"):
-                sys.stdout.write(f"     └─ \033[92m✅ Başarılı:\033[0m {res_short}\n")
+                sys.stdout.write(f"     └─ \033[92m✅\033[0m {res_short}\n")
             else:
-                sys.stdout.write(f"     └─ \033[91m❌ Durum:\033[0m {res_short}\n")
+                sys.stdout.write(f"     └─ \033[91m❌ {status}:\033[0m {res_short}\n")
             sys.stdout.flush()
 
         elif event_type == "summarizing":
-            sys.stdout.write("  ✨ \033[95mSonuçlar toparlanıyor...\033[0m\n")
+            sys.stdout.write(f"  \033[36m▓▓▓▓▓▓▓▓▓▓\033[0m \033[95mSonuçlar toparlanıyor...\033[0m\n")
             sys.stdout.flush()
 
     async def run(self) -> None:
@@ -704,7 +798,28 @@ class CLIGateway:
             if user_input == "/":
                 selected = await asyncio.to_thread(_interactive_slash_menu)
                 if selected:
-                    user_input = selected
+                    cmd_root = selected.strip().split()[0].lower()
+                    if cmd_root in COMMANDS_REQUIRING_ARGS and len(selected.strip().split()) == 1:
+                        hints = {
+                            "/setmodel": "Model ID veya alias (örn: flash, pro, 20b, mixtral)",
+                            "/perm": "Yetki modu (full | safe | ask)",
+                            "/provider": "Sağlayıcı (gemini | groq | openai | anthropic | ollama)",
+                            "/set": "Ayar ve değer (örn: approval_mode full, name mrSpy)",
+                            "/config": "Alt komut (show | get <key> | set <key> <val>)",
+                            "/plan": "on | off",
+                        }
+                        hint = hints.get(cmd_root, "Gerekli argümanlar")
+                        print(f"\n💡 {cmd_root} — {hint}")
+                        try:
+                            arg_input = input(f"  {cmd_root} > ").strip()
+                            if arg_input:
+                                user_input = f"{cmd_root} {arg_input}"
+                            else:
+                                continue
+                        except (KeyboardInterrupt, EOFError):
+                            continue
+                    else:
+                        user_input = selected
                 else:
                     continue
 
@@ -877,14 +992,18 @@ class CLIGateway:
 
         elif cmd == "/perm":
             if not subcmd or subcmd not in ("full", "safe", "ask"):
-                print(
-                    "\nKullanım: /perm <mod>\n\n"
-                    "Modlar:\n"
-                    "  full  — Tüm işlemler otomatik onaylanır (kalıcı, onay sormaz)\n"
-                    "  safe  — Güvenli mod (zararsız işlemler otomatik, tehlikeliler sorar)\n"
-                    "  ask   — Her işlemde onay sorar (varsayılan)"
-                )
-                return
+                print("\n📋 İzin & Yetki Modu Seçin:")
+                print("  [1] 🔓 full — Tam Yetki (tüm işlemler otomatik onaylanır, kalıcı)")
+                print("  [2] 🔐 safe — Güvenli Mod (zararsız işlemler otomatik, kritik olanlar sorar)")
+                print("  [3] 🔒 ask  — Sorarak Onay (her işlemde onay sorar)")
+                try:
+                    choice = input("\nSeçiminiz (1/2/3 veya full/safe/ask, Enter=iptal): ").strip().lower()
+                except (KeyboardInterrupt, EOFError):
+                    return
+                choice_map = {"1": "full", "2": "safe", "3": "ask", "full": "full", "safe": "safe", "ask": "ask"}
+                subcmd = choice_map.get(choice, "")
+                if not subcmd:
+                    return
             mode_map = {"full": "yes", "safe": "safe", "ask": "ask"}
             mode = mode_map[subcmd]
             success, msg = live_config.set("approval_mode", mode)
@@ -922,15 +1041,18 @@ class CLIGateway:
             success, msg = live_config.set_model_for_provider(provider, resolved)
             print(f"\n{msg}")
             if success:
+                print(f"  📁 Kalıcı kayıt: .env.local ({provider}_model = {resolved})")
                 self._refresh_settings_on_router()
 
     def _refresh_settings_on_router(self) -> None:
-        """Refresh the router's settings after config changes."""
+        """Refresh the router's settings and rebuild LLM after config changes."""
         try:
-            # Force re-read by updating the router's internal settings reference
-            self._router._settings = get_settings().model_copy(
-                update=self._get_live_overrides()
-            )
+            from config.settings import invalidate_settings_cache
+            invalidate_settings_cache()
+            new_settings = get_settings().model_copy(update=self._get_live_overrides())
+            self._router._settings = new_settings
+            self._router._destroy_current_llm()
+            self._router._llm = self._router._build_llm(new_settings)
         except Exception:
             pass
 
