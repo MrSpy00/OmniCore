@@ -1,0 +1,319 @@
+"""Long-term memory backed by ChromaDB for semantic recall.
+
+Embeds messages and documents into a vector store so the Cognitive Router
+can query past interactions and user preferences by meaning rather than
+exact keyword match.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import math
+from typing import Any
+
+import chromadb
+from chromadb import Documents, EmbeddingFunction, Embeddings
+from chromadb.config import Settings as ChromaSettings
+
+from config.logging import get_logger
+from config.settings import get_settings
+
+logger = get_logger(__name__)
+
+_COLLECTION_NAME = "omnicore_memory"
+
+
+class SemanticEmbedding(EmbeddingFunction[Documents]):
+    """Embedding function that produces semantically meaningful vectors.
+
+    Tries to use ``sentence-transformers`` (all-MiniLM-L6-v2, 384-dim) for
+    real semantic embeddings.  Falls back to a deterministic MD5-hash
+    projection when the library is not installed — the fallback produces
+    *fast but semantically meaningless* vectors, so the quality of long-term
+    memory recall will be degraded.
+    """
+
+    def __init__(self) -> None:
+        self._model = None
+        self._dim = 384
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer("all-MiniLM-L6-v2")
+            self._dim = self._model.get_embedding_dimension()
+            logger.info(
+                "long_term.semantic_embedding_loaded",
+                model="all-MiniLM-L6-v2",
+                dim=self._dim,
+            )
+        except ImportError:
+            logger.warning(
+                "long_term.semantic_embedding_fallback_hash",
+                hint="pip install sentence-transformers for real semantic embeddings",
+            )
+        except Exception as exc:
+            logger.warning(
+                "long_term.semantic_embedding_load_failed",
+                error=str(exc),
+                hint="Falling back to hash-based embeddings (degraded quality)",
+            )
+
+        self._fallback_calls = 0
+
+    @property
+    def is_semantic(self) -> bool:
+        return self._model is not None
+
+    @property
+    def fallback_invocations(self) -> int:
+        return self._fallback_calls
+
+    @staticmethod
+    def name() -> str:
+        return "semantic_embedding"
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return self._embed(input)
+
+    def embed_query(self, input: Documents) -> Embeddings:
+        return self._embed(input)
+
+    def _embed(self, input: Documents) -> Embeddings:
+        if self._model is not None:
+            vectors = self._model.encode(list(input), normalize_embeddings=True)
+            return [v.tolist() for v in vectors]
+
+        # Fallback: hash-based projection (fast but semantically meaningless)
+        self._fallback_calls += len(input)
+        embeddings = []
+        for text in input:
+            vec = [0.0] * self._dim
+            words = text.lower().split()
+            for w in words:
+                h = int(hashlib.md5(w.encode(), usedforsecurity=False).hexdigest(), 16)
+                idx = h % self._dim
+                vec[idx] += 1.0
+            norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+            embeddings.append([x / norm for x in vec])
+        return embeddings
+
+
+class LongTermMemory:
+    """ChromaDB-backed semantic memory.
+
+    Parameters
+    ----------
+    persist_dir:
+        Override the persistence directory from settings.
+    """
+
+    def __init__(self, persist_dir: str | None = None) -> None:
+        settings = get_settings()
+        self._persist_dir = persist_dir or str(settings.chroma_persist_dir)
+        self._embedding_fn = SemanticEmbedding()
+
+        try:
+            self._client = chromadb.PersistentClient(
+                path=self._persist_dir,
+                settings=ChromaSettings(anonymized_telemetry=False, is_persistent=True),
+            )
+        except Exception as exc:
+            logger.warning("long_term.persistent_failed_fallback_ephemeral", error=str(exc))
+            self._client = chromadb.EphemeralClient(settings=ChromaSettings(anonymized_telemetry=False))
+
+        self._collection = self._get_or_create_collection()
+        logger.info(
+            "long_term.initialized",
+            persist_dir=self._persist_dir,
+            doc_count=self._collection.count(),
+        )
+
+    def _get_or_create_collection(self):
+        """Get existing collection or create one. Never passes embedding_function
+        to avoid ChromaDB conflict errors when the collection already exists
+        with a different (or no) embedding configuration."""
+        try:
+            return self._client.get_collection(name=_COLLECTION_NAME)
+        except Exception:
+            return self._client.create_collection(
+                name=_COLLECTION_NAME,
+                metadata={"hnsw:space": "cosine"},
+            )
+
+    def _recover_collection(self) -> None:
+        """Attempt to recover the collection reference after an error."""
+        try:
+            self._collection = self._get_or_create_collection()
+        except Exception as exc:
+            logger.error("long_term.collection_recovery_failed", error=str(exc))
+
+    # -- write ----------------------------------------------------------------
+
+    def store(
+        self,
+        text: str,
+        *,
+        doc_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """Embed and store a piece of text. Returns the document ID."""
+        doc_id = doc_id or hashlib.sha256(text.encode()).hexdigest()[:16]
+        emb = self._embedding_fn._embed([text])
+        upsert_kwargs: dict[str, Any] = {
+            "ids": [doc_id],
+            "documents": [text],
+            "embeddings": emb,
+        }
+        if metadata:
+            upsert_kwargs["metadatas"] = [metadata]
+        try:
+            self._collection.upsert(**upsert_kwargs)
+            logger.debug("long_term.stored", doc_id=doc_id)
+        except Exception as exc:
+            logger.warning("long_term.store_fallback_lightweight", error=str(exc))
+            try:
+                self._recover_collection()
+                self._collection.upsert(**upsert_kwargs)
+            except Exception as e2:
+                logger.error("long_term.store_fatal", error=str(e2))
+        return doc_id
+
+    # -- read -----------------------------------------------------------------
+
+    def recall(
+        self,
+        query: str,
+        n_results: int = 5,
+        where: dict | None = None,
+    ) -> list[dict[str, Any]]:
+        """Retrieve the top-*n_results* documents semantically close to *query*."""
+        if not query or not str(query).strip():
+            return []
+
+        try:
+            total_docs = self._collection.count()
+            if total_docs == 0:
+                return []
+
+            q_emb = self._embedding_fn._embed([query])
+            kwargs: dict[str, Any] = {
+                "query_embeddings": q_emb,
+                "n_results": min(n_results, total_docs),
+            }
+            if where:
+                kwargs["where"] = where
+            results = self._collection.query(**kwargs)
+        except Exception as exc:
+            logger.warning("long_term.recall_fallback_lightweight", error=str(exc))
+            try:
+                self._recover_collection()
+                q_emb = self._embedding_fn._embed([query])
+                results = self._collection.query(
+                    query_embeddings=q_emb,
+                    n_results=min(n_results, self._collection.count() or 1),
+                )
+            except Exception as e2:
+                logger.error("long_term.recall_fatal", error=str(e2))
+                return []
+
+        ids: list[list[str]] = results.get("ids") or [[]]  # type: ignore[assignment]
+        documents: list[list[str]] = results.get("documents") or [[]]  # type: ignore[assignment]
+        metadatas: list[list[dict]] = results.get("metadatas") or [[]]  # type: ignore[assignment]
+        distances: list[list[float]] = results.get("distances") or [[]]  # type: ignore[assignment]
+        items: list[dict[str, Any]] = []
+        for i in range(len(ids[0])):
+            items.append(
+                {
+                    "id": ids[0][i],
+                    "document": documents[0][i] if documents[0] else "",
+                    "metadata": metadatas[0][i] if metadatas[0] else {},
+                    "distance": distances[0][i] if distances[0] else None,
+                }
+            )
+        logger.debug("long_term.recall", query=query[:80], n_results=len(items))
+        return items
+
+    _KNOWN_CATEGORIES = ("identity", "preferences", "projects", "relationships", "wishes", "notes")
+    _MAX_PER_CATEGORY = 50
+
+    def get_all_memories_categorized(self, limit_per_category: int = _MAX_PER_CATEGORY) -> dict[str, list[str]]:
+        """Return all memories grouped by category with per-category limits."""
+        if self._collection.count() == 0:
+            return {}
+
+        categories: dict[str, list[str]] = {}
+
+        for cat in self._KNOWN_CATEGORIES:
+            try:
+                results = self._collection.get(
+                    where={"category": cat},
+                    include=["documents"],
+                    limit=limit_per_category,
+                )
+                docs = results.get("documents") or []
+                if docs:
+                    categories[cat] = docs
+            except Exception:
+                continue
+
+        uncategorized_results = self._collection.get(
+            include=["documents", "metadatas"],
+            limit=limit_per_category,
+        )
+        docs = uncategorized_results.get("documents") or []
+        metas = uncategorized_results.get("metadatas") or []
+        extra: list[str] = []
+        for doc, meta in zip(docs, metas):
+            cat = (meta.get("category") or "").lower()
+            if cat not in self._KNOWN_CATEGORIES:
+                extra.append(doc)
+        if extra:
+            categories["notes"] = categories.get("notes", []) + extra
+
+        return categories
+
+    def format_memory_for_prompt(self) -> str:
+        """Format stored memories as a clean block for system prompt injection."""
+        cat_memories = self.get_all_memories_categorized()
+        if not cat_memories:
+            return ""
+
+        lines = ["--- KALICI HAFIZA / PERSISTENT MEMORY ---"]
+        cat_titles = {
+            "identity": "👤 Kimlik & Kişisel Bilgiler / Identity",
+            "preferences": "⭐ Tercihler & Zevkler / Preferences",
+            "projects": "🚀 Projeler & Çalışmalar / Projects",
+            "relationships": "👥 İlişkiler / Relationships",
+            "wishes": "🎯 İstekler & Hedefler / Wishes & Goals",
+            "notes": "📝 Genel Notlar / General Notes",
+        }
+        for cat, items in cat_memories.items():
+            title = cat_titles.get(cat, f"📌 {cat.capitalize()}")
+            lines.append(f"{title}:")
+            for item in items:
+                lines.append(f"  - {item}")
+        lines.append("------------------------------------------")
+        return "\n".join(lines)
+
+    # -- admin ----------------------------------------------------------------
+
+    def count(self) -> int:
+        """Return total number of stored documents."""
+        return self._collection.count()
+
+    def delete(self, doc_id: str) -> None:
+        """Delete a single document by ID."""
+        self._collection.delete(ids=[doc_id])
+        logger.info("long_term.deleted", doc_id=doc_id)
+
+    def reset(self) -> None:
+        """Drop and recreate the collection. Destructive."""
+        self._client.delete_collection(_COLLECTION_NAME)
+        self._collection = self._client.create_collection(
+            name=_COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine"},
+        )
+        logger.warning("long_term.reset")
+        return None
+
+    clear = reset

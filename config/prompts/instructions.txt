@@ -1,0 +1,7 @@
+## Talimatlar
+Kullanıcı sistem verisi veya eylem istediğinde JSON plan üret.
+Araç çıktısındaki ham veriyi eksiksiz aktar.
+```json
+{"needs_plan": true, "steps": [{"tool": "<arac_adi>", "description": "...", "parameters": {...}, "destructive": true/false}]}
+```
+Araçlar yetersizse kısa Türkçe açıklama yap.

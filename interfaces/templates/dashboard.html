@@ -1,0 +1,2181 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OmniCore — Sovereign Autonomous AI OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Cytoscape.js for GraphRAG Knowledge Graph Visualization -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
+<!-- Prism.js for code syntax highlighting -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+<style>
+:root {
+  --bg-base: #07090E;
+  --bg-card: rgba(15, 19, 30, 0.75);
+  --bg-card-hover: rgba(22, 28, 44, 0.85);
+  --bg-glass: rgba(11, 15, 24, 0.65);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(0, 240, 255, 0.4);
+  --accent-cyan: #00F0FF;
+  --accent-cyan-dim: rgba(0, 240, 255, 0.15);
+  --accent-emerald: #00FF9D;
+  --accent-purple: #8B5CF6;
+  --accent-rose: #F43F5E;
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --font-main: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+}
+
+[data-theme="light"] {
+  --bg-base: #F8FAFC;
+  --bg-card: rgba(255, 255, 255, 0.88);
+  --bg-card-hover: rgba(241, 245, 249, 0.95);
+  --bg-glass: rgba(255, 255, 255, 0.8);
+  --border: rgba(0, 0, 0, 0.09);
+  --border-focus: rgba(0, 150, 199, 0.5);
+  --accent-cyan: #0284C7;
+  --accent-cyan-dim: rgba(2, 132, 199, 0.12);
+  --accent-emerald: #059669;
+  --accent-purple: #7C3AED;
+  --accent-rose: #E11D48;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #94A3B8;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: var(--font-main);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+/* Ambient Lighting */
+.ambient-glow {
+  position: fixed;
+  top: -20%;
+  left: 20%;
+  width: 60vw;
+  height: 50vh;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.08) 0%, rgba(0, 240, 255, 0.04) 40%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* App Header */
+header {
+  height: 64px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  z-index: 10;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: inherit;
+}
+.brand-logo {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(139, 92, 246, 0.2));
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.brand-logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), filter 0.3s ease;
+  filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.5));
+}
+.brand-logo-img:hover {
+  transform: scale(1.15) rotate(3deg);
+  filter: drop-shadow(0 0 12px rgba(0, 240, 255, 0.9));
+}
+.brand-title {
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--text-primary) 60%, var(--accent-cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.brand-badge {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-emerald);
+  box-shadow: 0 0 10px var(--accent-emerald);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.status-dot.connecting {
+  background: #F59E0B;
+  box-shadow: 0 0 10px #F59E0B;
+  animation: pulse 1s infinite alternate;
+}
+.status-dot.disconnected {
+  background: var(--accent-rose);
+  box-shadow: 0 0 10px var(--accent-rose);
+}
+.authority-pill {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 255, 157, 0.1);
+  border: 1px solid rgba(0, 255, 157, 0.3);
+  color: var(--accent-emerald);
+}
+.btn-lang, .btn-theme {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+.btn-lang:hover, .btn-theme:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Layout */
+.app-container {
+  flex: 1;
+  display: flex;
+  height: calc(100vh - 64px);
+  z-index: 1;
+  position: relative;
+}
+
+/* Sidebar */
+aside.nav-sidebar {
+  width: 260px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  gap: 6px;
+}
+.nav-heading {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 8px 12px 4px;
+}
+.nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  text-align: left;
+  width: 100%;
+}
+.nav-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+.nav-btn.active {
+  color: var(--accent-cyan);
+  background: var(--accent-cyan-dim);
+  border-color: rgba(0, 240, 255, 0.2);
+  font-weight: 600;
+}
+.nav-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.sidebar-spacer { flex: 1; }
+
+/* Memory Stats Card */
+.memory-stats-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.memory-stats-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent-purple);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.memory-stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+.memory-stat-val {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.privacy-badge {
+  background: rgba(0, 255, 157, 0.05);
+  border: 1px solid rgba(0, 255, 157, 0.2);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.privacy-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent-emerald);
+}
+.privacy-text {
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+/* Main Content Area */
+main.main-viewport {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: radial-gradient(circle at top right, rgba(15, 23, 42, 0.4), transparent 60%);
+}
+
+/* View Sections */
+.view-section {
+  flex: 1;
+  display: none;
+  height: 100%;
+  overflow: hidden;
+}
+.view-section.active {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Chat View */
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.chat-messages::-webkit-scrollbar { width: 6px; }
+.chat-messages::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+}
+
+/* Message Styles */
+.message-row {
+  display: flex;
+  gap: 12px;
+  max-width: 85%;
+  animation: fadeIn 0.2s ease-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.message-row.user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+.message-row.bot {
+  align-self: flex-start;
+}
+.message-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  overflow: hidden;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+.message-row.user .message-avatar {
+  background: linear-gradient(135deg, #4F46E5, #8B5CF6);
+  color: #FFF;
+}
+.message-row.bot .message-avatar {
+  background: #0B0E17;
+  border: 1px solid rgba(0, 240, 255, 0.4);
+}
+.bot-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.6));
+}
+.message-bubble {
+  padding: 14px 18px;
+  border-radius: var(--radius-lg);
+  line-height: 1.6;
+  font-size: 0.92rem;
+  position: relative;
+  word-break: break-word;
+}
+.message-row.user .message-bubble {
+  background: linear-gradient(135deg, #4F46E5, #6366F1);
+  color: #FFF;
+  border-bottom-right-radius: 4px;
+  box-shadow: 0 4px 16px rgba(79, 70, 229, 0.25);
+}
+.message-row.bot .message-bubble {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-bottom-left-radius: 4px;
+  backdrop-filter: blur(16px);
+}
+
+/* Code Block Wrapper & Copy Button */
+.code-block-container {
+  position: relative;
+  margin: 10px 0;
+}
+.code-block-container pre {
+  background: #0B0E17;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  overflow-x: auto;
+}
+.btn-copy-code {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  z-index: 2;
+}
+.btn-copy-code:hover {
+  background: var(--accent-cyan);
+  color: #07090E;
+}
+.message-bubble code {
+  font-family: var(--font-mono);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.message-bubble pre code {
+  background: transparent;
+  padding: 0;
+}
+
+/* Typewriter cursor */
+.typing-cursor {
+  display: inline-block;
+  color: var(--accent-cyan);
+  font-weight: 700;
+  animation: cursorBlink 0.7s infinite;
+  margin-left: 2px;
+}
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Plan Card Visualizer */
+.rendered-plan-card {
+  background: rgba(11, 15, 24, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin: 8px 0;
+  box-shadow: 0 4px 20px rgba(0, 240, 255, 0.1);
+}
+.plan-card-header {
+  font-size: 0.86rem;
+  color: var(--accent-cyan);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.plan-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plan-step-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+}
+.step-num {
+  background: rgba(0, 240, 255, 0.15);
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.step-info { flex: 1; }
+.step-desc {
+  font-size: 0.84rem;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.step-tool { margin-top: 3px; }
+.tool-tag {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  background: rgba(139, 92, 246, 0.15);
+  color: #C4B5FD;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+/* Step Progress Card */
+.progress-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  margin: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.progress-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0, 240, 255, 0.2);
+  border-top-color: var(--accent-cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.progress-step-item {
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.step-badge {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--accent-cyan);
+}
+
+/* Chat Input Bar */
+.chat-input-wrapper {
+  padding: 12px 32px 20px;
+  background: linear-gradient(to top, var(--bg-base) 80%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.action-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.action-chips::-webkit-scrollbar { display: none; }
+.chip-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  padding: 6px 14px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.18s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chip-btn:hover {
+  background: var(--accent-cyan-dim);
+  border-color: rgba(0, 240, 255, 0.3);
+  color: var(--accent-cyan);
+}
+
+.input-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  backdrop-filter: blur(20px);
+  padding: 6px 10px 6px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all 0.2s;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+.input-box:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.15), 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+.input-box textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  font-size: 0.94rem;
+  resize: none;
+  max-height: 120px;
+  padding: 6px 0;
+}
+.input-box textarea::placeholder { color: var(--text-muted); }
+.btn-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: all 0.18s;
+}
+.btn-icon:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+.btn-send {
+  background: var(--accent-cyan);
+  color: #07090E;
+}
+.btn-send:hover {
+  filter: brightness(1.1);
+  transform: scale(1.05);
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.4);
+}
+.btn-mic.recording {
+  background: var(--accent-rose);
+  color: #FFF;
+  animation: pulse 1s infinite alternate;
+}
+@keyframes pulse {
+  from { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.6); }
+  to { box-shadow: 0 0 0 10px rgba(244, 63, 94, 0); }
+}
+
+/* Common View Header */
+.view-header {
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-glass);
+}
+.view-title-group h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.view-title-group p {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.view-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.btn-action {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.btn-action:hover {
+  background: var(--accent-cyan-dim);
+  border-color: rgba(0, 240, 255, 0.3);
+  color: var(--accent-cyan);
+}
+
+/* GraphRAG View */
+.graph-container {
+  flex: 1;
+  position: relative;
+  background: var(--bg-base);
+  overflow: hidden;
+}
+#cyGraph {
+  width: 100%;
+  height: 100%;
+}
+.graph-drawer {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 280px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(16px);
+  padding: 14px;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 5;
+}
+.graph-drawer-title {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+.graph-drawer-body {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Process Manager View */
+.process-content {
+  flex: 1;
+  padding: 24px 32px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.proc-search-input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  outline: none;
+  width: 260px;
+}
+.proc-search-input:focus { border-color: var(--accent-cyan); }
+.process-table-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.process-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.process-table th {
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px 18px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.process-table td {
+  padding: 12px 18px;
+  font-size: 0.82rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.process-table tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+.pid-tag {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+.proc-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.btn-kill {
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  color: var(--accent-rose);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.btn-kill:hover {
+  background: var(--accent-rose);
+  color: #FFF;
+}
+
+/* Modal for Process Kill Confirmation */
+.modal-backdrop {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.cyber-modal {
+  background: var(--bg-card);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  max-width: 440px;
+  width: 90%;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: fadeIn 0.2s ease-out;
+}
+.cyber-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent-rose);
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.cyber-modal-body {
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+.cyber-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+.btn-cancel {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+.btn-confirm-danger {
+  background: var(--accent-rose);
+  border: 1px solid var(--accent-rose);
+  color: #FFF;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.82rem;
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.4);
+}
+
+/* Settings & Resources Views */
+.settings-content, .resources-content {
+  flex: 1;
+  padding: 24px 32px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 900px;
+}
+.card-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.card-section h3 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.select-input {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  font-size: 0.88rem;
+  padding: 10px 14px;
+  outline: none;
+  cursor: pointer;
+}
+.select-input:focus { border-color: var(--accent-cyan); }
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.radio-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.radio-option:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+.radio-option.selected {
+  background: var(--accent-cyan-dim);
+  border-color: var(--accent-cyan);
+}
+.radio-label-title { font-size: 0.88rem; font-weight: 600; }
+.radio-label-desc { font-size: 0.76rem; color: var(--text-muted); margin-top: 2px; }
+
+/* Metrics Gauge */
+.metric-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.metric-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.metric-track {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.metric-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.fill-cyan { background: linear-gradient(90deg, #00F0FF, #00FF9D); }
+.fill-purple { background: linear-gradient(90deg, #8B5CF6, #EC4899); }
+
+/* Tool Search & Directory */
+.tool-search-box {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  padding: 10px 16px;
+  outline: none;
+  font-size: 0.88rem;
+}
+.tool-search-box:focus { border-color: var(--accent-cyan); }
+.tool-list-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.tool-item-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tool-item-name {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent-cyan);
+}
+.tool-item-desc {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* Mobile Responsive System */
+.mobile-menu-btn {
+  display: none;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+}
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 800;
+  backdrop-filter: blur(3px);
+}
+.sidebar-backdrop.open { display: block; }
+@media (max-width: 768px) {
+  .mobile-menu-btn { display: flex !important; margin-right: 8px; }
+  .app-container { position: relative !important; flex-direction: column !important; }
+  .nav-sidebar {
+    position: fixed !important;
+    top: 64px;
+    left: -280px;
+    width: 260px !important;
+    height: calc(100vh - 64px) !important;
+    z-index: 900;
+    background: var(--bg-base) !important;
+    transition: left 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 4px 0 25px rgba(0,0,0,0.85);
+  }
+  .nav-sidebar.open { left: 0 !important; }
+  .brand-badge { display: none !important; }
+  .authority-pill { display: none !important; }
+  .chat-input-wrapper { padding: 10px 12px !important; }
+  .action-chips { display: none !important; }
+  .chat-container { height: calc(100vh - 64px) !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="ambient-glow"></div>
+
+<header>
+  <div style="display:flex; align-items:center;">
+    <button class="mobile-menu-btn" id="btnMobileToggle" onclick="toggleSidebar()" aria-label="Menüyü aç/kapa">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="3" y1="12" x2="21" y2="12"></line>
+        <line x1="3" y1="6" x2="21" y2="6"></line>
+        <line x1="3" y1="18" x2="21" y2="18"></line>
+      </svg>
+    </button>
+    <a href="#" class="brand">
+      <div class="brand-logo">
+        <img src="/assets/OmniCore-bounce.png" alt="OmniCore Logo" class="brand-logo-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
+        <svg style="display:none;" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+          <polyline points="2 17 12 22 22 17"></polyline>
+          <polyline points="2 12 12 17 22 12"></polyline>
+        </svg>
+      </div>
+      <div class="brand-title">OMNICORE</div>
+      <div class="brand-badge">v0.1.0</div>
+    </a>
+  </div>
+
+  <div class="header-status">
+    <div class="status-pill" id="connStatusPill" role="status" aria-live="polite">
+      <span class="status-dot" id="connStatusDot"></span>
+      <span id="headerProviderModel">Bağlanıyor...</span>
+    </div>
+    <div class="authority-pill" id="headerAuthority">🔓 TAM YETKİ</div>
+    <button class="btn-theme" id="btnThemeToggle" onclick="toggleTheme()" aria-label="Temayı değiştir" title="Açık/Koyu Tema">🌓</button>
+    <button class="btn-lang" id="btnHeaderVoice" onclick="toggleVoiceInput()" title="Sesli Asistan & Mikrofon">🎙️ Ses</button>
+    <button class="btn-lang" id="btnLangToggle" onclick="toggleLanguage()">🇹🇷 TR</button>
+  </div>
+</header>
+
+<div class="app-container">
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleSidebar()"></div>
+  <!-- Navigation Sidebar -->
+  <aside class="nav-sidebar" aria-label="Ana Menü">
+    <div class="nav-heading" data-i18n="nav_heading">Gezinti</div>
+
+    <button class="nav-btn active" onclick="switchView('chat')" id="nav-chat">
+      <span class="nav-icon">💬</span>
+      <span data-i18n="nav_chat">Yapay Zeka Sohbet</span>
+    </button>
+
+    <button class="nav-btn" onclick="switchView('graph')" id="nav-graph">
+      <span class="nav-icon">🧠</span>
+      <span>Bilgi Grafiği (GraphRAG)</span>
+    </button>
+
+    <button class="nav-btn" onclick="switchView('processes')" id="nav-processes">
+      <span class="nav-icon">⚡</span>
+      <span>Süreç Yöneticisi</span>
+    </button>
+
+    <button class="nav-btn" onclick="switchView('settings')" id="nav-settings">
+      <span class="nav-icon">⚙️</span>
+      <span data-i18n="nav_settings">Sistem & Yetki</span>
+    </button>
+
+    <button class="nav-btn" onclick="switchView('resources')" id="nav-resources">
+      <span class="nav-icon">🛠️</span>
+      <span data-i18n="nav_resources">Donanım & Araçlar</span>
+    </button>
+
+    <div class="sidebar-spacer"></div>
+
+    <!-- Memory Stats Card -->
+    <div class="memory-stats-card" id="memStatsCard">
+      <div class="memory-stats-title">
+        <span>💾</span> Bellek & Bilgi Tabanı
+      </div>
+      <div class="memory-stat-row">
+        <span>Kalıcı Kayıt:</span>
+        <span class="memory-stat-val" id="statMemDocs">--</span>
+      </div>
+      <div class="memory-stat-row">
+        <span>Graf Düğümleri:</span>
+        <span class="memory-stat-val" id="statGraphNodes">--</span>
+      </div>
+      <div class="memory-stat-row">
+        <span>Graf İlişkileri:</span>
+        <span class="memory-stat-val" id="statGraphEdges">--</span>
+      </div>
+    </div>
+
+    <div class="privacy-badge">
+      <div class="privacy-header">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        </svg>
+        <span data-i18n="privacy_title">%100 Yerel Gizlilik</span>
+      </div>
+      <div class="privacy-text" data-i18n="privacy_desc">
+        OmniCore tamamen cihazınızda çalışır. Verileriniz dış sunuculara kesinlikle aktarılmaz.
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Viewport -->
+  <main class="main-viewport">
+    <!-- View 1: Chat -->
+    <section class="view-section active" id="view-chat" aria-label="Sohbet Alanı">
+      <div class="chat-container">
+        <div class="chat-messages" id="messagesList" role="log" aria-live="polite">
+          <div class="message-row bot">
+            <div class="message-avatar">
+              <img src="/assets/OmniCore-bounce.png" alt="OmniCore" class="bot-avatar-img" onerror="this.outerHTML='🤖';" />
+            </div>
+            <div class="message-bubble">
+              👋 <strong>OmniCore Sovereign AI OS</strong> hazır! Nasıl yardımcı olabilirim?
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-input-wrapper">
+          <div class="action-chips">
+            <button class="chip-btn" onclick="sendPrompt('Spotify\'da sevdiğim şarkıyı çal')">🎵 Spotify Çal</button>
+            <button class="chip-btn" onclick="sendPrompt('Şu an ekrana bak ve açık olan pencereyi özetle')">👁️ Ekrana Bak</button>
+            <button class="chip-btn" onclick="sendPrompt('Donanım durumunu ve GPU VRAM basıncını göster')">⚡ Sistem & VRAM</button>
+            <button class="chip-btn" onclick="sendPrompt('Hakkımda bildiğin kalıcı tercihleri ve notları listele')">🧠 Hafıza Özeti</button>
+          </div>
+
+          <div class="input-box">
+            <button class="btn-icon btn-mic" id="btnMic" onclick="toggleVoiceInput()" title="Sesle Konuş" aria-label="Sesle Konuş">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            </button>
+            <textarea id="chatInput" rows="1" placeholder="Bir mesaj veya otonom komut yazın... (Enter ile gönder)" onkeydown="handleInputKey(event)" aria-label="Mesaj girişi"></textarea>
+            <button class="btn-icon btn-send" onclick="sendCurrentMessage()" title="Gönder" aria-label="Mesaj Gönder">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- View 2: GraphRAG Knowledge Graph -->
+    <section class="view-section" id="view-graph" aria-label="Bilgi Grafiği">
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2>🧠 GraphRAG Bilgi Grafiği</h2>
+          <p>Kalıcı anlamsal ilişkiler, varlık ağları ve çok adımlı çıkarım haritası</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn-action" onclick="loadGraphData()">🔄 Yenile</button>
+          <button class="btn-action" onclick="fitGraph()">🎯 Ekrana Sığdır</button>
+        </div>
+      </div>
+      <div class="graph-container">
+        <div id="cyGraph"></div>
+        <div class="graph-drawer" id="graphDrawer">
+          <div class="graph-drawer-title" id="drawerTitle">Varlık Detayı</div>
+          <div class="graph-drawer-body" id="drawerBody">Seçilen düğümün bilgileri burada görüntülenir.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- View 3: Process Manager -->
+    <section class="view-section" id="view-processes" aria-label="Süreç Yöneticisi">
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2>⚡ Süreç Yöneticisi</h2>
+          <p>Aktif sistem süreçleri, kaynak tüketimi ve anında sonlandırma kontrolü</p>
+        </div>
+        <div class="view-actions">
+          <input type="text" id="procSearchInput" class="proc-search-input" placeholder="Süreç filtrele..." oninput="filterProcesses()" aria-label="Süreç filtreleme" />
+          <button class="btn-action" onclick="loadProcesses()">🔄 Yenile</button>
+        </div>
+      </div>
+      <div class="process-content">
+        <div class="process-table-card">
+          <table class="process-table">
+            <thead>
+              <tr>
+                <th>PID</th>
+                <th>Süreç Adı</th>
+                <th>CPU (%)</th>
+                <th>Bellek (%)</th>
+                <th>Aksiyon</th>
+              </tr>
+            </thead>
+            <tbody id="procTableBody">
+              <tr>
+                <td colspan="5" style="text-align:center; padding: 24px; color: var(--text-muted);">Yükleniyor...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- View 4: Settings -->
+    <section class="view-section" id="view-settings" aria-label="Sistem Ayarları">
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2>⚙️ Sistem & Yetki Yapılandırması</h2>
+          <p>Bilişsel model ve otonom eylem güvenlik seviyesi ayarları</p>
+        </div>
+      </div>
+      <div class="settings-content">
+        <div class="card-section">
+          <h3>🤖 Aktif Yapay Zeka Modeli</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted);">Kullanılacak LLM sağlayıcısını ve modelini dinamik olarak değiştirin:</p>
+          <select class="select-input" id="selModelList" onchange="onModelSelected(this.value)" aria-label="Model Seçimi">
+            <option value="">Modeller yükleniyor...</option>
+          </select>
+        </div>
+
+        <div class="card-section">
+          <h3>🛡️ Güvenlik ve Eylem Onay Modu</h3>
+          <div class="radio-group" role="radiogroup" aria-label="Yetki Modu Seçimi">
+            <div class="radio-option" id="opt-full" onclick="setAuthorityMode('full')">
+              <input type="radio" name="perm_mode" value="full" aria-label="Tam Yetki" />
+              <div>
+                <div class="radio-label-title">🔓 Tam Yetki (Full Auto)</div>
+                <div class="radio-label-desc">Tüm araçlar, komutlar ve sistem işlemleri kullanıcı onayı beklemeden yürütülür.</div>
+              </div>
+            </div>
+            <div class="radio-option" id="opt-safe" onclick="setAuthorityMode('safe')">
+              <input type="radio" name="perm_mode" value="safe" aria-label="Güvenli Mod" />
+              <div>
+                <div class="radio-label-title">🔐 Güvenli Mod (Safe Auto)</div>
+                <div class="radio-label-desc">Okuma ve arama işlemleri otomatik, dosya silme veya kritik sistem işlemleri onay sorar.</div>
+              </div>
+            </div>
+            <div class="radio-option" id="opt-ask" onclick="setAuthorityMode('ask')">
+              <input type="radio" name="perm_mode" value="ask" aria-label="Sorarak Onay" />
+              <div>
+                <div class="radio-label-title">🔒 Sorarak Onay (Strict Ask)</div>
+                <div class="radio-label-desc">Tüm eylemler yürütülmeden önce kullanıcıdan açık onay talep eder.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- View 5: Resources & Tools -->
+    <section class="view-section" id="view-resources" aria-label="Sistem Kaynakları">
+      <div class="view-header">
+        <div class="view-title-group">
+          <h2>🛠️ Sistem Kaynakları & Araç Kataloğu</h2>
+          <p>Donanım telemetrisi ve OmniCore'un kullanabildiği kayıtlı 60+ otonom araç</p>
+        </div>
+      </div>
+      <div class="resources-content">
+        <div class="card-section">
+          <h3>💻 Canlı Donanım Telemetrisi</h3>
+          <div class="metric-row">
+            <div class="metric-meta">
+              <span>İşlemci (CPU)</span>
+              <span id="txtCpuUsage">--%</span>
+            </div>
+            <div class="metric-track">
+              <div class="metric-fill fill-cyan" id="barCpu" style="width: 0%"></div>
+            </div>
+          </div>
+          <div class="metric-row" style="margin-top: 10px;">
+            <div class="metric-meta">
+              <span>Bellek (RAM)</span>
+              <span id="txtRamUsage">--%</span>
+            </div>
+            <div class="metric-track">
+              <div class="metric-fill fill-purple" id="barRam" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-section">
+          <h3>🔧 Araç Havuzu</h3>
+          <input type="text" class="tool-search-box" placeholder="Araç adı veya açıklamasıyla filtreleyin..." oninput="filterTools(this.value)" aria-label="Araç filtreleme" />
+          <div class="tool-list-container" id="toolListContainer"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Modal Dialog for Process Kill -->
+<div class="modal-backdrop" id="killModalBackdrop" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="modalProcTitle">
+  <div class="cyber-modal">
+    <div class="cyber-modal-header">
+      <span>⚠️</span>
+      <span id="modalProcTitle">Süreç Sonlandırma Onayı</span>
+    </div>
+    <div class="cyber-modal-body" id="modalProcBody">
+      Bu süreci sonlandırmak istediğinizden emin misiniz?
+    </div>
+    <div class="cyber-modal-footer">
+      <button class="btn-cancel" onclick="closeKillModal()">Vazgeç</button>
+      <button class="btn-confirm-danger" id="btnConfirmKill" onclick="executeProcessKill()">Sonlandır</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// --- Theme Toggle ---
+function initTheme() {
+  const saved = localStorage.getItem('omnicore-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+}
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('omnicore-theme', next);
+}
+initTheme();
+
+// --- Navigation & View Switching ---
+function toggleSidebar() {
+  const sidebar = document.querySelector('.nav-sidebar');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  if (sidebar) sidebar.classList.toggle('open');
+  if (backdrop) backdrop.classList.toggle('open');
+}
+
+function switchView(viewId) {
+  const sidebar = document.querySelector('.nav-sidebar');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  if (sidebar) sidebar.classList.remove('open');
+  if (backdrop) backdrop.classList.remove('open');
+
+  document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+
+  const targetView = document.getElementById('view-' + viewId);
+  const targetNav = document.getElementById('nav-' + viewId);
+  if (targetView) targetView.classList.add('active');
+  if (targetNav) targetNav.classList.add('active');
+
+  if (viewId === 'graph') {
+    setTimeout(loadGraphData, 100);
+  } else if (viewId === 'processes') {
+    loadProcesses();
+  }
+}
+
+// --- WebSocket Chat Engine with Typewriter Streaming & Backoff ---
+let chatSocket = null;
+let activeBotBubble = null;
+let activeCursor = null;
+let wsReconnectDelay = 1000;
+const maxWsReconnectDelay = 15000;
+let wsReconnectTimer = null;
+let authToken = '';
+
+function setConnectionStatus(state, label) {
+  const dot = document.getElementById('connStatusDot');
+  const modelText = document.getElementById('headerProviderModel');
+  if (dot) {
+    dot.className = 'status-dot ' + (state === 'connected' ? '' : (state === 'connecting' ? 'connecting' : 'disconnected'));
+  }
+  if (modelText && label) {
+    modelText.textContent = label;
+  }
+}
+
+async function fetchAuthToken() {
+  try {
+    const res = await fetch('/api/auth/token');
+    if (res.ok) {
+      const data = await res.json();
+      authToken = data.token || '';
+    }
+  } catch (e) {}
+}
+
+async function initWebSocket() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+
+  if (!authToken) {
+    await fetchAuthToken();
+  }
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const tokenParam = authToken ? `?token=${encodeURIComponent(authToken)}` : '';
+  const wsUrl = `${protocol}//${window.location.host}/ws/chat${tokenParam}`;
+
+  setConnectionStatus('connecting', 'Bağlanıyor...');
+
+  try {
+    chatSocket = new WebSocket(wsUrl);
+  } catch(e) {
+    scheduleReconnect();
+    return;
+  }
+
+  chatSocket.onopen = () => {
+    wsReconnectDelay = 1000;
+    setConnectionStatus('connected');
+    fetchStatus();
+  };
+
+  chatSocket.onmessage = (e) => {
+    try {
+      const payload = JSON.parse(e.data);
+      if (payload.type === 'ping') {
+        chatSocket.send(JSON.stringify({ type: 'pong' }));
+        return;
+      }
+      handleWsMessage(payload);
+    } catch(err) {
+      console.error("WS parse error:", err);
+    }
+  };
+
+  chatSocket.onclose = () => {
+    setConnectionStatus('disconnected', 'Bağlantı koptu, yeniden bağlanılıyor...');
+    scheduleReconnect();
+  };
+
+  chatSocket.onerror = () => {
+    try { chatSocket.close(); } catch(e) {}
+  };
+}
+
+function scheduleReconnect() {
+  if (wsReconnectTimer) return;
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null;
+    wsReconnectDelay = Math.min(maxWsReconnectDelay, Math.round(wsReconnectDelay * 1.5));
+    initWebSocket();
+  }, wsReconnectDelay);
+}
+
+function handleWsMessage(event) {
+  const titleText = document.getElementById('progressTitleText');
+  const stepsContainer = document.getElementById('progressStepsContainer');
+
+  if (event.type === 'thinking') {
+    if (titleText) titleText.textContent = event.data?.text || "İstek analiz ediliyor...";
+  } else if (event.type === 'plan_created') {
+    if (titleText) titleText.textContent = `📋 ${event.data.total} Adımlı Plan Yürütülüyor:`;
+    if (stepsContainer) {
+      stepsContainer.innerHTML = '';
+      (event.data.steps || []).forEach(s => {
+        const item = document.createElement('div');
+        item.className = 'progress-step-item';
+        item.innerHTML = `<span class="step-badge">${s.step}/${event.data.total}</span> ${s.tool}: ${s.description}`;
+        stepsContainer.appendChild(item);
+      });
+    }
+  } else if (event.type === 'step_start') {
+    if (titleText) titleText.textContent = `⚡ [${event.data.step}/${event.data.total}] ${event.data.tool} yürütülüyor...`;
+  } else if (event.type === 'step_end') {
+    if (stepsContainer) {
+      const item = document.createElement('div');
+      item.className = 'progress-step-item';
+      const ok = event.data.status === 'ok';
+      item.style.color = ok ? 'var(--accent-emerald)' : 'var(--accent-rose)';
+      item.textContent = `${ok ? '✅' : '❌'} ${event.data.tool}: ${event.data.result || 'tamamlandı'}`;
+      stepsContainer.appendChild(item);
+    }
+  } else if (event.type === 'summarizing') {
+    if (titleText) titleText.textContent = "✨ Sonuçlar toparlanıyor...";
+  } else if (event.type === 'token') {
+    // Typewriter token append
+    if (!activeBotBubble) {
+      removeProgressCard();
+      activeBotBubble = appendMessage('', 'bot');
+      activeCursor = document.createElement('span');
+      activeCursor.className = 'typing-cursor';
+      activeCursor.textContent = '▌';
+      activeBotBubble.appendChild(activeCursor);
+    }
+    const tokenSpan = document.createElement('span');
+    tokenSpan.textContent = event.token;
+    if (activeCursor && activeCursor.parentNode === activeBotBubble) {
+      activeBotBubble.insertBefore(tokenSpan, activeCursor);
+    } else {
+      activeBotBubble.appendChild(tokenSpan);
+    }
+    const list = document.getElementById('messagesList');
+    list.scrollTop = list.scrollHeight;
+  } else if (event.type === 'done') {
+    removeProgressCard();
+    if (activeCursor) {
+      activeCursor.remove();
+      activeCursor = null;
+    }
+    if (activeBotBubble) {
+      activeBotBubble.innerHTML = formatMarkdown(event.reply);
+      activeBotBubble = null;
+    } else {
+      appendMessage(event.reply, 'bot');
+    }
+    speakText(event.reply);
+  } else if (event.type === 'error') {
+    removeProgressCard();
+    if (activeCursor) { activeCursor.remove(); activeCursor = null; }
+    appendMessage(`❌ Hata: ${event.error}`, 'bot');
+    activeBotBubble = null;
+  }
+}
+
+// --- Message Rendering & Formatting ---
+function appendMessage(text, role='bot') {
+  const list = document.getElementById('messagesList');
+  const row = document.createElement('div');
+  row.className = 'message-row ' + role;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'message-avatar ' + role;
+  if (role === 'user') {
+    avatar.textContent = 'YOU';
+  } else {
+    avatar.innerHTML = '<img src="/assets/OmniCore-bounce.png" class="bot-avatar-img" alt="OmniCore" onerror="this.outerHTML=\'🤖\';">';
+  }
+
+  const bubble = document.createElement('div');
+  bubble.className = 'message-bubble';
+  if (text) {
+    bubble.innerHTML = formatMarkdown(text);
+  }
+
+  row.appendChild(avatar);
+  row.appendChild(bubble);
+  list.appendChild(row);
+  list.scrollTop = list.scrollHeight;
+  return bubble;
+}
+
+function copyCode(btn) {
+  const pre = btn.nextElementSibling;
+  const code = pre ? pre.textContent : '';
+  if (navigator.clipboard && code) {
+    navigator.clipboard.writeText(code).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = 'Kopyalandı!';
+      btn.style.background = 'var(--accent-emerald)';
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.style.background = '';
+      }, 1500);
+    });
+  }
+}
+
+function formatMarkdown(text) {
+  if (!text) return '';
+
+  const trimmed = text.trim();
+  let jsonPlan = null;
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('```json') && trimmed.endsWith('```'))) {
+    try {
+      const cleanJson = trimmed.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+      const parsed = JSON.parse(cleanJson);
+      if (parsed && (parsed.needs_plan !== undefined || parsed.steps || parsed.total)) {
+        jsonPlan = parsed;
+      }
+    } catch(e) {}
+  }
+
+  if (jsonPlan) {
+    const steps = jsonPlan.steps || [];
+    let html = `<div class="rendered-plan-card">
+      <div class="plan-card-header">
+        <span>📋</span>
+        <strong>Otonom Görev Planı (${steps.length} Adım)</strong>
+      </div>
+      <div class="plan-steps-list">`;
+    steps.forEach((st, i) => {
+      const tool = st.tool_name || st.tool || 'Araç';
+      const desc = st.description || st.text || `Adım ${i+1}`;
+      html += `<div class="plan-step-item">
+        <span class="step-num">${i+1}</span>
+        <div class="step-info">
+          <div class="step-desc">${desc}</div>
+          <div class="step-tool"><span class="tool-tag">⚡ ${tool}</span></div>
+        </div>
+      </div>`;
+    });
+    html += `</div></div>`;
+    if (jsonPlan.message || jsonPlan.reply) {
+      html += `<div style="margin-top: 8px;">${formatMarkdown(jsonPlan.message || jsonPlan.reply)}</div>`;
+    }
+    return html;
+  }
+
+  let esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  esc = esc.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g, (match, lang, code) => {
+    const language = lang ? lang.trim() : 'plaintext';
+    return `<div class="code-block-container">
+      <button class="btn-copy-code" onclick="copyCode(this)" aria-label="Kodu kopyala">Kopyala</button>
+      <pre><code class="language-${language}">${code}</code></pre>
+    </div>`;
+  });
+  esc = esc.replace(/`([^`]+)`/g, '<code>$1</code>');
+  esc = esc.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  esc = esc.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  esc = esc.replace(/\n/g, '<br>');
+  if (window.Prism) {
+    setTimeout(() => { try { Prism.highlightAll(); } catch(e) {} }, 30);
+  }
+  return esc;
+}
+
+function appendProgressCard() {
+  const list = document.getElementById('messagesList');
+  const card = document.createElement('div');
+  card.className = 'progress-card';
+  card.id = 'activeProgressCard';
+
+  const title = document.createElement('div');
+  title.className = 'progress-title';
+  title.innerHTML = '<span class="spinner"></span> <span id="progressTitleText">İşlem analiz ediliyor...</span>';
+  card.appendChild(title);
+
+  const stepsContainer = document.createElement('div');
+  stepsContainer.id = 'progressStepsContainer';
+  stepsContainer.style.display = 'flex';
+  stepsContainer.style.flexDirection = 'column';
+  stepsContainer.style.gap = '4px';
+  card.appendChild(stepsContainer);
+
+  list.appendChild(card);
+  list.scrollTop = list.scrollHeight;
+  return card;
+}
+
+function removeProgressCard() {
+  const card = document.getElementById('activeProgressCard');
+  if (card) card.remove();
+}
+
+function handleInputKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendCurrentMessage();
+  }
+}
+
+function sendPrompt(text) {
+  document.getElementById('chatInput').value = text;
+  sendCurrentMessage();
+}
+
+async function sendCurrentMessage() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  appendMessage(text, 'user');
+  appendProgressCard();
+
+  if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+    activeBotBubble = null;
+    activeCursor = null;
+    chatSocket.send(JSON.stringify({ message: text }));
+  } else {
+    // Fallback to SSE stream if websocket is offline
+    sendViaSse(text);
+  }
+}
+
+async function sendViaSse(text) {
+  try {
+    if (!authToken) await fetchAuthToken();
+    const tokenParam = authToken ? '&token=' + encodeURIComponent(authToken) : '';
+    const url = '/api/chat/stream?message=' + encodeURIComponent(text) + tokenParam;
+    const response = await fetch(url, {
+      headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.replace(/^data: /, '').trim();
+        if (!jsonStr) continue;
+        try {
+          const payload = JSON.parse(jsonStr);
+          handleWsMessage(payload);
+        } catch(err) {}
+      }
+    }
+  } catch(err) {
+    removeProgressCard();
+    appendMessage(`⚠️ Hata: ${err.message}`, 'bot');
+  }
+}
+
+// --- Voice Recognition & TTS ---
+let voiceActive = false;
+let speechRecognition = null;
+
+function toggleVoiceInput() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    alert("Tarayıcınız Web Speech API desteklemiyor. Google Chrome veya Edge kullanın.");
+    return;
+  }
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!speechRecognition) {
+    speechRecognition = new SpeechRec();
+    speechRecognition.continuous = false;
+    speechRecognition.interimResults = false;
+    speechRecognition.lang = 'tr-TR';
+
+    speechRecognition.onstart = () => {
+      voiceActive = true;
+      document.getElementById('btnMic').classList.add('recording');
+    };
+    speechRecognition.onresult = (e) => {
+      const text = e.results[0][0].transcript;
+      document.getElementById('chatInput').value = text;
+      sendCurrentMessage();
+    };
+    speechRecognition.onend = () => {
+      voiceActive = false;
+      document.getElementById('btnMic').classList.remove('recording');
+    };
+  }
+
+  if (voiceActive) {
+    speechRecognition.stop();
+  } else {
+    try { speechRecognition.start(); } catch(e) { speechRecognition.stop(); }
+  }
+}
+
+function speakText(text) {
+  if (!('speechSynthesis' in window)) return;
+  const clean = text.replace(/<[^>]+>/g, '').replace(/[*_#`]/g, '');
+  const utter = new SpeechSynthesisUtterance(clean);
+  utter.lang = 'tr-TR';
+  utter.rate = 1.05;
+  window.speechSynthesis.speak(utter);
+}
+
+// --- GraphRAG Cytoscape Visualizer ---
+let cy = null;
+
+async function loadGraphData() {
+  try {
+    const res = await fetch('/api/graph/data');
+    const data = await res.json();
+
+    const container = document.getElementById('cyGraph');
+    if (!container) return;
+
+    // Limit maximum rendered nodes to prevent lag
+    const maxNodes = 150;
+    let nodes = data.nodes || [];
+    let edges = data.edges || [];
+    if (nodes.length > maxNodes) {
+      nodes = nodes.slice(0, maxNodes);
+      const nodeIds = new Set(nodes.map(n => n.data.id));
+      edges = edges.filter(e => nodeIds.has(e.data.source) && nodeIds.has(e.data.target));
+    }
+
+    const elements = [
+      ...nodes.map(n => ({ data: { id: n.data.id, label: n.data.label || n.data.id } })),
+      ...edges.map(e => ({ data: { source: e.data.source, target: e.data.target, label: e.data.label || 'relates' } }))
+    ];
+
+    if (elements.length === 0) {
+      container.innerHTML = '<div style="display:grid; place-items:center; height:100%; color:var(--text-muted); font-size:0.9rem;">Henüz graf verisi oluşturulmadı.</div>';
+      return;
+    }
+
+    if (cy) cy.destroy();
+
+    cy = cytoscape({
+      container: container,
+      elements: elements,
+      style: [
+        {
+          selector: 'node',
+          style: {
+            'background-color': '#00F0FF',
+            'label': 'data(label)',
+            'color': '#F8FAFC',
+            'font-size': '11px',
+            'font-family': 'Plus Jakarta Sans',
+            'text-valign': 'bottom',
+            'text-margin-y': 4,
+            'width': 22,
+            'height': 22,
+            'border-width': 2,
+            'border-color': 'rgba(255, 255, 255, 0.4)'
+          }
+        },
+        {
+          selector: 'edge',
+          style: {
+            'width': 1.5,
+            'line-color': 'rgba(139, 92, 246, 0.45)',
+            'target-arrow-color': 'rgba(139, 92, 246, 0.6)',
+            'target-arrow-shape': 'triangle',
+            'curve-style': 'bezier',
+            'font-size': '9px',
+            'color': '#94A3B8'
+          }
+        }
+      ],
+      layout: {
+        name: 'cose',
+        animate: false,
+        padding: 30
+      }
+    });
+
+    cy.on('tap', 'node', function(evt) {
+      const node = evt.target;
+      const drawer = document.getElementById('graphDrawer');
+      const drawerTitle = document.getElementById('drawerTitle');
+      const drawerBody = document.getElementById('drawerBody');
+      drawer.style.display = 'flex';
+      drawerTitle.textContent = `📌 ${node.data('label')}`;
+      const connectedEdges = node.connectedEdges();
+      drawerBody.innerHTML = `Bağlantılı ilişkiler: <strong>${connectedEdges.length}</strong><br>` +
+        connectedEdges.map(e => `• ${e.data('source')} ➔ <em>${e.data('label')}</em> ➔ ${e.data('target')}`).join('<br>');
+    });
+
+    cy.on('tap', function(evt) {
+      if (evt.target === cy) {
+        document.getElementById('graphDrawer').style.display = 'none';
+      }
+    });
+  } catch(e) {
+    console.error("Failed to load graph data:", e);
+  }
+}
+
+function fitGraph() {
+  if (cy) cy.fit(null, 30);
+}
+
+// --- Process Manager & Modal ---
+let allProcesses = [];
+let pendingKillPid = null;
+let pendingKillName = '';
+
+async function loadProcesses() {
+  try {
+    if (!authToken) await fetchAuthToken();
+    const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+    const res = await fetch('/api/system/processes?limit=30', { headers });
+    if (res.ok) {
+      allProcesses = await res.json();
+      renderProcesses(allProcesses);
+    }
+  } catch(e) {
+    console.error("Failed to load processes:", e);
+  }
+}
+
+function renderProcesses(procs) {
+  const tbody = document.getElementById('procTableBody');
+  tbody.innerHTML = '';
+  if (!procs || procs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px; color: var(--text-muted);">Süreç bulunamadı.</td></tr>';
+    return;
+  }
+  procs.forEach(p => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="pid-tag">${p.pid}</td>
+      <td class="proc-name">${p.name}</td>
+      <td><span style="color: ${p.cpu > 20 ? 'var(--accent-rose)' : 'var(--text-primary)'}">${p.cpu}%</span></td>
+      <td>${p.ram}%</td>
+      <td>
+        <button class="btn-kill" onclick="promptKillProcess(${p.pid}, '${p.name}')" aria-label="${p.name} sürecini sonlandır">Sonlandır</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function filterProcesses() {
+  const query = document.getElementById('procSearchInput').value.toLowerCase().trim();
+  const filtered = allProcesses.filter(p => p.name.toLowerCase().includes(query) || String(p.pid).includes(query));
+  renderProcesses(filtered);
+}
+
+function promptKillProcess(pid, name) {
+  pendingKillPid = pid;
+  pendingKillName = name;
+  const modal = document.getElementById('killModalBackdrop');
+  const body = document.getElementById('modalProcBody');
+  body.innerHTML = `<strong>${name}</strong> (PID: <code>${pid}</code>) sürecini sonlandırmak istediğinizden emin misiniz? Bu işlem kaydedilmemiş verilerin kaybına neden olabilir.`;
+  modal.style.display = 'flex';
+}
+
+function closeKillModal() {
+  document.getElementById('killModalBackdrop').style.display = 'none';
+  pendingKillPid = null;
+  pendingKillName = '';
+}
+
+async function executeProcessKill() {
+  if (!pendingKillPid) return;
+  const pid = pendingKillPid;
+  closeKillModal();
+
+  try {
+    if (!authToken) await fetchAuthToken();
+    const headers = { 'Content-Type': 'application/json' };
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+    const res = await fetch('/api/system/kill-process', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ pid })
+    });
+    const data = await res.json();
+    if (data.success) {
+      loadProcesses();
+    } else {
+      alert(`Hata: ${data.error || 'Süreç sonlandırılamadı'}`);
+    }
+  } catch(e) {
+    alert(`Bağlantı hatası: ${e.message}`);
+  }
+}
+
+// --- Telemetry & System Status ---
+async function fetchStatus() {
+  try {
+    const res = await fetch('/api/status');
+    if (res.ok) {
+      const d = await res.json();
+      document.getElementById('headerProviderModel').textContent = `${d.provider.toUpperCase()} / ${d.model}`;
+      const authPill = document.getElementById('headerAuthority');
+      if (d.approval_mode === 'yes') {
+        authPill.textContent = '🔓 TAM YETKİ';
+        authPill.style.color = 'var(--accent-emerald)';
+      } else if (d.approval_mode === 'safe') {
+        authPill.textContent = '🔐 GÜVENLİ MOD';
+        authPill.style.color = 'var(--accent-cyan)';
+      } else {
+        authPill.textContent = '🔒 SORARAK ONAY';
+        authPill.style.color = 'var(--accent-rose)';
+      }
+    }
+  } catch(e) {}
+}
+
+async function fetchMemoryStats() {
+  try {
+    const res = await fetch('/api/memory/stats');
+    if (res.ok) {
+      const d = await res.json();
+      document.getElementById('statMemDocs').textContent = d.chromadb_documents ?? '--';
+      document.getElementById('statGraphNodes').textContent = d.graph_nodes ?? '--';
+      document.getElementById('statGraphEdges').textContent = d.graph_edges ?? '--';
+    }
+  } catch(e) {}
+}
+
+async function fetchSysinfo() {
+  try {
+    const res = await fetch('/api/sysinfo');
+    if (res.ok) {
+      const d = await res.json();
+      document.getElementById('txtCpuUsage').textContent = d.cpu_percent + '%';
+      document.getElementById('barCpu').style.width = Math.min(100, d.cpu_percent) + '%';
+      document.getElementById('txtRamUsage').textContent = `${d.ram_percent}% (${d.ram_used_gb} / ${d.ram_total_gb} GB)`;
+      document.getElementById('barRam').style.width = Math.min(100, d.ram_percent) + '%';
+    }
+  } catch(e) {}
+}
+
+async function loadModels() {
+  try {
+    const res = await fetch('/api/models');
+    if (res.ok) {
+      const d = await res.json();
+      const sel = document.getElementById('selModelList');
+      sel.innerHTML = '';
+      for (const [provider, models] of Object.entries(d)) {
+        const grp = document.createElement('optgroup');
+        grp.label = provider.toUpperCase();
+        for (const m of models) {
+          const opt = document.createElement('option');
+          opt.value = `${provider}:${m.id}`;
+          opt.textContent = `${m.name} (${m.context})`;
+          grp.appendChild(opt);
+        }
+        sel.appendChild(grp);
+      }
+    }
+  } catch(e) {}
+}
+
+let allTools = [];
+
+async function loadTools() {
+  try {
+    const res = await fetch('/api/tools');
+    if (res.ok) {
+      allTools = await res.json();
+      renderTools(allTools);
+    }
+  } catch(e) {}
+}
+
+function renderTools(tools) {
+  const container = document.getElementById('toolListContainer');
+  container.innerHTML = '';
+  tools.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'tool-item-card';
+    card.innerHTML = `
+      <div class="tool-item-name">⚡ ${t.name}</div>
+      <div class="tool-item-desc">${t.description || 'Açıklama yok'}</div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function filterTools(query) {
+  const q = query.toLowerCase();
+  const filtered = allTools.filter(t => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q));
+  renderTools(filtered);
+}
+
+async function onModelSelected(val) {
+  const [provider, model] = val.split(':');
+  await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: 'model', value: model })
+  });
+  await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: 'provider', value: provider })
+  });
+  fetchStatus();
+}
+
+async function setAuthorityMode(mode) {
+  await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: 'approval_mode', value: mode })
+  });
+  fetchStatus();
+}
+
+function toggleLanguage() {
+  const btn = document.getElementById('btnLangToggle');
+  btn.textContent = btn.textContent.includes('TR') ? '🇺🇸 EN' : '🇹🇷 TR';
+}
+
+// Auto-run on load
+initWebSocket();
+fetchStatus();
+fetchSysinfo();
+fetchMemoryStats();
+loadModels();
+loadTools();
+setInterval(fetchStatus, 4000);
+setInterval(fetchSysinfo, 2500);
+setInterval(fetchMemoryStats, 8000);
+
+// Auto-refresh Process Manager when view is active
+let processRefreshTimer = null;
+const originalSwitchView = switchView;
+switchView = function(viewId) {
+  originalSwitchView(viewId);
+  if (processRefreshTimer) { clearInterval(processRefreshTimer); processRefreshTimer = null; }
+  if (viewId === 'processes') {
+    loadProcesses();
+    processRefreshTimer = setInterval(loadProcesses, 3000);
+  }
+};
+</script>
+</body>
+</html>

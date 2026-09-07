@@ -1,0 +1,116 @@
+# ============================================================
+# OmniCore — .gitignore
+# ============================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Environment secrets (NEVER commit real keys!) ---
+.env
+.env.*
+.env.local
+.env.local*
+*.env.local
+!.env.example
+*.key
+*.pem
+secrets.toml
+
+# --- Data directories (runtime-generated) ---
+data/
+logs/
+
+# --- Audio / media artifacts from tools ---
+*.wav
+*.mp3
+*.ogg
+*.mp4
+*.avi
+
+# --- Screenshot artifacts from tools ---
+screenshot_*.png
+screen_*.png
+capture_*.png
+ocr_*.png
+
+# --- Windows Registry export artifacts (admin_toolkit) ---
+*.reg
+
+# --- Test coverage ---
+.coverage
+htmlcov/
+coverage.xml
+.tox/
+
+# --- Agent/session artifacts ---
+.agentignore
+.agents/
+.commandcode/
+.omnicore/
+OMNICORE_DOCS_TXT/
+prompt1.txt
+prompt2.txt
+prompt*.txt
+START.txt
+sonuc.txt
+tmp_*
+
+# --- Secret and local override files ---
+*.secrets
+*.secret
+secrets.*
+local.*
+*.local
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS ---
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# --- Pytest / tooling caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+node_modules/
+*.log
+*.log.*
+
+# --- SQLite databases (runtime state only; not for version control) ---
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+!tests/fixtures/*.db
+
+# --- ChromaDB backup snapshots ---
+*.chroma_snapshot
+
+# --- Omega toolkit generated artifacts ---
+omnicore_packet_capture.txt
+
+# --- APScheduler SQLite job store ---
+apscheduler.db
+
+# --- Workspace generated runtime caches ---
+workspace/skills/__pycache__/
+workspace/data/
+workspace/*.tmp
