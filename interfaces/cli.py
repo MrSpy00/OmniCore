@@ -776,7 +776,8 @@ def _clean_error(exc: Exception) -> str:
     if "connection" in msg.lower() or "connect" in msg.lower():
         return "🌐 Ağ bağlantısı kurulamıyor. İnternet bağlantınızı kontrol edin."
     # Generic fallback
-    return f"⚠️ Bir hata oluştu: {type(exc).__name__}"
+    detail = f" ({exc})" if str(exc).strip() else ""
+    return f"⚠️ Bir hata oluştu: {type(exc).__name__}{detail}"
 
 
 class CLIGateway:

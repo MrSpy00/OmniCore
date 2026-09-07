@@ -2365,7 +2365,7 @@ class CognitiveRouter:
                 continue
 
             # Execute delegated steps through the same gate-approved path
-            if step.delegated:
+            if step.delegated or step.tool_name == "agent_spawn_subtask":
                 delegated_ok = await self._execute_delegated_step(step, user_message, results_summary)
                 if delegated_ok:
                     await self._emit_progress(
@@ -2398,7 +2398,7 @@ class CognitiveRouter:
                     "total": total_steps,
                     "tool": step.tool_name,
                     "status": status_str,
-                    "result": step.result or (output.message if output else ""),
+                    "result": step.result or (output.result or output.error if output else ""),
                 },
             )
 
@@ -2425,12 +2425,22 @@ class CognitiveRouter:
         if spawn_tool is None:
             return False
 
+        spawn_params = dict(step.parameters or {})
+        if not spawn_params.get("objective"):
+            spawn_params["objective"] = (
+                spawn_params.get("goal")
+                or spawn_params.get("task")
+                or spawn_params.get("prompt")
+                or spawn_params.get("query")
+                or step.description
+                or user_message.content
+            )
+        if "max_subtasks" not in spawn_params:
+            spawn_params["max_subtasks"] = 4
+
         spawn_input = ToolInput(
             tool_name="agent_spawn_subtask",
-            parameters={
-                "objective": step.description or user_message.content,
-                "max_subtasks": 4,
-            },
+            parameters=spawn_params,
             requires_approval=False,
         )
         spawn_output = await self._recovery.execute_with_retry(spawn_tool, spawn_input, step)

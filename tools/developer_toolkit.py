@@ -292,12 +292,30 @@ class AgentSpawnSubtask(BaseTool):
 
     async def execute(self, tool_input: ToolInput) -> ToolOutput:
         params = self._params(tool_input)
-        objective = str(self._first_param(params, "objective", "goal", "description", "query", default="")).strip()
+        objective = str(
+            self._first_param(
+                params,
+                "objective",
+                "goal",
+                "description",
+                "query",
+                "task",
+                "prompt",
+                "url",
+                "target",
+                "summary",
+                "text",
+                "input",
+                "value",
+                default="",
+            )
+        ).strip()
+        if not objective:
+            str_vals = [str(v).strip() for v in params.values() if isinstance(v, str) and str(v).strip()]
+            objective = " ".join(str_vals) if str_vals else "Execute task"
+
         max_subtasks = int(self._first_param(params, "max_subtasks", default=4) or 4)
         max_subtasks = max(1, min(10, max_subtasks))
-
-        if not objective:
-            return self._failure("objective is required")
 
         raw_chunks = re.split(r"[;\n]+|\s+and\s+|\s+ve\s+", objective, flags=re.IGNORECASE)
         chunks = [c.strip(" .") for c in raw_chunks if c.strip(" .")]
@@ -310,12 +328,24 @@ class AgentSpawnSubtask(BaseTool):
             browser_words = ("browser", "tarayıcı", "tarayici", "youtube", "web", "internet", "google", "site")
             file_words = ("dosya", "file", "kod", "code", "glob", "dizin", "folder")
             search_words = ("find", "search", "bul", "ara")
+            summary_words = ("özet", "ozet", "summary", "oku", "read", "extract", "incele", "hakkında", "hakkinda")
+
             is_browser = any(w in lowered for w in browser_words)
             is_file = any(w in lowered for w in file_words)
             is_search = any(w in lowered for w in search_words)
-            if is_browser:
+            is_summary = any(w in lowered for w in summary_words)
+
+            url_match = re.search(r"https?://\S+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/\S*)?", chunk)
+            extracted_url = url_match.group(0) if url_match else ""
+            if extracted_url and not extracted_url.startswith("http"):
+                extracted_url = "https://" + extracted_url
+
+            if is_summary and extracted_url:
+                tool_name = "web_read_main_article"
+                parameters = {"url": extracted_url}
+            elif is_browser:
                 tool_name = "os_open_browser_visible"
-                parameters = {"url": chunk}
+                parameters = {"url": extracted_url or chunk}
             elif is_file and is_search:
                 tool_name = "dev_glob_search"
                 parameters = {"pattern": "**/*", "limit": 100}

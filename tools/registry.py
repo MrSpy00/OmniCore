@@ -37,13 +37,14 @@ class ToolRegistry:
         self._tools: dict[str, BaseTool] = {}
         self._lock = threading.RLock()
 
-    def register(self, tool: BaseTool, override: bool = False) -> None:
+    def register(self, tool: BaseTool | type[BaseTool], override: bool = False) -> None:
         """Add a tool to the registry. Raises on duplicate names unless override is True."""
+        instance = tool() if isinstance(tool, type) else tool
         with self._lock:
-            if tool.name in self._tools and not override:
-                raise ValueError(f"Tool '{tool.name}' is already registered")
-            self._tools[tool.name] = tool
-        logger.info("tool_registry.registered", tool=tool.name, overridden=override)
+            if instance.name in self._tools and not override:
+                raise ValueError(f"Tool '{instance.name}' is already registered")
+            self._tools[instance.name] = instance
+        logger.info("tool_registry.registered", tool=instance.name, overridden=override)
 
     def get(self, name: str) -> BaseTool | None:
         """Look up a tool by name, or ``None`` if not found."""

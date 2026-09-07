@@ -90,6 +90,11 @@ class ToolOutput(BaseModel):
     error: str = ""  # populated on failure
     view_range: ViewRange | None = None
 
+    @property
+    def message(self) -> str:
+        """Alias for result or error for backward compatibility."""
+        return self.result or self.error
+
     @field_validator("tool_name", mode="before")
     @classmethod
     def _validate_output_tool_name(cls, value: Any) -> str:

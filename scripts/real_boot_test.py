@@ -59,7 +59,7 @@ async def main():
     reg = ToolRegistry()
     classes = discover_tool_classes(Path(_root) / "tools")
     for cls in classes:
-        reg.register(cls)
+        reg.register(cls())
     custom = load_custom_skills(Path(_root) / "workspace" / "skills")
     tool_count = len(reg.list_tools())
     p(f"  Discovered {len(classes)} tool classes")

@@ -316,4 +316,8 @@ class LongTermMemory:
         logger.warning("long_term.reset")
         return None
 
+    def close(self) -> None:
+        """Release any underlying client resources if applicable."""
+        pass
+
     clear = reset

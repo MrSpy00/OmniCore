@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from config.root import resolve_project_root
@@ -330,7 +331,10 @@ class Settings(BaseSettings):
     llm_fallback_order: str = "groq,gemini,openai,deepseek"
 
     # Google Gemini
-    google_api_key: str = ""
+    google_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY", "google_api_key"),
+    )
     google_api_key_2: str = ""
     google_api_key_3: str = ""
     omni_llm_model: str = "gemini-2.5-flash"
@@ -488,7 +492,12 @@ class Settings(BaseSettings):
 
     @property
     def google_api_keys(self) -> list[str]:
-        keys = [k.strip() for k in (self.google_api_key, self.google_api_key_2, self.google_api_key_3)]
+        primary = (
+            self.google_api_key.strip()
+            or os.getenv("GOOGLE_API_KEY", "").strip()
+            or os.getenv("GEMINI_API_KEY", "").strip()
+        )
+        keys = [k.strip() for k in (primary, self.google_api_key_2, self.google_api_key_3)]
         return [k for k in keys if k] or [""]
 
     @property

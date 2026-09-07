@@ -116,7 +116,7 @@ async def _run(mode: str, debug: bool = False) -> None:
     if provider not in ("ollama",) and not availability.get(provider, False):
         provider_env_map = {
             "groq": "GROQ_API_KEY",
-            "gemini": "GOOGLE_API_KEY",
+            "gemini": "GOOGLE_API_KEY (or GEMINI_API_KEY)",
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
             "deepseek": "DEEPSEEK_API_KEY",

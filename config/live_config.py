@@ -29,6 +29,7 @@ _SENSITIVE_KEYS = frozenset(
         "GOOGLE_API_KEY",
         "GOOGLE_API_KEY_2",
         "GOOGLE_API_KEY_3",
+        "GEMINI_API_KEY",
         "GROQ_API_KEY",
         "GROQ_API_KEY_1",
         "GROQ_API_KEY_2",
