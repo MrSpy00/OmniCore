@@ -1,0 +1,5 @@
+-- Placeholder for future schema migrations.
+-- When the schema changes, add numbered migration files here:
+--   001_add_column_x.sql
+--   002_create_table_y.sql
+-- The setup_db.py script handles initial creation via memory/state.py.

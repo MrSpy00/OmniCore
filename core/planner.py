@@ -1,0 +1,469 @@
+"""Planner — multi-step plan generator and validator.
+
+The Planner takes raw step descriptions from the LLM classification and
+converts them into a structured ``TaskPlan`` with validated ``TaskStep``
+objects.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+from config.logging import get_logger
+from models.capabilities import RiskLevel
+from models.tasks import TaskPlan, TaskStep
+
+logger = get_logger(__name__)
+
+# Tools that are inherently destructive and always require HITL approval.
+_DESTRUCTIVE_TOOLS = frozenset(
+    {
+        "os_write_file",
+        "os_move_file",
+        "os_delete_file",
+        "terminal_execute",
+    }
+)
+
+_DOMAIN_HINTS: tuple[tuple[str, str], ...] = (
+    ("os_", "filesystem"),
+    ("file", "filesystem"),
+    ("sys_", "system"),
+    ("process", "process"),
+    ("terminal_", "devops"),
+    ("net_", "network"),
+    ("api_", "network"),
+    ("gui_", "ui"),
+    ("media_", "media"),
+    ("vision", "vision"),
+    ("web_", "browser"),
+    ("security", "security"),
+)
+
+_QUERY_DOMAIN_HINTS: tuple[tuple[str, str], ...] = (
+    ("dosya", "filesystem"),
+    ("file", "filesystem"),
+    ("klasor", "filesystem"),
+    ("path", "filesystem"),
+    ("terminal", "devops"),
+    ("bash", "devops"),
+    ("powershell", "devops"),
+    ("deploy", "devops"),
+    ("network", "network"),
+    ("ag", "network"),
+    ("internet", "network"),
+    ("api", "network"),
+    ("web", "browser"),
+    ("browser", "browser"),
+    ("tarayici", "browser"),
+    ("ekran", "ui"),
+    ("gui", "ui"),
+    ("click", "ui"),
+    ("vision", "vision"),
+    ("ocr", "vision"),
+    ("resim", "media"),
+    ("video", "media"),
+    ("ses", "media"),
+    ("process", "process"),
+    ("surec", "process"),
+    ("security", "security"),
+    ("guvenlik", "security"),
+)
+
+_CRITICAL_RISK_MARKERS = (
+    "delete",
+    "shutdown",
+    "kill",
+    "terminate",
+    "format",
+    "encrypt",
+    "registry_delete",
+    "reg_delete",
+)
+
+_HIGH_RISK_MARKERS = (
+    "write",
+    "move",
+    "set",
+    "restart",
+    "deploy",
+    "registry",
+    "reg_",
+    "process_",
+)
+
+_DELEGATION_MARKERS = (
+    "scan directory",
+    "scan files",
+    "grep code",
+    "scan codebase",
+    "find in code",
+    "search code",
+)
+
+# Tools that should NEVER be delegated to swarm — they are specific actions
+_NON_DELEGATABLE_PREFIXES = (
+    "web_",
+    "browser_",
+    "gui_",
+    "os_",
+    "terminal_",
+    "dev_execute",
+    "media_",
+    "sys_",
+    "security_",
+    "hardware_",
+    "game_",
+    "steam_",
+    "audio_",
+    "network_",
+)
+
+
+def infer_tool_domain(tool_name: str) -> str:
+    lowered = (tool_name or "").lower()
+    for prefix, domain in _DOMAIN_HINTS:
+        if lowered.startswith(prefix) or prefix in lowered:
+            return domain
+    return "general"
+
+
+def infer_query_domains(query: str) -> set[str]:
+    lowered = (query or "").lower()
+    matches: set[str] = set()
+    for marker, domain in _QUERY_DOMAIN_HINTS:
+        if marker in lowered:
+            matches.add(domain)
+    return matches
+
+
+def _infer_risk_level(tool_name: str, is_destructive: bool) -> RiskLevel:
+    lowered = (tool_name or "").lower()
+    if any(marker in lowered for marker in _CRITICAL_RISK_MARKERS):
+        return RiskLevel.CRITICAL
+    if any(marker in lowered for marker in _HIGH_RISK_MARKERS):
+        return RiskLevel.HIGH
+    if is_destructive:
+        return RiskLevel.HIGH
+    return RiskLevel.LOW
+
+
+class Planner:
+    """Converts raw LLM step output into a validated TaskPlan.
+
+    Parameters
+    ----------
+    llm:
+        The LLM instance used for plan refinement if needed.
+    """
+
+    def __init__(self, llm: ChatGoogleGenerativeAI) -> None:
+        self._llm = llm
+
+    def build_plan(
+        self,
+        user_request: str,
+        raw_steps: list[dict[str, Any]],
+    ) -> TaskPlan:
+        """Construct a ``TaskPlan`` from the raw step dicts returned by
+        the Cognitive Router's intent classification.
+
+        Parameters
+        ----------
+        user_request:
+            The original user message.
+        raw_steps:
+            List of dicts, each with keys ``tool``, ``description``,
+            ``parameters``, and optionally ``destructive``.
+        """
+        steps: list[TaskStep] = []
+        for raw in raw_steps:
+            tool_name = raw.get("tool") or raw.get("tool_name", "unknown")
+            is_destructive = raw.get("destructive", tool_name in _DESTRUCTIVE_TOOLS)
+            risk_level = raw.get("risk_level") or _infer_risk_level(tool_name, is_destructive)
+            domain = raw.get("domain") or infer_tool_domain(tool_name)
+            step = TaskStep(
+                tool_name=tool_name,
+                description=raw.get("description", ""),
+                parameters=raw.get("parameters", {}),
+                is_destructive=is_destructive,
+                domain=domain,
+                risk_level=risk_level,
+                requires_admin=bool(raw.get("requires_admin", False)),
+                requires_dry_run=bool(raw.get("requires_dry_run", False)),
+                requires_backup=bool(raw.get("requires_backup", False)),
+                requires_double_confirmation=bool(raw.get("requires_double_confirmation", False)),
+                dry_run_done=bool(raw.get("dry_run_done", False)),
+                backup_ready=bool(raw.get("backup_ready", False)),
+                admin_verified=bool(raw.get("admin_verified", False)),
+                delegated=bool(raw.get("delegated", False)),
+                delegation_strategy=str(raw.get("delegation_strategy", "none") or "none"),
+            )
+            self._annotate_delegation(step)
+            steps.append(step)
+
+        plan = TaskPlan(
+            user_request=user_request,
+            steps=steps,
+        )
+        logger.info(
+            "planner.built",
+            plan_id=plan.id,
+            step_count=len(steps),
+            destructive_count=sum(1 for s in steps if s.is_destructive),
+        )
+        return plan
+
+    @staticmethod
+    def validate_plan(plan: TaskPlan) -> list[str]:
+        """Return a list of warnings/issues with the plan (empty = valid).
+
+        This is a lightweight sanity check, not a security boundary.
+        """
+        issues: list[str] = []
+        if not plan.steps:
+            issues.append("Plan has no steps")
+        for step in plan.steps:
+            if step.tool_name == "unknown":
+                issues.append(f"Step '{step.description}' has unknown tool")
+            if not step.description:
+                issues.append(f"Step with tool '{step.tool_name}' has no description")
+        return issues
+
+    def replan_failed_step(
+        self,
+        plan: TaskPlan,
+        failed_step_index: int,
+        failure_reason: str,
+    ) -> TaskPlan:
+        """Self-healing replanner: adapt remaining steps if a step fails."""
+        if failed_step_index < 0 or failed_step_index >= len(plan.steps):
+            return plan
+
+        failed_step = plan.steps[failed_step_index]
+        logger.warning(
+            "planner.replan_triggered",
+            plan_id=plan.id,
+            failed_step=failed_step.description,
+            reason=failure_reason[:100],
+        )
+
+        # Build recovery step
+        recovery_step = TaskStep(
+            tool_name="dev_grep_analyzer",
+            description=f"Self-healing diagnostic for failed step: {failed_step.description}",
+            parameters={"query": failure_reason[:50]},
+            domain="devops",
+            risk_level=RiskLevel.LOW,
+        )
+
+        new_steps = list(plan.steps[:failed_step_index]) + [recovery_step] + list(plan.steps[failed_step_index:])
+        return TaskPlan(
+            user_request=plan.user_request,
+            steps=new_steps,
+        )
+
+    @staticmethod
+    def _annotate_delegation(step: TaskStep) -> None:
+        if step.delegated:
+            return
+
+        lowered_tool = (step.tool_name or "").lower()
+
+        # Never delegate specific action tools (web, gui, browser, etc.)
+        if any(lowered_tool.startswith(prefix) for prefix in _NON_DELEGATABLE_PREFIXES):
+            return
+
+        # Only delegate when description explicitly matches codebase scan patterns
+        lowered_desc = (step.description or "").lower()
+        if any(marker in lowered_desc for marker in _DELEGATION_MARKERS):
+            step.delegated = True
+            step.delegation_strategy = "swarm"
+
+
+class WorkflowExecutionEngine:
+    """Long-Horizon Task Workflow Engine with SQLite Checkpointing & ReAct Recovery.
+
+    Enables multi-step tasks to persist step results across system reboots, resume
+    interrupted plans, and self-reflect on step failure with alternative branching.
+    """
+
+    def __init__(self, db_path: Path | None = None) -> None:
+        if db_path is None:
+            home_dir = Path.home() / ".omnicore"
+            home_dir.mkdir(parents=True, exist_ok=True)
+            self._db_path = home_dir / "workflows.db"
+        else:
+            self._db_path = db_path
+
+        self._init_db()
+
+    def _init_db(self) -> None:
+        import sqlite3
+
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workflow_checkpoints (
+                    workflow_id TEXT NOT NULL,
+                    step_index INTEGER NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    parameters_json TEXT,
+                    result_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (workflow_id, step_index)
+                );
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def checkpoint_step(
+        self,
+        workflow_id: str,
+        step_index: int,
+        tool_name: str,
+        status: str,
+        parameters: dict[str, Any],
+        result: Any,
+    ) -> None:
+        """Commit an executed step result to persistent storage."""
+        import json
+        import sqlite3
+
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO workflow_checkpoints
+                (workflow_id, step_index, tool_name, status, parameters_json, result_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    workflow_id,
+                    step_index,
+                    tool_name,
+                    status,
+                    json.dumps(parameters, default=str),
+                    json.dumps(result, default=str),
+                ),
+            )
+            conn.commit()
+            logger.info("workflow.checkpoint_saved", workflow_id=workflow_id, step=step_index, status=status)
+        finally:
+            conn.close()
+
+    def get_completed_steps(self, workflow_id: str) -> dict[int, dict[str, Any]]:
+        """Retrieve already executed step checkpoints for resuming."""
+        import json
+        import sqlite3
+
+        results: dict[int, dict[str, Any]] = {}
+        conn = sqlite3.connect(self._db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT step_index, tool_name, status, parameters_json, result_json
+                FROM workflow_checkpoints WHERE workflow_id = ? ORDER BY step_index ASC
+                """,
+                (workflow_id,),
+            )
+            for row in cursor.fetchall():
+                idx, tool, stat, p_json, r_json = row
+                results[idx] = {
+                    "tool": tool,
+                    "status": stat,
+                    "parameters": json.loads(p_json or "{}"),
+                    "result": json.loads(r_json or "{}"),
+                }
+        finally:
+            conn.close()
+        return results
+
+    def suggest_alternative_branch(
+        self,
+        failed_tool: str,
+        error_message: str,
+    ) -> tuple[str, dict[str, Any]]:
+        """Self-reflective ReAct logic: suggest alternative tool branch based on failure signature."""
+        err_lower = error_message.lower()
+
+        # File not found -> fallback to fast disk search
+        if any(w in err_lower for w in ("not found", "bulunamadı", "no such file")):
+            if failed_tool in ("os_read_file", "dev_grep_analyzer"):
+                return "es_fast_search", {"query": err_lower.split(":")[-1].strip()}
+
+        # Web blocked or failed -> fallback to headless fetch
+        if any(w in err_lower for w in ("timeout", "net::", "err_", "forbidden", "cloudflare")):
+            if failed_tool.startswith("web_"):
+                return "browser_fetch_page", {}
+
+        # Default recovery diagnostic
+        return "terminal_execute", {"command": "whoami"}
+
+
+# ─── Tree-of-Thought Planlayıcı ─────────────────────────────────────────────────
+
+
+class TreeOfThoughtPlanner:
+    """N aday plan üretir, sezgisel puanlama ile en iyisini seçer.
+
+    Karmaşık görevlerde (>3 adım) LLM'den birden fazla farklı yaklaşım ister,
+    her birini heuristic ile puanlar ve en iyisini seçer.
+    """
+
+    def __init__(self, llm: Any = None, n_candidates: int = 3) -> None:
+        self._llm = llm
+        self._n_candidates = n_candidates
+
+    def score_branch(self, branch: Any) -> float:
+        """Bir dalı sezgisel olarak puanlar (LLM gerektirmez).
+
+        Faktörler:
+        - Adım sayısı (az = iyi)
+        - Yıkıcı adım oranı (az = iyi)
+        - Risk dağılımı (düşük = iyi)
+        - Araç çeşitliliği (orta iyi — çok az kırılgan, çok fazla karmaşık)
+        """
+        steps = getattr(branch, "steps", [])
+        if not steps:
+            return 0.0
+
+        step_count = len(steps)
+        destructive_count = sum(1 for s in steps if getattr(s, "is_destructive", False))
+        destructive_ratio = destructive_count / step_count
+
+        risk_weights = {"LOW": 0.1, "MEDIUM": 0.3, "HIGH": 0.6, "CRITICAL": 0.9}
+        risk_sum = sum(risk_weights.get(str(getattr(s, "risk_level", "MEDIUM")), 0.3) for s in steps)
+        avg_risk = risk_sum / step_count
+
+        unique_tools = len({getattr(s, "tool_name", "") for s in steps})
+        diversity_score = min(1.0, unique_tools / max(1, step_count * 0.5))
+
+        score = (
+            max(0, 1.0 - step_count / 15) * 0.3
+            + (1.0 - destructive_ratio) * 0.25
+            + (1.0 - avg_risk) * 0.25
+            + diversity_score * 0.2
+        )
+
+        branch.heuristic_score = round(score, 4)
+        branch.risk_score = round(avg_risk, 4)
+        return score
+
+    def select_best(self, branches: list[Any]) -> Any:
+        """En yüksek puanlı dalı seçer."""
+        if not branches:
+            return None
+        for b in branches:
+            self.score_branch(b)
+        best = max(branches, key=lambda b: b.heuristic_score)
+        best.selected = True
+        return best

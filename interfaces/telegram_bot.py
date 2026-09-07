@@ -1,0 +1,455 @@
+"""Telegram Bot Gateway — primary async communication channel.
+
+Uses ``python-telegram-bot`` v21+ with native asyncio support.  Handles:
+  - Incoming user messages → forwarded to CognitiveRouter.
+  - HITL approval requests → inline keyboard buttons.
+  - Outgoing responses → sent back to the user.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import html
+import uuid
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+from config.logging import get_logger
+from config.settings import get_settings
+from core.guardian import ApprovalResult
+from core.router import CognitiveRouter
+from models.messages import Message, MessageRole
+
+logger = get_logger(__name__)
+
+
+class TelegramGateway:
+    """Async Telegram bot that bridges users to the CognitiveRouter.
+
+    Parameters
+    ----------
+    router:
+        The CognitiveRouter instance for processing messages.
+    """
+
+    def __init__(self, router: CognitiveRouter) -> None:
+        self._router = router
+        self._settings = get_settings()
+        self._app: Application | None = None
+        self._pending_approvals: dict[str, asyncio.Future[ApprovalResult]] = {}
+
+    # -- lifecycle ------------------------------------------------------------
+
+    def build(self) -> Application:
+        """Build and configure the Telegram application."""
+        builder = Application.builder().token(self._settings.telegram_bot_token)
+        self._app = builder.build()
+
+        # Register handlers.
+        self._app.add_handler(CommandHandler("start", self._handle_start))
+        self._app.add_handler(CommandHandler("help", self._handle_start))
+        self._app.add_handler(CommandHandler("status", self._handle_status))
+        self._app.add_handler(CommandHandler("models", self._handle_models))
+        self._app.add_handler(CommandHandler("setmodel", self._handle_setmodel))
+        self._app.add_handler(CommandHandler("clear", self._handle_clear))
+        self._app.add_handler(CommandHandler("reset", self._handle_clear))
+        self._app.add_handler(CommandHandler("doctor", self._handle_doctor))
+        self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
+        self._app.add_handler(CallbackQueryHandler(self._handle_approval_callback))
+
+        logger.info("telegram.built")
+        return self._app
+
+    async def run(self) -> None:
+        """Start polling for updates. Blocks until shutdown."""
+        if self._app is None:
+            self.build()
+        assert self._app is not None
+
+        logger.info("telegram.starting_polling")
+        await self._app.initialize()
+        await self._app.start()
+        await self._app.updater.start_polling()  # type: ignore[union-attr]
+
+        # Keep running until cancelled.
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            logger.info("telegram.cancelled")
+        finally:
+            await self.shutdown()
+
+    async def shutdown(self) -> None:
+        """Gracefully stop the bot."""
+        if self._app:
+            await self._app.updater.stop()  # type: ignore[union-attr]
+            await self._app.stop()
+            await self._app.shutdown()
+        logger.info("telegram.shutdown")
+
+    # -- auth helpers ----------------------------------------------------------
+
+    def _is_allowed(self, user_id: int) -> bool:
+        """Check if a user is in the allow list. Denies access by default if unset."""
+        allowed = self._settings.allowed_user_ids
+        if not allowed:
+            logger.warning("telegram.no_allowed_users_configured_denying_access", user_id=user_id)
+            return False
+        return user_id in allowed
+
+    # -- command handlers ------------------------------------------------------
+
+    async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        assert update.effective_user and update.message
+        if not self._is_allowed(update.effective_user.id):
+            await update.message.reply_text("Unauthorized.", parse_mode="HTML")
+            return
+        await update.message.reply_text(
+            "<b>OmniCore v0.1.0 — Aktif ✅</b>\n\n"
+            "Türkçe veya İngilizce mesaj gönderebilirsiniz.\n\n"
+            "<b>Yetenekler:</b>\n"
+            "• Dosya yönetimi ve OS işlemleri\n"
+            "• Web araması ve otomasyon\n"
+            "• Terminal komutları (onay ile)\n"
+            "• GUI otomasyonu ve ekran analizi\n"
+            "• Hafıza ve zamanlama\n\n"
+            "<b>Komutlar:</b>\n"
+            "<code>/help</code>     — Tüm komutlar\n"
+            "<code>/status</code>   — Sistem durumu\n"
+            "<code>/models</code>   — Aktif LLM modeller\n"
+            "<code>/setmodel</code> — Model değiştir\n"
+            "<code>/reset</code>    — Geçmişi temizle\n"
+            "<code>/clear</code>    — Geçmişi temizle (Telegram)\n"
+            "<code>/doctor</code>   — Teknik teşhis\n"
+            "<code>/plan</code>     — Plan modunu aç/kapat",
+            parse_mode=ParseMode.HTML,
+        )
+
+    async def _handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        assert update.effective_user and update.message
+        if not self._is_allowed(update.effective_user.id):
+            return
+        provider = (self._settings.llm_provider or "gemini").strip().lower()
+        if provider == "groq":
+            model = self._settings.groq_primary_model
+        else:
+            provider = "gemini"
+            model = self._settings.omni_llm_model
+        provider_esc = html.escape(provider)
+        model_esc = html.escape(model)
+        approval_mode = self._router._guardian.mode.value
+        auto_approve = "ON ✅" if approval_mode == "yes" else "OFF 🔒"
+        tools_count = len(self._router._registry)
+        await update.message.reply_text(
+            "<b>OmniCore Sistem Durumu</b>\n"
+            f"Provider: <code>{provider_esc}</code>\n"
+            f"Model: <code>{model_esc}</code>\n"
+            f"HITL Timeout: <code>{self._settings.hitl_timeout_minutes}dk</code>\n"
+            f"Otomatik Onay: <code>{auto_approve}</code>\n"
+            f"Kayıtlı Araç: <code>{tools_count}</code>\n\n"
+            "Modelleri değiştirmek için: <code>/setmodel &lt;model-id&gt;</code>\n"
+            "Modelleri görmek için: <code>/models</code>",
+            parse_mode=ParseMode.HTML,
+        )
+
+    async def _handle_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        assert update.effective_user and update.message
+        user_id = str(update.effective_user.id)
+        if not self._is_allowed(update.effective_user.id):
+            return
+        self._router._short_term.clear(user_id)
+        await update.message.reply_text(
+            "Conversation history cleared.",
+            parse_mode=ParseMode.HTML,
+        )
+
+    async def _handle_models(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        assert update.effective_user and update.message
+        if not self._is_allowed(update.effective_user.id):
+            return
+        from config.live_config import get_live_config
+
+        lc = get_live_config()
+        active_provider = lc.get("provider", self._settings.llm_provider)
+        active_model = lc.get("model", self._settings.omni_llm_model)
+        await update.message.reply_text(
+            f"<b>Aktif LLM Yapılandırması:</b>\n"
+            f"Provider: <code>{html.escape(str(active_provider))}</code>\n"
+            f"Model: <code>{html.escape(str(active_model))}</code>\n\n"
+            f"Değiştirmek için: <code>/setmodel &lt;model-id&gt;</code>",
+            parse_mode=ParseMode.HTML,
+        )
+
+    async def _handle_setmodel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        assert update.effective_user and update.message
+        if not self._is_allowed(update.effective_user.id):
+            return
+        if not context.args:
+            await update.message.reply_text(
+                "Kullanım: <code>/setmodel &lt;model-id&gt;</code>\nÖrn: <code>/setmodel gemini-2.5-flash</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        new_model = context.args[0].strip()
+        from config.live_config import get_live_config
+
+        get_live_config().set("model", new_model)
+        await update.message.reply_text(
+            f"Model <code>{html.escape(new_model)}</code> olarak güncellendi.",
+            parse_mode=ParseMode.HTML,
+        )
+
+    async def _handle_doctor(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        assert update.effective_user and update.message
+        if not self._is_allowed(update.effective_user.id):
+            return
+        import psutil
+
+        cpu = psutil.cpu_percent(interval=None)
+        ram = psutil.virtual_memory().percent
+        tools_cnt = len(self._router._registry)
+        await update.message.reply_text(
+            f"<b>🩺 OmniCore Doctor</b>\n"
+            f"• CPU: <code>{cpu}%</code>\n"
+            f"• RAM: <code>{ram}%</code>\n"
+            f"• Araçlar: <code>{tools_cnt} aktif</code>\n"
+            f"• Durum: <b>Sağlıklı ✅</b>",
+            parse_mode=ParseMode.HTML,
+        )
+
+    # -- message handler -------------------------------------------------------
+
+    async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        assert update.effective_user and update.message and update.message.text
+        user_id = update.effective_user.id
+        if not self._is_allowed(user_id):
+            await update.message.reply_text("Unauthorized.", parse_mode=ParseMode.HTML)
+            return
+
+        user_text = update.message.text
+        logger.info("telegram.message", user_id=user_id, text=user_text[:100])
+
+        if user_text.lower().startswith(".omnicore approve"):
+            await self._handle_approval_toggle(update, user_text)
+            return
+
+        # Show "typing" indicator while processing.
+        await update.message.chat.send_action("typing")
+
+        msg = Message(
+            role=MessageRole.USER,
+            content=user_text,
+            channel="telegram",
+            user_id=str(user_id),
+        )
+
+        try:
+            reply = await self._router.handle_message(msg, conversation_id=str(user_id))
+            # Telegram has a 4096-char limit per message.
+            for chunk in _chunk_text(reply, 4096):
+                await update.message.reply_text(_escape_html(chunk), parse_mode=ParseMode.HTML)
+        except Exception as exc:
+            logger.error("telegram.handler_error", error=str(exc))
+            await update.message.reply_text(
+                f"<b>Error:</b> {_escape_html(str(exc))}",
+                parse_mode=ParseMode.HTML,
+            )
+
+    async def _handle_approval_toggle(self, update: Update, user_text: str) -> None:
+        assert update.message
+        parts = user_text.strip().split()
+        if len(parts) < 3:
+            await update.message.reply_text(
+                "Usage: <code>.omnicore approve [yes|ask]</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        mode = parts[2].strip().lower()
+        if mode not in ("yes", "ask"):
+            await update.message.reply_text(
+                "Invalid mode. Use <code>yes</code> or <code>ask</code>.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        applied = self._router._guardian.set_mode(mode)
+        await update.message.reply_text(
+            f"Approval mode set to <code>{applied.value}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+
+    # -- HITL approval via inline keyboard ------------------------------------
+
+    async def request_user_approval(self, action_description: str, user_id: str) -> ApprovalResult:
+        """Send an inline keyboard to the user and wait for their response.
+
+        This method is injected into the Guardian as the approval callback.
+        """
+        callback_id = f"hitl_{uuid.uuid4().hex}"
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[ApprovalResult] = loop.create_future()
+        self._pending_approvals[callback_id] = future
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("Approve", callback_data=f"approve:{callback_id}"),
+                    InlineKeyboardButton("Deny", callback_data=f"deny:{callback_id}"),
+                ]
+            ]
+        )
+
+        assert self._app
+        chat_id_int: int | None = None
+        try:
+            chat_id_int = int(user_id)
+        except (ValueError, TypeError):
+            allowed = self._settings.allowed_user_ids
+            if allowed:
+                chat_id_int = next(iter(allowed))
+        if chat_id_int is None:
+            logger.error("telegram.cannot_resolve_chat_id_for_approval", user_id=user_id)
+            return ApprovalResult.DENIED
+
+        # Retry send with exponential backoff on transient network errors.
+        max_send_retries = 3
+        for _attempt in range(max_send_retries):
+            try:
+                await self._app.bot.send_message(
+                    chat_id=chat_id_int,
+                    text=(
+                        "<b>⚠️ ONAY GEREKİYOR</b>\n\n"
+                        f"İşlem: <code>{_escape_html(action_description)}</code>\n\n"
+                        f"Bu istek <code>{self._settings.hitl_timeout_minutes}</code> "
+                        "dakika içinde zaman aşımına uğrar."
+                    ),
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML,
+                )
+                break  # success
+            except Exception as exc:
+                if _attempt == max_send_retries - 1:
+                    self._pending_approvals.pop(callback_id, None)
+                    logger.error(
+                        "telegram.approval_send_failed",
+                        callback_id=callback_id,
+                        error=str(exc),
+                        attempts=_attempt + 1,
+                    )
+                    return ApprovalResult.DENIED
+                backoff = 0.5 * (2**_attempt)
+                logger.warning(
+                    "telegram.approval_send_retry",
+                    attempt=_attempt + 1,
+                    backoff=backoff,
+                    error=str(exc),
+                )
+                await asyncio.sleep(backoff)
+
+        logger.info("telegram.approval_requested", callback_id=callback_id, user_id=user_id)
+
+        try:
+            result = await future
+        finally:
+            self._pending_approvals.pop(callback_id, None)
+
+        return result
+
+    async def _handle_approval_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle inline keyboard button presses for HITL approvals."""
+        query = update.callback_query
+        if query is None:
+            return
+        try:
+            logger.info(f"Button pressed: {query.data}")
+
+            if query.from_user and not self._is_allowed(query.from_user.id):
+                logger.warning("telegram.callback_unauthorized", user_id=query.from_user.id)
+                await query.answer("Yetkisiz kullanıcı.", show_alert=True)
+                return
+
+            await query.answer()
+
+            if not query.data:
+                logger.warning("telegram.callback_empty")
+                return
+
+            parts = query.data.split(":", 1)
+            if len(parts) != 2:
+                logger.warning("telegram.callback_malformed", data=query.data)
+                return
+
+            action, callback_id = parts
+            future = self._pending_approvals.get(callback_id)
+            if future is None or future.done():
+                logger.warning("telegram.callback_missing_future", callback_id=callback_id)
+                await query.edit_message_text(
+                    "This approval request has expired.",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+
+            if action == "approve":
+                decision = ApprovalResult.APPROVED
+                if not future.done():
+                    future.set_result(decision)
+                try:
+                    await query.edit_message_text(
+                        text="Action APPROVED.",
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    pass
+            elif action == "deny":
+                decision = ApprovalResult.DENIED
+                if not future.done():
+                    future.set_result(decision)
+                try:
+                    await query.edit_message_text(
+                        text="Action DENIED.",
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    pass
+            else:
+                logger.warning("telegram.callback_unknown_action", action=action, callback_id=callback_id)
+        except Exception as e:
+            logger.error(f"Callback failed: {e}")
+            try:
+                await query.answer("Error processing")
+            except Exception:
+                logger.error("telegram.callback_answer_failed")
+
+
+def _chunk_text(text: str, max_len: int) -> list[str]:
+    """Split text into chunks of at most *max_len* characters.
+
+    Prefers splitting on newlines to avoid cutting mid-sentence.
+    """
+    if len(text) <= max_len:
+        return [text]
+    chunks: list[str] = []
+    while text:
+        if len(text) <= max_len:
+            chunks.append(text)
+            break
+        # Try to find a newline near the boundary to split cleanly.
+        boundary = text.rfind("\n", 0, max_len)
+        if boundary <= max_len // 2:
+            # No good newline — fall back to hard split.
+            boundary = max_len
+        chunks.append(text[:boundary])
+        text = text[boundary:].lstrip("\n")
+    return chunks
+
+
+def _escape_html(text: str) -> str:
+    return html.escape(text, quote=False)

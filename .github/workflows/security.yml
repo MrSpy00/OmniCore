@@ -1,0 +1,38 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"  # Weekly on Monday at 03:00 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "core/**"
+      - "interfaces/**"
+      - "memory/**"
+      - "tools/**"
+      - "pyproject.toml"
+
+jobs:
+  bandit:
+    name: Bandit SAST Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: Run Bandit Security Analysis
+        run: uv run bandit -r core/ memory/ interfaces/ tools/ -ll -s B101,B108
+
+  async-audit:
+    name: AST Async Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: Verify Coroutine Await Hygiene
+        run: uv run python scripts/ast_async_audit.py

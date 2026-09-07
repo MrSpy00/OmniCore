@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: Ruff Lint Check
+        run: uv run ruff check .
+      - name: Ruff Format Check
+        run: uv run ruff format --check .
+      - name: Mypy Static Type Analysis
+        run: uv run mypy core/ memory/ tools/ interfaces/ --ignore-missing-imports
+      - name: Pre-commit Hook Validation
+        run: uv run pre-commit run --all-files
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb python3-tk libasound2-dev portaudio19-dev
+      - run: uv sync
+      - name: Run tests with coverage (Linux)
+        run: xvfb-run -a uv run pytest --tb=short -q --cov --cov-report=html:htmlcov --cov-report=term --cov-fail-under=70
+        if: runner.os == 'Linux'
+      - name: Run tests with coverage (Windows)
+        run: uv run pytest --tb=short -q --cov --cov-report=html:htmlcov --cov-report=term --cov-fail-under=70
+        if: runner.os == 'Windows'
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: coverage-report
+          path: htmlcov/
+          if-no-files-found: ignore
+
+  security:
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: Run Bandit SAST Security Scan
+        run: uv run bandit -r core/ memory/ interfaces/ tools/ -ll -s B101,B108
+      - name: Run AST async audit
+        run: uv run python scripts/ast_async_audit.py
+      - name: Run code security inspection
+        run: uv run ruff check core/ memory/ interfaces/
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build Docker image
+        run: docker build -t omnicore:test .
+      - name: Test Docker image
+        run: |
+          docker run --rm omnicore:test python -c "import core; print('Import OK')"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, test, security, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

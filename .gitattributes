@@ -1,0 +1,13 @@
+# Auto detect text files and normalize line endings to LF
+* text=auto eol=lf
+
+# Windows scripts keep CRLF if required
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.ico binary
+*.webp binary

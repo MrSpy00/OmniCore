@@ -1,0 +1,2787 @@
+"""Cognitive Router — the central LLM brain of OmniCore.
+
+Responsibilities:
+  1. Parse natural-language input.
+  2. Consult short-term and long-term memory for context.
+  3. Delegate to the Planner for multi-step task decomposition.
+  4. Execute the plan step-by-step, routing each tool call through the
+     Guardian for safety checks and the RecoveryEngine on failure.
+  5. Return a final natural-language response to the user.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import itertools
+import json
+import os
+import re
+import threading
+import time
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
+from pydantic import SecretStr
+
+from config.logging import get_logger
+from config.settings import get_settings
+from core.guardian import ApprovalMode, ApprovalResult, Guardian
+from core.planner import Planner, infer_query_domains, infer_tool_domain
+from core.policy import CapabilityPolicyEngine
+from core.recovery import RecoveryEngine
+from memory.graph_memory import GraphMemory
+from memory.long_term import LongTermMemory
+from memory.short_term import ShortTermMemory
+from memory.state import StateTracker
+from models.capabilities import RiskLevel
+from models.messages import Message, MessageRole
+from models.tasks import StepStatus, TaskStatus, TaskStep
+from models.tools import ToolInput, ToolStatus
+from tools.registry import ToolRegistry
+
+logger = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Round-robin API key rotator for multi-key support
+# ---------------------------------------------------------------------------
+class _ApiKeyRotator:
+    """Generic round-robin API key selector (thread-safe, async-safe).
+
+    Uses a lock to prevent race conditions when multiple coroutines
+    call next_key() concurrently.
+    """
+
+    def __init__(self, keys: list[str]) -> None:
+        self._keys = keys or [""]
+        self._cycle = itertools.cycle(self._keys)
+        self._current: str = ""
+        self._lock = threading.Lock()
+        self.next_key()
+
+    @property
+    def current(self) -> str:
+        with self._lock:
+            return self._current
+
+    @property
+    def first(self) -> str:
+        return self._keys[0]
+
+    def next_key(self) -> str:
+        with self._lock:
+            self._current = next(self._cycle)
+            return self._current
+
+    async def get_next_key(self) -> str:
+        """Async-friendly key rotation."""
+        return self.next_key()
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+
+class _GroqModelRotator:
+    """Round-robin Groq model selector (thread-safe, async-safe).
+
+    Uses a lock to prevent race conditions when multiple coroutines
+    call next_model() concurrently.
+    """
+
+    def __init__(self, models: list[str]) -> None:
+        self._models = [m for m in models if m] or ["openai/gpt-oss-20b"]
+        self._cycle = itertools.cycle(self._models)
+        self._current: str = ""
+        self._lock = threading.Lock()
+        self.next_model()
+
+    @property
+    def current(self) -> str:
+        with self._lock:
+            return self._current
+
+    def next_model(self) -> str:
+        with self._lock:
+            self._current = next(self._cycle)
+            return self._current
+
+    async def get_next_model(self) -> str:
+        """Async-friendly model rotation."""
+        return self.next_model()
+
+    def __len__(self) -> int:
+        return len(self._models)
+
+
+# ---------------------------------------------------------------------------
+# LLM error classification
+# ---------------------------------------------------------------------------
+_RATE_LIMIT_MARKERS: tuple[str, ...] = (
+    "429",
+    "413",
+    "payload too large",
+    "request too large",
+    "content too large",
+    "input too large",
+    "rate_limit_exceeded",
+    "rate limit",
+    "quota",
+    "resource_exhausted",
+    "too many requests",
+)
+_RETRYABLE_MARKERS: tuple[str, ...] = (
+    *_RATE_LIMIT_MARKERS,
+    "context length",
+    "token limit",
+    "quota exceeded",
+    "timeout",
+    "timed out",
+)
+
+
+def _classify_llm_error(exc: BaseException) -> tuple[bool, bool]:
+    """Return (is_retryable, is_rate_limit)."""
+    text = str(exc).lower()
+    is_rate_limit = any(m in text for m in _RATE_LIMIT_MARKERS)
+    is_retryable = any(m in text for m in _RETRYABLE_MARKERS) or is_rate_limit
+    return is_retryable, is_rate_limit
+
+
+def _is_retryable_llm_error(exc: BaseException) -> bool:
+    return _classify_llm_error(exc)[0]
+
+
+def _is_rate_limit_error(exc: BaseException) -> bool:
+    return _classify_llm_error(exc)[1]
+
+
+_SUPPORTED_PROVIDERS: tuple[str, ...] = (
+    "groq",
+    "gemini",
+    "openai",
+    "anthropic",
+    "deepseek",
+    "mistral",
+    "ollama",
+    "xai",
+    "cohere",
+    "ai21",
+    "perplexity",
+    "reka",
+    "writer",
+    "fireworks",
+    "together",
+    "deepinfra",
+    "novita",
+    "cerebras",
+    "sambanova",
+    "hyperbolic",
+    "nebius",
+    "siliconflow",
+    "nvidia",
+    "lepton",
+    "openrouter",
+    "moonshot",
+    "zhipu",
+    "minimax",
+    "qwen",
+    "stepfun",
+)
+
+
+_OPERATIONAL_FACT_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("windows", "User OS is Windows"),
+    ("linux", "User OS is Linux"),
+    ("macos", "User OS is macOS"),
+    ("powershell", "User shell preference is PowerShell"),
+    ("bash", "User shell preference is Bash"),
+)
+
+_ALWAYS_ON_TOOL_NAMES: tuple[str, ...] = (
+    "agent_spawn_subtask",
+    "terminal_execute",
+    "os_read_file",
+)
+
+_QUERY_TOOL_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("dosya", ("os_", "file", "path")),
+    ("file", ("os_", "file", "path")),
+    ("klasor", ("os_", "dir", "path")),
+    ("terminal", ("terminal_", "dev_", "process", "os_run")),
+    ("bash", ("terminal_", "dev_", "process")),
+    ("powershell", ("terminal_", "dev_", "process")),
+    ("kod", ("dev_", "grep", "glob", "python", "git")),
+    ("code", ("dev_", "grep", "glob", "python", "git")),
+    ("ara", ("search", "grep", "glob", "web_", "net_")),
+    ("search", ("search", "grep", "glob", "web_", "net_")),
+    ("api", ("api_", "net_", "web_")),
+    ("network", ("net_", "api_", "dns", "socket", "ping")),
+    ("ag", ("net_", "api_", "dns", "socket", "ping")),
+    ("internet", ("net_", "api_", "web_")),
+    ("web", ("web_", "browser", "http", "api_")),
+    ("tarayici", ("web_play_youtube_video_visible", "os_open_browser_visible", "browser_launch", "web_")),
+    ("browser", ("web_play_youtube_video_visible", "os_open_browser_visible", "browser_launch", "web_")),
+    ("youtube", ("web_play_youtube_video_visible", "media_", "web_")),
+    ("video", ("web_play_youtube_video_visible", "media_", "web_")),
+    ("kanal", ("web_play_youtube_video_visible", "os_open_browser_visible", "web_")),
+    ("gui", ("gui_", "vision", "screen", "click", "mouse")),
+    ("ekran", ("gui_take_screenshot", "gui_analyze_screen", "vision")),
+    ("screenshot", ("gui_take_screenshot", "gui_analyze_screen")),
+    ("goruntu", ("gui_take_screenshot", "gui_analyze_screen", "media_")),
+    ("vision", ("vision", "gui_", "ocr", "screen")),
+    ("ocr", ("vision", "gui_", "screen")),
+    ("resim", ("gui_take_screenshot", "media_", "image", "vision")),
+    ("ses", ("media_", "audio")),
+    ("spotify", ("spotify_control", "media_control_spotify_native", "os_launch_application", "media_control_native")),
+    (
+        "muzik",
+        (
+            "spotify_control",
+            "media_control_spotify_native",
+            "media_control_native",
+            "web_play_youtube_video_visible",
+        ),
+    ),
+    (
+        "music",
+        (
+            "spotify_control",
+            "media_control_spotify_native",
+            "media_control_native",
+            "web_play_youtube_video_visible",
+        ),
+    ),
+    (
+        "oynat",
+        (
+            "web_play_youtube_video_visible",
+            "spotify_control",
+            "media_control_spotify_native",
+            "media_control_native",
+        ),
+    ),
+    ("uygulama", ("os_launch_application", "os_list_processes", "sys_")),
+    ("program", ("os_launch_application", "os_list_processes", "sys_")),
+    ("guvenlik", ("security", "encrypt", "decrypt", "audit")),
+    ("security", ("security", "encrypt", "decrypt", "audit")),
+    ("bildirim", ("web_play_youtube_video_visible", "sys_")),
+    ("zil", ("web_play_youtube_video_visible",)),
+    ("abone", ("web_play_youtube_video_visible",)),
+    ("begen", ("web_play_youtube_video_visible",)),
+    ("beğen", ("web_play_youtube_video_visible",)),
+    ("seek", ("web_play_youtube_video_visible",)),
+    ("sarma", ("web_play_youtube_video_visible",)),
+    ("tarih", ("web_play_youtube_video_visible", "sys_info")),
+    ("duraklat", ("web_play_youtube_video_visible", "media_control_native")),
+    ("orta", ("web_play_youtube_video_visible",)),
+    ("ortaya", ("web_play_youtube_video_visible",)),
+    ("kaç gün", ("web_play_youtube_video_visible",)),
+    ("kac gun", ("web_play_youtube_video_visible",)),
+    ("son video", ("web_play_youtube_video_visible",)),
+    ("reklam", ("web_play_youtube_video_visible",)),
+    ("atla", ("web_play_youtube_video_visible",)),
+)
+
+# Turkish word → English tool-name/description hint mapping.
+# Expands the tool scoring for queries written in Turkish, bridging the gap
+# between native-language user intent and English tool names/descriptions.
+_TR_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "dosya": ("file", "fs", "read", "write", "path"),
+    "klasor": ("dir", "folder", "path", "list"),
+    "ac": ("open", "launch", "browser", "start", "gui", "play"),
+    "kapat": ("close", "kill", "stop", "process"),
+    "sil": ("delete", "remove", "clean", "unlink"),
+    "yaz": ("write", "create", "append", "save"),
+    "oku": ("read", "get", "content", "view"),
+    "indir": ("download", "fetch", "get", "http"),
+    "yukle": ("upload", "send", "post", "http"),
+    "calistir": ("run", "execute", "launch", "process"),
+    "ekran": ("screenshot", "screen", "gui", "display", "vision"),
+    "goruntu": ("screenshot", "image", "vision", "screen"),
+    "ses": ("audio", "volume", "music", "sound", "spotify"),
+    "youtube": ("youtube", "video", "play", "browser", "notifications"),
+    "spotify": ("spotify", "media", "music", "launch"),
+    "uygulama": ("launch", "application", "process", "app"),
+    "video": ("video", "youtube", "media", "play", "seek"),
+    "pil": ("battery", "power", "system"),
+    "sistem": ("system", "info", "process", "os"),
+    "ag": ("net", "network", "ping", "dns", "socket"),
+    "arsiv": ("archive", "zip", "compress", "extract"),
+    "hata": ("error", "debug", "log", "recovery"),
+    "git": ("git", "commit", "push", "branch"),
+    "kodla": ("dev", "code", "python", "execute"),
+    "hatirla": ("memory", "recall", "chroma", "long_term"),
+    "zamanla": ("schedule", "timer", "cron", "reminder"),
+    "bildirim": ("notification", "alert", "notify", "desktop", "bell", "youtube"),
+    "zil": ("bell", "notification", "youtube"),
+    "abone": ("subscribe", "channel", "youtube"),
+    "begen": ("like", "favorite", "youtube"),
+    "beğen": ("like", "favorite", "youtube"),
+    "duraklat": ("pause", "stop", "media", "youtube"),
+    "sar": ("seek", "forward", "rewind", "youtube"),
+    "sarma": ("seek", "forward", "rewind", "youtube"),
+    "pano": ("clipboard", "copy", "paste"),
+    "parca": ("process", "task", "split", "chunk"),
+    "sifrele": ("encrypt", "crypto", "security"),
+    "raporla": ("report", "log", "audit", "admin"),
+    "yedekle": ("backup", "copy", "archive", "save"),
+}
+
+_MAX_RELEVANT_TOOLS = 12
+_GROQ_PREEMPTIVE_TOKEN_LIMIT = 4000
+
+
+class _LocalLLMResponse:
+    """Small response envelope compatible with LLM result usage.
+
+    When ``is_fallback`` is True the response was produced by a local
+    fallback path (e.g. all retries exhausted, missing provider package)
+    rather than by an actual LLM call.
+    """
+
+    def __init__(self, content: str, *, is_fallback: bool = False) -> None:
+        self.content = content
+        self.is_fallback = is_fallback
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> _LocalLLMResponse:
+        return self
+
+
+class _SimpleCircuitBreaker:
+    """A minimal count-based circuit breaker for external LLM calls.
+
+    SECURITY: Uses asyncio.Lock for thread-safety in async contexts.
+    """
+
+    def __init__(self, threshold: int = 3, cooldown_seconds: int = 30) -> None:
+        self._threshold = max(1, threshold)
+        self._cooldown_seconds = max(1, cooldown_seconds)
+        self._failures = 0
+        self._open_until = 0.0
+        # SECURITY: Async lock for thread-safe access
+        self._lock = asyncio.Lock()
+
+    def is_open(self) -> bool:
+        return time.monotonic() < self._open_until
+
+    async def record_success(self) -> None:
+        async with self._lock:
+            self._failures = 0
+            self._open_until = 0.0
+
+    async def record_failure(self) -> None:
+        async with self._lock:
+            self._failures += 1
+            if self._failures >= self._threshold:
+                self._open_until = time.monotonic() + self._cooldown_seconds
+
+
+class CognitiveRouter:
+    """Central orchestrator that ties together the LLM, memory, tools, and safety layers.
+
+    Parameters
+    ----------
+    tool_registry:
+        Registry of available tools.
+    short_term:
+        Short-term conversation memory.
+    long_term:
+        Long-term semantic memory.
+    state_tracker:
+        SQLite state tracker for persistence.
+    approval_callback:
+        Async function that presents an approval request to the user and
+        returns an ``ApprovalResult``.  Injected by the gateway layer.
+    """
+
+    def __init__(
+        self,
+        tool_registry: ToolRegistry,
+        short_term: ShortTermMemory,
+        long_term: LongTermMemory,
+        state_tracker: StateTracker,
+        approval_callback: Callable[..., Awaitable[ApprovalResult]] | None = None,
+    ) -> None:
+        self._registry = tool_registry
+        self._short_term = short_term
+        self._long_term = long_term
+        self._state = state_tracker
+
+        settings = get_settings()
+        self._key_rotator: _ApiKeyRotator | None = None
+        self._model_rotator: _GroqModelRotator | None = None
+        self._google_key_rotator: _ApiKeyRotator | None = None
+        self._settings = settings
+        self._provider_sequence = settings.provider_preference
+        self._provider_availability = settings.provider_availability
+        self._runtime_provider = self._select_initial_provider(settings)
+        self._llm = self._build_llm(settings)
+        self._llm_semaphore = asyncio.Semaphore(settings.llm_semaphore_limit)
+        self._circuit_breaker = _SimpleCircuitBreaker(threshold=3, cooldown_seconds=30)
+        self._planner = Planner(self._llm)
+        self._guardian = Guardian(
+            timeout_minutes=settings.hitl_timeout_minutes,
+            approval_callback=approval_callback,
+        )
+        self._recovery = RecoveryEngine(max_attempts=settings.recovery_max_attempts)
+        self._policy = CapabilityPolicyEngine()
+        self._graph_memory: GraphMemory | None = None
+        self._user_pinned_provider: str | None = None  # Set when user uses /provider
+
+    def _build_llm(self, settings) -> Any:
+        provider = (getattr(settings, "llm_provider", None) or self._runtime_provider or "").strip().lower() or "gemini"
+        return self._build_llm_for_provider(provider, settings)
+
+    def _build_llm_for_provider(self, provider: str, settings) -> Any:
+        normalized = (provider or "").strip().lower() or "gemini"
+        if normalized == "groq":
+            api_keys = settings.groq_api_keys
+            if not api_keys:
+                api_keys = [settings.groq_api_key or ""]
+            models = settings.groq_model_chain
+
+            if self._key_rotator is None:
+                self._key_rotator = _ApiKeyRotator(api_keys)
+            if self._model_rotator is None:
+                self._model_rotator = _GroqModelRotator(models)
+
+            active_key = self._key_rotator.current
+            active_model = self._model_rotator.current
+
+            logger.info(
+                "router.groq_active_route",
+                model=active_model,
+                key_suffix=f"...{active_key[-6:]}" if active_key else "<empty>",
+                key_pool=len(api_keys),
+                model_pool=len(models),
+            )
+            if active_model == "llama-3.1-8b-instant":
+                active_model = "openai/gpt-oss-20b"
+            elif active_model == "llama-3.3-70b-versatile":
+                active_model = "openai/gpt-oss-120b"
+
+            groq_kwargs: dict[str, Any] = {
+                "model": active_model,
+                "api_key": SecretStr(active_key) if active_key else None,
+                "temperature": settings.llm_temperature,
+            }
+            if "gpt-oss-20b" in active_model:
+                groq_kwargs["reasoning_effort"] = "low"
+            elif "gpt-oss-120b" in active_model:
+                groq_kwargs["reasoning_effort"] = "medium"
+            if not active_key:
+                return _LocalLLMResponse("Groq API key not configured.", is_fallback=True)
+            try:
+                return ChatGroq(**groq_kwargs)
+            except Exception as exc:
+                logger.warning("router.groq_init_failed", error=str(exc))
+                return _LocalLLMResponse(f"Groq initialization failed: {exc}", is_fallback=True)
+        if normalized == "gemini":
+            if self._google_key_rotator is None:
+                self._google_key_rotator = _ApiKeyRotator(settings.google_api_keys)
+            active_google_key = self._google_key_rotator.current
+            if not active_google_key:
+                return _LocalLLMResponse("Gemini API key not configured.", is_fallback=True)
+            try:
+                return ChatGoogleGenerativeAI(
+                    model=settings.omni_llm_model,
+                    google_api_key=active_google_key,
+                    temperature=settings.llm_temperature,
+                    max_output_tokens=settings.llm_max_output_tokens,
+                )
+            except Exception as exc:
+                logger.warning("router.gemini_init_failed", error=str(exc))
+                return _LocalLLMResponse(f"Gemini initialization failed: {exc}", is_fallback=True)
+        if normalized == "ollama":
+            logger.info(
+                "router.ollama_active_route",
+                model=settings.ollama_model,
+                base_url=settings.ollama_base_url,
+            )
+            # Use OpenAI-compatible envelope or local fallback
+            try:
+                from langchain_ollama import ChatOllama
+
+                return ChatOllama(
+                    model=settings.ollama_model,
+                    base_url=settings.ollama_base_url,
+                    temperature=settings.llm_temperature,
+                )
+            except ImportError:
+                try:
+                    from langchain_community.chat_models import ChatOllama as ChatOllamaLegacy
+
+                    return ChatOllamaLegacy(
+                        model=settings.ollama_model,
+                        base_url=settings.ollama_base_url,
+                        temperature=settings.llm_temperature,
+                    )
+                except Exception:
+                    return _LocalLLMResponse(f"Local Ollama model fallback ({settings.ollama_model})")
+        if normalized == "openai":
+            try:
+                from langchain_openai import ChatOpenAI
+
+                openai_key = getattr(settings, "openai_api_key", "")
+                openai_model = getattr(settings, "openai_model", "gpt-4o-mini")
+                openai_base_url = getattr(settings, "openai_base_url", "") or None
+                kwargs: dict[str, Any] = {
+                    "model": openai_model,
+                    "api_key": SecretStr(openai_key) if openai_key else None,
+                    "temperature": settings.llm_temperature,
+                    "max_tokens": settings.llm_max_output_tokens,
+                }
+                if openai_base_url:
+                    kwargs["base_url"] = openai_base_url
+                return ChatOpenAI(**kwargs)
+            except ImportError:
+                logger.warning("router.openai_not_installed", hint="pip install langchain-openai")
+                return _LocalLLMResponse("OpenAI provider: langchain-openai is not installed.")
+        if normalized == "anthropic":
+            try:
+                from langchain_anthropic import ChatAnthropic
+
+                anthropic_key = getattr(settings, "anthropic_api_key", "")
+                anthropic_model = getattr(settings, "anthropic_model", "claude-haiku-3-5")
+                return ChatAnthropic(
+                    model=anthropic_model,
+                    api_key=SecretStr(anthropic_key) if anthropic_key else None,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_output_tokens,
+                )
+            except ImportError:
+                logger.warning(
+                    "router.anthropic_not_installed",
+                    hint="pip install langchain-anthropic",
+                )
+                return _LocalLLMResponse("Anthropic provider: langchain-anthropic is not installed.")
+        if normalized == "deepseek":
+            try:
+                from langchain_openai import ChatOpenAI
+
+                deepseek_key = getattr(settings, "deepseek_api_key", "")
+                deepseek_model = getattr(settings, "deepseek_model", "deepseek-chat")
+                deepseek_base = getattr(settings, "deepseek_base_url", "https://api.deepseek.com/v1")
+                return ChatOpenAI(
+                    model=deepseek_model,
+                    api_key=SecretStr(deepseek_key) if deepseek_key else None,
+                    base_url=deepseek_base,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_output_tokens,
+                )
+            except ImportError:
+                return _LocalLLMResponse("DeepSeek provider: langchain-openai is not installed.")
+        if normalized == "mistral":
+            try:
+                from langchain_mistralai import ChatMistralAI
+
+                mistral_key = getattr(settings, "mistral_api_key", "")
+                mistral_model = getattr(settings, "mistral_model", "mistral-small-latest")
+                return ChatMistralAI(
+                    model=mistral_model,
+                    api_key=SecretStr(mistral_key) if mistral_key else None,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_output_tokens,
+                )
+            except ImportError:
+                logger.warning(
+                    "router.mistral_not_installed",
+                    hint="pip install langchain-mistralai",
+                )
+                return _LocalLLMResponse("Mistral provider: langchain-mistralai is not installed.")
+
+        # --- Genel OpenAI-uyumlu provider handler ---
+        # xai, cohere, ai21, fireworks, together, deepinfra, novita, cerebras,
+        # sambanova, hyperbolic, nebius, siliconflow, nvidia, lepton, openrouter,
+        # moonshot, zhipu, minimax, qwen, stepfun
+        from config.settings import OPENAI_COMPATIBLE_PROVIDERS
+
+        compat_base_url = OPENAI_COMPATIBLE_PROVIDERS.get(normalized)
+        if compat_base_url:
+            try:
+                from langchain_openai import ChatOpenAI
+
+                api_key = getattr(settings, f"{normalized}_api_key", "")
+                model = getattr(settings, f"{normalized}_model", "")
+                return ChatOpenAI(
+                    model=model,
+                    api_key=SecretStr(api_key) if api_key else None,
+                    base_url=compat_base_url,
+                    temperature=settings.llm_temperature,
+                    max_tokens=settings.llm_max_output_tokens,
+                )
+            except ImportError:
+                return _LocalLLMResponse(f"{normalized} provider: langchain-openai is not installed.")
+
+        raise ValueError(f"Unsupported LLM provider: {provider}")
+
+    def _select_initial_provider(self, settings) -> str:
+        for provider in settings.provider_preference:
+            if self._provider_has_credentials(provider, settings):
+                return provider
+        return "gemini"
+
+    def _provider_has_credentials(self, provider: str, settings=None) -> bool:
+        cfg = settings or self._settings
+        normalized = (provider or "").strip().lower()
+        if normalized == "groq":
+            return any(key.strip() for key in cfg.groq_api_keys)
+        if normalized == "gemini":
+            return any(key.strip() for key in cfg.google_api_keys)
+        if normalized == "ollama":
+            return getattr(cfg, "ollama_enabled", False)
+        # Tek API key ile provider'lar
+        api_key_attr = f"{normalized}_api_key"
+        if hasattr(cfg, api_key_attr):
+            return bool(getattr(cfg, api_key_attr, "").strip())
+        return False
+
+    def _find_alternate_provider(self, current: str) -> str | None:
+        current_normalized = (current or "").strip().lower()
+        for provider in self._provider_sequence:
+            if provider == current_normalized:
+                continue
+            if self._provider_has_credentials(provider):
+                return provider
+        return None
+
+    def _can_rotate_groq_route(self) -> bool:
+        if self._key_rotator is None or self._model_rotator is None:
+            return False
+        return (len(self._key_rotator) * len(self._model_rotator)) > 1
+
+    def _can_rotate_google_route(self) -> bool:
+        if self._google_key_rotator is None:
+            return False
+        return len(self._google_key_rotator) > 1
+
+    def _switch_provider(self, provider: str, *, reason: str = "runtime") -> bool:
+        target = provider.strip().lower() or "gemini"
+        if target not in _SUPPORTED_PROVIDERS:
+            logger.warning("router.provider_switch_rejected", provider=target, reason="unsupported")
+            return False
+
+        self._refresh_runtime_settings()
+        if not self._provider_has_credentials(target):
+            logger.warning(
+                "router.provider_switch_rejected",
+                provider=target,
+                reason="credentials_unavailable",
+            )
+            return False
+
+        previous = self._runtime_provider
+        self._runtime_provider = target
+        self._destroy_current_llm()
+        self._llm = self._build_llm_for_provider(target, self._settings)
+        logger.warning(
+            "router.provider_switched",
+            from_provider=previous,
+            to_provider=target,
+            reason=reason,
+        )
+        return True
+
+    def _refresh_runtime_settings(self) -> None:
+        """Refresh settings from environment/.env for live key rotation scenarios."""
+        get_settings.cache_clear()
+        self._settings = get_settings()
+        self._provider_sequence = self._settings.provider_preference
+        self._provider_availability = self._settings.provider_availability
+
+    def _create_groq_client(self, api_key: str, model_name: str) -> Any:
+        """Create a fresh ChatGroq instance for the given route."""
+        effective_model = model_name
+        if effective_model == "llama-3.1-8b-instant":
+            effective_model = "openai/gpt-oss-20b"
+        elif effective_model == "llama-3.3-70b-versatile":
+            effective_model = "openai/gpt-oss-120b"
+
+        groq_kwargs: dict[str, Any] = {
+            "model": effective_model,
+            "api_key": SecretStr(api_key) if api_key else None,
+            "temperature": self._settings.llm_temperature,
+        }
+        if "gpt-oss-20b" in effective_model:
+            groq_kwargs["reasoning_effort"] = "low"
+        elif "gpt-oss-120b" in effective_model:
+            groq_kwargs["reasoning_effort"] = "medium"
+        return ChatGroq(**groq_kwargs)
+
+    def _destroy_current_llm(self) -> None:
+        """Release current LLM client reference before hard re-instantiation."""
+        self._llm = None
+
+    async def rebuild_llm(self) -> None:
+        """Rebuild active LLM client from current settings and provider."""
+        self._refresh_runtime_settings()
+        self._destroy_current_llm()
+        self._llm = self._build_llm_for_provider(self._runtime_provider, self._settings)
+        if hasattr(self, "_planner") and self._planner is not None:
+            self._planner._llm = self._llm
+        logger.info("router.llm_rebuilt", provider=self._runtime_provider)
+
+    def _rotate_groq_route_and_rebuild(self) -> None:
+        """Rotate to next Groq key+model route and rebuild LLM."""
+        self._refresh_runtime_settings()
+        if self._key_rotator is None:
+            self._key_rotator = _ApiKeyRotator(self._settings.groq_api_keys)
+        if self._model_rotator is None:
+            self._model_rotator = _GroqModelRotator(self._settings.groq_model_chain)
+
+        old_key = self._key_rotator.current
+        old_model = self._model_rotator.current
+
+        # Step key every retry; when key wraps to first entry, step model once.
+        prev_key = self._key_rotator.current
+        new_key = self._key_rotator.next_key()
+        wrapped = len(self._key_rotator) > 1 and new_key == self._key_rotator.first and prev_key != new_key
+        if len(self._key_rotator) == 1:
+            wrapped = True
+
+        if wrapped:
+            self._model_rotator.next_model()
+
+        logger.warning(
+            "router.groq_route_rotated",
+            old_model=old_model,
+            new_model=self._model_rotator.current,
+            old_key_suffix=f"...{old_key[-6:]}" if old_key else "<empty>",
+            new_key_suffix=f"...{self._key_rotator.current[-6:]}" if self._key_rotator.current else "<empty>",
+        )
+        self._destroy_current_llm()
+        self._llm = self._create_groq_client(self._key_rotator.current, self._model_rotator.current)
+        if hasattr(self, "_planner") and self._planner is not None:
+            self._planner._llm = self._llm
+
+    def _rotate_google_route_and_rebuild(self) -> None:
+        """Rotate to next Gemini key route and rebuild LLM client."""
+        self._refresh_runtime_settings()
+        # NOTE: Do NOT re-create the rotator here — that would reset the cycle
+        # back to the first key (double-alloc bug). Instead, keep the existing
+        # rotator and advance it to the next key.
+        if self._google_key_rotator is None:
+            self._google_key_rotator = _ApiKeyRotator(self._settings.google_api_keys)
+
+        old_key = self._google_key_rotator.current
+        new_key = self._google_key_rotator.next_key()
+        logger.warning(
+            "router.google_route_rotated",
+            old_key_suffix=f"...{old_key[-6:]}" if old_key else "<empty>",
+            new_key_suffix=f"...{new_key[-6:]}" if new_key else "<empty>",
+            key_pool=len(self._google_key_rotator),
+        )
+        self._destroy_current_llm()
+        self._llm = self._build_llm(self._settings)
+        if hasattr(self, "_planner") and self._planner is not None:
+            self._planner._llm = self._llm
+
+    def _create_tool_learning_plan(self, step: TaskStep, user_message: Message) -> dict[str, Any]:
+        query = str(step.parameters.get("query") or user_message.content or step.description)
+        return {
+            "mode": "learn_build_execute",
+            "missing_tool": step.tool_name,
+            "steps": [
+                {
+                    "tool": "web_read_main_article",
+                    "reason": "Research unknown tool behavior from real web sources",
+                    "parameters": {
+                        "url": f"https://duckduckgo.com/?q={query.replace(' ', '+')}",
+                        "max_chars": 8000,
+                    },
+                },
+                {
+                    "tool": "dev_execute_python_code",
+                    "reason": "Generate executable adaptation script for missing capability",
+                    "parameters": {
+                        "code": (
+                            "import json\n"
+                            "print(json.dumps({\n"
+                            "  'status': 'generated_fallback',\n"
+                            "  'tool': '" + step.tool_name + "',\n"
+                            "  'note': 'Tool missing in registry; executed adaptive script path'\n"
+                            "}, ensure_ascii=True))"
+                        )
+                    },
+                },
+            ],
+        }
+
+    def _compute_retry_budget(self) -> int:
+        groq_routes = 1
+        if self._key_rotator is not None and self._model_rotator is not None:
+            groq_routes = max(1, len(self._key_rotator) * len(self._model_rotator))
+        google_routes = max(1, len(self._settings.google_api_keys))
+        # Keep retry space finite and bounded even under oversized key/model lists.
+        return min(30, max(3, groq_routes + google_routes + 2))
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Cheap token estimate for provider routing decisions, O(n)."""
+        return max(1, len(text or "") // 4)
+
+    def _semantic_target_provider(self, user_text: str) -> str:
+        """Select target provider based on approximate prompt size, O(1).
+
+        Groq's Llama 3.x models support up to 128k tokens. We only switch
+        to Gemini for very large payloads (>3000 estimated tokens) to avoid
+        unnecessary provider hops on normal-length requests.
+        """
+        estimated_tokens = self._estimate_tokens(user_text)
+        if estimated_tokens >= 3000:
+            return "gemini"
+        return self._runtime_provider
+
+    def _power_and_hardware_adaptive_route(self) -> str | None:
+        """Adaptive hardware routing based on battery state, running games, and GPU VRAM pressure."""
+        try:
+            import psutil
+
+            # 1. Active game / game engine detection
+            from core.vram_monitor import detect_running_games
+
+            active_games = detect_running_games()
+            if active_games and self._runtime_provider == "ollama":
+                logger.warning("router.game_active_switching_to_cloud", games=active_games)
+                return "groq" if self._provider_has_credentials("groq") else "gemini"
+
+            # 2. Battery power state (< 30% and not plugged -> force fast lightweight cloud)
+            battery = psutil.sensors_battery()
+            if battery and not battery.power_plugged and battery.percent < 30:
+                if self._runtime_provider == "ollama":
+                    logger.info("router.battery_low_switching_to_cloud", percent=battery.percent)
+                    return "groq" if self._provider_has_credentials("groq") else "gemini"
+
+            # If plugged or battery > 70% and user configured ollama as default, allow local
+            preferred = getattr(self._settings, "llm_provider", "")
+            if (
+                preferred == "ollama"
+                and self._runtime_provider != "ollama"
+                and not active_games
+                and (battery is None or battery.power_plugged or battery.percent >= 70)
+            ):
+                return "ollama"
+
+            # 3. GPU VRAM > 85% -> route away from local Ollama to cloud
+            from tools.hardware_telemetry_toolkit import _get_nvidia_gpu_info
+
+            gpu = _get_nvidia_gpu_info()
+            if gpu.get("available") is not False:
+                v_total = float(gpu.get("vram_total_mb") or 0)
+                v_used = float(gpu.get("vram_used_mb") or 0)
+                if v_total > 0 and (v_used / v_total) > 0.85:
+                    if self._runtime_provider == "ollama":
+                        return "gemini" if self._provider_has_credentials("gemini") else "groq"
+        except Exception as exc:
+            logger.debug("router.hardware_routing_failed", error=str(exc))
+        return None
+
+    def _route_provider_if_needed(self, user_text: str) -> None:
+        hw_target = self._power_and_hardware_adaptive_route()
+        if hw_target and hw_target != self._runtime_provider:
+            logger.info(
+                "router.hardware_adaptive_route",
+                from_provider=self._runtime_provider,
+                to_provider=hw_target,
+            )
+            self._switch_provider(hw_target, reason="hardware_adaptive_routing")
+            return
+
+        target = self._semantic_target_provider(user_text)
+        if target != self._runtime_provider:
+            logger.info(
+                "router.semantic_provider_route",
+                from_provider=self._runtime_provider,
+                to_provider=target,
+                estimated_tokens=self._estimate_tokens(user_text),
+            )
+            self._switch_provider(target, reason="semantic_routing")
+
+    def _filter_relevant_tools(self, query: str, all_tools: list[dict[str, str]]) -> list[dict[str, str]]:
+        """Select a compact, relevant tool subset for prompt injection."""
+        if not all_tools:
+            return []
+
+        lowered_query = (query or "").lower()
+        query_domains = infer_query_domains(lowered_query)
+        query_tokens = {token for token in re.split(r"[^a-z0-9_]+", lowered_query) if token}
+        scored: list[tuple[int, dict[str, str]]] = []
+
+        for tool in all_tools:
+            name = str(tool.get("name") or "")
+            if not name:
+                continue
+            desc = str(tool.get("description") or "")
+            domain = infer_tool_domain(name)
+            name_l = name.lower()
+            desc_l = desc.lower()
+
+            score = 0
+            if name in _ALWAYS_ON_TOOL_NAMES:
+                score += 10000
+
+            if domain in query_domains:
+                score += 90
+
+            if name_l in lowered_query:
+                score += 180
+
+            for token in query_tokens:
+                if token in name_l:
+                    score += 35
+                if token in desc_l:
+                    score += 12
+
+            # Turkish synonym expansion: map Turkish words to English tool-name hints.
+            for tr_word, en_hints in _TR_SYNONYMS.items():
+                if tr_word in lowered_query:
+                    if any(hint in name_l or hint in desc_l for hint in en_hints):
+                        score += 30
+
+            for marker, hints in _QUERY_TOOL_KEYWORDS:
+                if marker in lowered_query and any(hint in name_l or hint in desc_l for hint in hints):
+                    score += 45
+
+            media_markers = ("spotify", "muzik", "music", "oynat")
+            if any(marker in lowered_query for marker in media_markers):
+                if name_l in {"media_control_native", "media_control_spotify_native", "spotify_control"}:
+                    score += 500
+                if name_l.startswith("gui_"):
+                    score -= 160
+
+            if score > 0:
+                scored.append((score, tool))
+
+        # Always include core tools even if no score signal was generated.
+        existing_names = {tool.get("name") for _, tool in scored}
+        for tool in all_tools:
+            name = str(tool.get("name") or "")
+            if name in _ALWAYS_ON_TOOL_NAMES and name not in existing_names:
+                scored.append((10000, tool))
+
+        if not scored:
+            # Conservative default: keep only always-on and then fill deterministically.
+            always_on = [t for t in all_tools if str(t.get("name") or "") in _ALWAYS_ON_TOOL_NAMES]
+            remainder = [t for t in all_tools if t not in always_on]
+            return [*always_on, *remainder][:_MAX_RELEVANT_TOOLS]
+
+        scored.sort(key=lambda item: (-item[0], str(item[1].get("name") or "")))
+
+        selected: list[dict[str, str]] = []
+        selected_names: set[str] = set()
+        for _, tool in scored:
+            name = str(tool.get("name") or "")
+            if not name or name in selected_names:
+                continue
+            selected.append(tool)
+            selected_names.add(name)
+            if len(selected) >= _MAX_RELEVANT_TOOLS:
+                break
+
+        return selected
+
+    async def _build_system_prompt_with_tools(
+        self,
+        memory_context: str,
+        tools: list[dict[str, str]],
+    ) -> str:
+        settings = get_settings()
+        user_name = settings.user_name.strip() or None
+        user_line = ""
+        if user_name:
+            user_line = f"KULLANICI ADI: {user_name}. Kullanıcıya hitap ederken bu adı kullan. "
+
+        tools_desc = "\n".join(f"- {t['name']}: {t['description']} (yikici={t['destructive']})" for t in tools)
+
+        # Load system rules from template file
+        from config.root import resolve_project_root
+
+        rules_path = resolve_project_root() / "config" / "prompts" / "system_rules.txt"
+        try:
+            mandated = rules_path.read_text(encoding="utf-8").strip()
+        except Exception:
+            mandated = "KRİTİK ZORUNLULUK: SEN OMNICORE ADINDA TÜRK BİR YAPAY ZEKASIN. KURAL 1: ASLA İNGİLİZCE KONUŞMA."
+
+        # Taste context ekle
+        taste_context = ""
+        try:
+            from memory.taste import get_taste_engine
+
+            engine = get_taste_engine()
+            if asyncio.iscoroutinefunction(getattr(engine, "format_for_system_prompt_async", None)):
+                taste_context = await engine.format_for_system_prompt_async()
+            else:
+                taste_context = engine.format_for_system_prompt()
+        except Exception as exc:
+            logger.debug("router.taste_context_failed", error=str(exc))
+
+        # OmniCore Öğrenen Persona context ekle
+        persona_context = ""
+        try:
+            from config.persona_system import get_persona_manager
+
+            persona_context = get_persona_manager().get_system_prompt_context()
+        except Exception as exc:
+            logger.debug("router.persona_context_failed", error=str(exc))
+
+        # Aktif pencere bağlamı (ActiveContextObserver)
+        active_context = ""
+        try:
+            from tools.windows_uia_context import get_active_context
+
+            ctx = get_active_context()
+            if ctx:
+                proc = ctx.get("process_name", "")
+                title = ctx.get("title", "")
+                active_context = f"AKTİF PENCERE: {title}"
+                if proc:
+                    active_context += f" (İşlem: {proc})"
+        except Exception as exc:
+            logger.debug("router.active_context_failed", error=str(exc))
+
+        # Clipboard bağlamı (hata izi algılandıysa)
+        clipboard_context = ""
+        try:
+            from tools.clipboard_watcher import get_clipboard_watcher
+
+            latest = get_clipboard_watcher().get_latest()
+            if latest and latest.get("content_type", {}).get("category") == "error":
+                clipboard_context = (
+                    f"PANO HATASI ALGILANDI: {latest['content_type'].get('error_summary', 'bilinmeyen hata')}"
+                )
+        except Exception as exc:
+            logger.debug("router.clipboard_context_failed", error=str(exc))
+
+        # Load instructions from template file
+        instructions_path = resolve_project_root() / "config" / "prompts" / "instructions.txt"
+        try:
+            instructions = instructions_path.read_text(encoding="utf-8").strip()
+        except Exception:
+            instructions = "Kullanıcı sistem verisi veya eylem istediğinde JSON plan üret."
+
+        return (
+            f"{mandated}\n\n"
+            f"{user_line}\n"
+            "## Kullanılabilir Araçlar\n"
+            f"{tools_desc}\n\n"
+            "## İlgili Hatıralar\n"
+            f"{memory_context or '(yok)'}\n\n"
+            f"{taste_context}\n\n"
+            f"{persona_context}\n\n"
+            f"{active_context}\n\n"
+            f"{clipboard_context}\n\n"
+            f"{instructions}"
+        )
+
+    def _estimate_context_tokens_for_routing(
+        self,
+        system_prompt: str,
+        recent: list[Message],
+    ) -> int:
+        recent_text = "\n".join(msg.content for msg in recent if msg.content)
+        return self._estimate_tokens(f"{system_prompt}\n{recent_text}")
+
+    def _maybe_preemptive_gemini_route(self, estimated_tokens: int) -> None:
+        # Never auto-switch if user explicitly selected a provider.
+        if self._user_pinned_provider:
+            return
+        if self._runtime_provider != "groq":
+            return
+        if estimated_tokens <= _GROQ_PREEMPTIVE_TOKEN_LIMIT:
+            return
+        switched = self._switch_provider("gemini", reason="preemptive_context_routing")
+        if switched:
+            logger.warning(
+                "router.preemptive_gemini_routing",
+                estimated_tokens=estimated_tokens,
+                threshold=_GROQ_PREEMPTIVE_TOKEN_LIMIT,
+            )
+
+    def _local_fallback_response(self) -> _LocalLLMResponse:
+        return _LocalLLMResponse(
+            "Harici model gecici olarak devre disi. Lütfen 30 saniye sonra tekrar deneyin.",
+            is_fallback=True,
+        )
+
+    def _collect_operational_facts(self, user_message: Message, reply: str) -> list[str]:
+        u_content = user_message.content or ""
+        combined = f"{u_content}\n{reply}".lower()
+        facts: list[str] = []
+
+        for marker, fact in _OPERATIONAL_FACT_PATTERNS:
+            if marker in combined:
+                facts.append(fact)
+
+        path_matches = re.findall(r"([A-Za-z]:\\[^\s,;\"']+|/[\w\-./]+)", u_content)
+        for raw_path in path_matches[:3]:
+            facts.append(f"Active target path: {raw_path}")
+
+        dedup: list[str] = []
+        for fact in facts:
+            if fact not in dedup:
+                dedup.append(fact)
+        return dedup
+
+    async def _persist_operational_memory(self, user_message: Message, reply: str) -> None:
+        facts = self._collect_operational_facts(user_message, reply)
+        for fact in facts:
+            self._long_term.store(
+                fact,
+                metadata={
+                    "kind": "operational_fact",
+                    "user_id": user_message.user_id,
+                    "channel": user_message.channel,
+                },
+            )
+
+    async def _build_memory_context(self, user_message: Message, n_results: int = 6) -> str:
+        query = user_message.content or ""
+        if not query.strip():
+            return ""
+
+        user_specific: list[dict[str, Any]] = []
+        if user_message.user_id:
+            user_specific = self._long_term.recall(
+                query,
+                n_results=n_results,
+                where={"user_id": user_message.user_id},
+            )
+        generic = self._long_term.recall(query, n_results=n_results)
+
+        merged: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for item in [*user_specific, *generic]:
+            item_id = str(item.get("id") or "")
+            if item_id and item_id in seen_ids:
+                continue
+            if item_id:
+                seen_ids.add(item_id)
+            merged.append(item)
+
+        lines = [f"- {m['document']}" for m in merged if m.get("document")]
+        if hasattr(self._long_term, "format_memory_for_prompt"):
+            cat_formatted = self._long_term.format_memory_for_prompt()
+            if cat_formatted:
+                lines.append("\n" + cat_formatted)
+
+        if self._graph_memory and hasattr(self._graph_memory, "format_graph_for_prompt"):
+            try:
+                graph_formatted = await self._graph_memory.format_graph_for_prompt(query)
+                if graph_formatted:
+                    lines.append("\n" + graph_formatted)
+            except Exception as e:
+                logger.debug("router.graph_format_failed", error=str(e))
+
+        return "\n".join(lines)
+
+    async def _ainvoke_with_retry(self, messages: list) -> Any:
+        if self._circuit_breaker.is_open():
+            return self._local_fallback_response()
+
+        attempt = 0
+        max_attempts = self._compute_retry_budget()
+        last_exc: Exception | None = None
+
+        while attempt < max_attempts:
+            attempt += 1
+            try:
+                if self._llm is None:
+                    self._llm = self._build_llm(self._settings)
+                async with self._llm_semaphore:
+                    response = await self._llm.ainvoke(messages)
+                await self._circuit_breaker.record_success()
+                return response
+            except Exception as exc:
+                if not _is_retryable_llm_error(exc):
+                    raise
+
+                last_exc = exc
+                await self._circuit_breaker.record_failure()
+                provider = self._runtime_provider
+                self._destroy_current_llm()
+                if provider == "groq":
+                    if _is_rate_limit_error(exc):
+                        fallback = self._find_alternate_provider(provider)
+                        if fallback is not None:
+                            switched = self._switch_provider(
+                                fallback,
+                                reason="llm_backpressure_fallback_from_groq",
+                            )
+                            if switched:
+                                await asyncio.sleep(min(1.0, 0.1 * attempt))
+                                continue
+                    if self._can_rotate_groq_route():
+                        self._rotate_groq_route_and_rebuild()
+                    else:
+                        fallback = self._find_alternate_provider(provider)
+                        if fallback is not None:
+                            switched = self._switch_provider(
+                                fallback,
+                                reason="llm_backpressure_fallback_from_groq",
+                            )
+                            if not switched:
+                                self._llm = self._build_llm_for_provider(provider, self._settings)
+                        else:
+                            self._llm = self._build_llm_for_provider(provider, self._settings)
+                elif provider == "gemini":
+                    if _is_rate_limit_error(exc):
+                        fallback = self._find_alternate_provider(provider)
+                        if fallback is not None:
+                            switched = self._switch_provider(
+                                fallback,
+                                reason="llm_backpressure_fallback_from_gemini",
+                            )
+                            if switched:
+                                await asyncio.sleep(min(1.0, 0.1 * attempt))
+                                continue
+                    if self._can_rotate_google_route():
+                        self._rotate_google_route_and_rebuild()
+                    else:
+                        fallback = self._find_alternate_provider(provider)
+                        if fallback is not None:
+                            switched = self._switch_provider(
+                                fallback,
+                                reason="llm_backpressure_fallback_from_gemini",
+                            )
+                            if not switched:
+                                self._llm = self._build_llm_for_provider(provider, self._settings)
+                        else:
+                            self._llm = self._build_llm_for_provider(provider, self._settings)
+                else:
+                    self._llm = self._build_llm(self._settings)
+
+                await asyncio.sleep(min(1.0, 0.1 * attempt))
+
+        if last_exc is not None:
+            logger.error(
+                "router.llm_retry_exhausted",
+                provider=self._runtime_provider,
+                attempts=max_attempts,
+                error=str(last_exc),
+            )
+        local_fallback = self._local_fallback_response()
+        logger.warning(
+            "router.using_local_fallback",
+            provider=self._runtime_provider,
+            reason="retry_exhausted" if last_exc else "circuit_breaker_open",
+        )
+        return local_fallback
+
+    # -- public API -----------------------------------------------------------
+
+    async def _emit_progress(
+        self,
+        callback: Any,
+        event_type: str,
+        data: dict[str, Any],
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            if asyncio.iscoroutinefunction(callback):
+                await callback(event_type, data)
+            else:
+                callback(event_type, data)
+        except Exception as exc:
+            logger.debug("router.progress_emit_failed", error=str(exc))
+
+    async def handle_message(
+        self,
+        user_message: Message,
+        conversation_id: str = "default",
+        on_progress: Any = None,
+    ) -> str:
+        """Process a user message end-to-end and return the assistant reply.
+
+        This is the single entry-point that every gateway calls.
+        """
+        slash_reply = await self._handle_slash_command(user_message, conversation_id=conversation_id)
+        if slash_reply is not None:
+            assistant_msg = Message(
+                role=MessageRole.ASSISTANT,
+                content=slash_reply,
+                channel=user_message.channel,
+                user_id=user_message.user_id,
+            )
+            self._short_term.add_message(conversation_id, user_message)
+            self._short_term.add_message(conversation_id, assistant_msg)
+            return slash_reply
+
+        # 1. Store in short-term memory.
+        self._short_term.add_message(conversation_id, user_message)
+        self._route_provider_if_needed(user_message.content)
+
+        # Auto-learn from user language and interaction into PersonaManager
+        try:
+            from config.persona_system import get_persona_manager
+
+            pm = get_persona_manager()
+            u_text = user_message.content or ""
+            turkish_chars = ("ç", "ğ", "ı", "ö", "ş", "ü", "Ç", "Ğ", "İ", "Ö", "Ş", "Ü")
+            tr_sample = ("ve", "bir", "bu", "ile", "için", "ne", "nasıl", "aç", "bul", "oynat", "bak")
+            if any(tc in u_text for tc in turkish_chars) or any(w in u_text.lower().split() for w in tr_sample):
+                pm.learn_from_interaction("language", "tr", confidence=0.9, context="user_text_turkish")
+            elif (
+                len(u_text.split()) >= 3
+                and all(ord(c) < 128 for c in u_text)
+                and any(
+                    w in u_text.lower().split() for w in ("the", "and", "is", "for", "open", "play", "find", "show")
+                )
+            ):
+                pm.learn_from_interaction("language", "en", confidence=0.85, context="user_text_english")
+        except Exception as exc:
+            logger.debug("router.persona_learning_failed", error=str(exc))
+
+        await self._emit_progress(on_progress, "thinking", {"text": "İstek analiz ediliyor..."})
+
+        # 2. Retrieve relevant long-term memories.
+        memory_context = await self._build_memory_context(user_message, n_results=6)
+
+        # 3. Semantic tool routing: inject only relevant tools to reduce token payload.
+        all_tools = self._registry.list_tools()
+        relevant_tools = self._filter_relevant_tools(user_message.content, all_tools)
+
+        # 4. Build the LLM prompt.
+        system_prompt = await self._build_system_prompt_with_tools(memory_context, relevant_tools)
+        recent = self._short_term.get_recent_messages(conversation_id, n=20)
+
+        estimated_context_tokens = self._estimate_context_tokens_for_routing(system_prompt, recent)
+        self._maybe_preemptive_gemini_route(estimated_context_tokens)
+
+        lc_messages: list = [SystemMessage(content=system_prompt)]
+        for msg in recent:
+            if msg.role == MessageRole.USER:
+                lc_messages.append(HumanMessage(content=msg.content))
+            elif msg.role == MessageRole.ASSISTANT:
+                lc_messages.append(AIMessage(content=msg.content))
+
+        # 5. Ask the LLM whether this requires a plan or a direct answer.
+        classification = await self._classify_intent(user_message.content, lc_messages)
+
+        if classification.get("needs_plan", False):
+            reply = await self._execute_plan(user_message, classification, conversation_id, on_progress=on_progress)
+        else:
+            # Simple conversational reply — no tools needed.
+            response = await self._ainvoke_with_retry(lc_messages)
+            reply = response.content
+
+        reply = _clean_raw_json_plan_reply(str(reply))
+
+        # 6. Store assistant reply in short-term memory.
+        assistant_msg = Message(
+            role=MessageRole.ASSISTANT,
+            content=reply,
+            channel=user_message.channel,
+            user_id=user_message.user_id,
+        )
+        self._short_term.add_message(conversation_id, assistant_msg)
+
+        # 7. Persist to long-term memory for future recall.
+        self._long_term.store(
+            f"User: {user_message.content}\nAssistant: {reply}",
+            metadata={"user_id": user_message.user_id, "channel": user_message.channel},
+        )
+        await self._persist_operational_memory(user_message, reply)
+
+        # 7.5. Otomatik varlık çıkarma → GraphMemory (交谈daki bilgileri bilgi grafa aktar)
+        try:
+            if self._graph_memory is None:
+                self._graph_memory = GraphMemory()
+                await self._graph_memory.initialize()
+            await self._graph_memory.extract_and_store_from_text(f"{user_message.content}\n{reply}")
+        except Exception as exc:
+            logger.debug("router.graph_memory_failed", error=str(exc))
+
+        # 8. Auto-learn from interaction (taste engine)
+        try:
+            from memory.taste import get_taste_engine
+
+            tools_used = []
+            if hasattr(self, "_last_tools_used"):
+                tools_used = self._last_tools_used
+            await get_taste_engine().auto_learn_from_interaction_async(user_message.content, reply, tools_used)
+        except Exception as exc:
+            logger.debug("router.taste_learning_failed", error=str(exc))
+
+        return reply
+
+    def _apply_model_change(
+        self, provider: str, model_id: str, settings_field: str, extra_update: dict | None = None
+    ) -> str:
+        """Apply a model change for the given provider and rebuild LLM."""
+        from config.live_config import get_live_config
+
+        live_config = get_live_config()
+        live_config.set_model_for_provider(provider, model_id)
+        update = {settings_field: model_id}
+        if extra_update:
+            update.update(extra_update)
+        self._settings = self._settings.model_copy(update=update)
+        if provider == "groq" and self._model_rotator is not None:
+            self._model_rotator = None
+        self._destroy_current_llm()
+        self._llm = self._build_llm(self._settings)
+        return f"✅ {provider.title()} modeli değiştirildi ve kaydedildi: {model_id}"
+
+    async def _handle_slash_command(self, user_message: Message, conversation_id: str = "default") -> str | None:
+        content = (user_message.content or "").strip()
+        if not content.startswith("/"):
+            return None
+
+        lowered = content.lower()
+        if lowered.startswith("/plan"):
+            enabled = not self._guardian.plan_mode
+            self._guardian.set_plan_mode(enabled)
+            state = "ON" if enabled else "OFF"
+            return f"Plan mode {state}. Destructive steps will be dry-run enforced."
+        if lowered.startswith("/doctor"):
+            from config.live_config import get_live_config
+
+            provider = getattr(self, "_runtime_provider", "unknown")
+            tools_count = len(self._registry) if hasattr(self, "_registry") else 0
+            live_config = get_live_config()
+            model_name = getattr(self._settings, "omni_llm_model", "unknown")
+            is_plan = self._guardian.plan_mode
+            perm_mode = self._guardian.mode.value
+            groq_keys = len(getattr(self._settings, "groq_api_keys", []))
+            gemini_keys = len(getattr(self._settings, "google_api_keys", []))
+            # Circuit breaker status - is_open() is a method, call it properly
+            circuit_status = "Aktif" if self._circuit_breaker.is_open() else "Kapalı"
+            return (
+                "🩺 OmniCore Sistem Teşhisi:\n"
+                "─────────────────────\n"
+                f"  Sağlayıcı:    {provider}\n"
+                f"  Model:        {model_name}\n"
+                f"  Plan modu:    {'Açık' if is_plan else 'Kapalı'}\n"
+                f"  Araçlar:      {tools_count}\n"
+                f"  Groq keys:    {groq_keys}\n"
+                f"  Gemini keys:  {gemini_keys}\n"
+                f"  İzin modu:    {perm_mode}\n"
+                f"  Circuit:      {circuit_status}\n"
+                "─────────────────────\n"
+                "  ✅ Tüm sistemler çalışıyor"
+            )
+        if lowered.startswith("/taste"):
+            from memory.taste import get_taste_engine
+
+            te = get_taste_engine()
+            summary = te.get_summary()
+            if not summary:
+                return "Henüz kayıtlı kullanıcı tercihi bulunmuyor."
+            lines = ["👅 Öğrenilen Kullanıcı Tercihleri (Taste):"]
+            for cat, prefs in summary.items():
+                lines.append(f"\n[{cat.upper()}]")
+                for k, v in prefs.items():
+                    lines.append(f"  • {k}: {v}")
+            return "\n".join(lines)
+        if lowered.startswith("/memory"):
+            items = self._long_term.recall(user_message.content or "", n_results=5)
+            return f"Memory preview: {len(items)} items"
+        if lowered.startswith("/commit"):
+            return "Commit helper available. Use git workflow commands in terminal."
+        if lowered.startswith("/reset"):
+            self._short_term.clear(conversation_id)
+            if user_message.user_id and user_message.user_id != conversation_id:
+                self._short_term.clear(user_message.user_id)
+            return "Konuşma geçmişi temizlendi. ♻️ Yeni konuşmaya hazır!"
+        if lowered.startswith("/models"):
+            from config.live_config import get_live_config
+            from config.settings import get_available_models
+
+            all_models = get_available_models()
+            availability = self._settings.provider_availability
+            live_config = get_live_config()
+            lines = ["📋 Kullanılabilir LLM Modeller:\n"]
+            current_provider = getattr(self, "_runtime_provider", "")
+
+            # Get the currently active model for each provider (runtime values)
+            active_models = {
+                "gemini": live_config.get("model") or self._settings.omni_llm_model,
+                "groq": live_config.get("model") or self._settings.groq_primary_model,
+                "openai": getattr(self._settings, "openai_model", ""),
+                "anthropic": getattr(self._settings, "anthropic_model", ""),
+                "deepseek": getattr(self._settings, "deepseek_model", ""),
+                "mistral": getattr(self._settings, "mistral_model", ""),
+                "ollama": getattr(self._settings, "ollama_model", ""),
+            }
+            # If the runtime provider is groq, the active groq model might differ from settings
+            if current_provider == "groq" and self._model_rotator is not None:
+                active_models["groq"] = self._model_rotator.current
+
+            for prov, models in all_models.items():
+                has_key = availability.get(prov, False)
+                key_status = "✅ API key var" if has_key else "❌ API key yok"
+                prov_marker = " ← aktif provider" if prov == current_provider else ""
+                lines.append(f"📌 {prov.upper()} ({key_status}){prov_marker}:")
+                for m in models:
+                    is_active = m["id"] == active_models.get(prov, "")
+                    active = " [AKTİF]" if is_active else ""
+                    dim = "" if has_key or prov == "ollama" else "  (key yok) "
+                    lines.append(f"  - {m['id']}{active}\n    {dim}{m['name']} | ctx={m['context']} | {m['speed']}")
+            lines.append(
+                "\n💡 Model değiştirmek: /setmodel <model-id>\n"
+                "💡 Kısa isim: flash, lite, pro, 20b, 120b, mixtral...\n"
+                "💡 Provider değiştirmek: /provider <provider>"
+            )
+            return "\n".join(lines)
+
+        if lowered.startswith("/setmodel "):
+            parts = content.split(" ", 2)
+            if len(parts) < 2:
+                return "Kullanim: /setmodel <model-id>  (orn: /setmodel gemini-2.5-pro veya /setmodel flash)"
+            model_id = parts[1].strip()
+            from config.live_config import get_live_config, resolve_model_alias
+            from config.settings import (
+                AVAILABLE_ANTHROPIC_MODELS,
+                AVAILABLE_DEEPSEEK_MODELS,
+                AVAILABLE_GEMINI_MODELS,
+                AVAILABLE_GROQ_MODELS,
+                AVAILABLE_MISTRAL_MODELS,
+                AVAILABLE_OLLAMA_MODELS,
+                AVAILABLE_OPENAI_MODELS,
+            )
+
+            # Resolve aliases
+            current_provider = getattr(self, "_runtime_provider", "gemini")
+            model_id = resolve_model_alias(model_id, current_provider)
+
+            all_gemini = {m["id"] for m in AVAILABLE_GEMINI_MODELS}
+            all_groq = {m["id"] for m in AVAILABLE_GROQ_MODELS}
+            all_openai = {m["id"] for m in AVAILABLE_OPENAI_MODELS}
+            all_anthropic = {m["id"] for m in AVAILABLE_ANTHROPIC_MODELS}
+            all_deepseek = {m["id"] for m in AVAILABLE_DEEPSEEK_MODELS}
+            all_mistral = {m["id"] for m in AVAILABLE_MISTRAL_MODELS}
+            all_ollama = {m["id"] for m in AVAILABLE_OLLAMA_MODELS}
+
+            # Provider → (model_id_set, settings_field, extra_update)
+            _provider_model_map: list[tuple[set[str], str, dict | None]] = [
+                (all_gemini, "omni_llm_model", None),
+                (all_groq, "groq_primary_model", {"groq_llm_model": model_id}),
+                (all_openai, "openai_model", None),
+                (all_anthropic, "anthropic_model", None),
+                (all_deepseek, "deepseek_model", None),
+                (all_mistral, "mistral_model", None),
+                (all_ollama, "ollama_model", None),
+            ]
+            _provider_names = ["gemini", "groq", "openai", "anthropic", "deepseek", "mistral", "ollama"]
+
+            for (model_set, field, extra), prov_name in zip(_provider_model_map, _provider_names):
+                if model_id in model_set:
+                    return self._apply_model_change(prov_name, model_id, field, extra)
+
+            return (
+                f"❌ Bilinmeyen model: {model_id}\n"
+                "Mevcut modelleri görmek için /models komutunu kullanın.\n"
+                "Kısa isim kullanabilirsiniz: flash, lite, pro, 20b, 120b, mixtral..."
+            )
+        if lowered.startswith("/provider"):
+            from config.live_config import get_live_config
+
+            parts = content.split(" ", 1)
+            if len(parts) < 2 or not parts[1].strip():
+                current = self._settings.llm_provider.strip().lower() or "gemini"
+                pinned = " (sabit)" if self._user_pinned_provider else ""
+                avail = self._settings.provider_preference
+                keys = self._settings.provider_availability
+                status_lines = []
+                for p in avail:
+                    s = "API key var" if keys.get(p) else "API key yok"
+                    marker = " <-- mevcut" if p == current else ""
+                    status_lines.append(f"  {p}: {s}{marker}")
+                return (
+                    f"Mevcut provider: {current}{pinned}\n"
+                    "Durum:\n" + "\n".join(status_lines) + "\n\n"
+                    "Değiştirmek için: /provider <gemini|groq|ollama>\n"
+                    "Otomatik geçişi açmak için: /provider auto"
+                )
+            new_prov = parts[1].strip().lower()
+            if new_prov == "auto":
+                self._user_pinned_provider = None
+                return "Otomatik provider geçişi açıldı."
+            supported = list(_SUPPORTED_PROVIDERS)
+            if new_prov not in supported:
+                return f"Bilinmeyen provider: {new_prov}\nDesteklenen: {', '.join(supported)}"
+            if not self._provider_has_credentials(new_prov):
+                hint_map = {
+                    "openai": "OPENAI_API_KEY",
+                    "anthropic": "ANTHROPIC_API_KEY",
+                    "deepseek": "DEEPSEEK_API_KEY",
+                    "mistral": "MISTRAL_API_KEY",
+                    "gemini": "GOOGLE_API_KEY",
+                    "groq": "GROQ_API_KEY",
+                }
+                env_var = hint_map.get(new_prov, f"{new_prov.upper()}_API_KEY")
+                return (
+                    f"❌ {new_prov} için API key bulunamadı.\n"
+                    f"/config ile API key ayarlayabilirsiniz veya .env dosyasına {env_var}=<api-key> ekleyin."
+                )
+            # Persist to live config
+            live_config = get_live_config()
+            live_config.set("provider", new_prov)
+            self._user_pinned_provider = new_prov
+            self._settings = self._settings.model_copy(update={"llm_provider": new_prov})
+            self._runtime_provider = new_prov
+            self._destroy_current_llm()
+            self._llm = self._build_llm(self._settings)
+            return f"✅ Provider değiştirildi: {new_prov}"
+
+        if lowered.startswith("/status"):
+            from config.live_config import get_live_config
+
+            provider = getattr(self, "_runtime_provider", "unknown")
+            tools_count = len(self._registry) if hasattr(self, "_registry") else 0
+            live_config = get_live_config()
+            model_name = (
+                live_config.get("model") or self._settings.omni_llm_model
+                if provider == "gemini"
+                else live_config.get("model") or self._settings.groq_primary_model
+            )
+            is_plan = getattr(self._guardian, "plan_mode", False)
+            user_name = live_config.get("name") or self._settings.user_name.strip() or "(OmniCore)"
+            perm_mode = self._guardian.mode.value if hasattr(self._guardian, "mode") else "ask"
+            perm_label = {"yes": "🔓 Tam Yetki", "ask": "🔒 Sorarak Onay"}.get(perm_mode, perm_mode)
+            return (
+                f"👤 Kullanıcı: {user_name}\n"
+                f"🤖 Provider: {provider} | Model: {model_name}\n"
+                f"🔧 Araçlar: {tools_count} | Plan modu: {'AÇIK' if is_plan else 'KAPALI'}\n"
+                f"🛡️ İzin: {perm_label}\n"
+                f"💾 Hafıza: kısa-vade aktif, uzun-vade ChromaDB"
+            )
+        if lowered.startswith("/name"):
+            from config.live_config import get_live_config
+
+            parts = content.split(" ", 1)
+            if len(parts) < 2 or not parts[1].strip():
+                current = get_live_config().get("name") or self._settings.user_name.strip() or "(OmniCore)"
+                return f"Mevcut görünen ad: {current}\nDeğiştirmek için: /name <yeni-ad>\nSıfırlamak için: /name off"
+            new_name = parts[1].strip()
+            live_config = get_live_config()
+            if new_name.lower() in ("off", "reset", "sıfırla", "sifirla", "kapat"):
+                live_config.set("name", "")
+                self._settings = self._settings.model_copy(update={"user_name": ""})
+                return "Görünen ad sıfırlandı. Bundan sonra OmniCore olarak tanınıyorum."
+            live_config.set("name", new_name)
+            self._settings = self._settings.model_copy(update={"user_name": new_name})
+            return (
+                f"Hoş geldin {new_name}! Bundan sonra sana {new_name} olarak hitap edeceğim.\n"
+                "Değişiklik otomatik kaydedildi (.env)."
+            )
+        if lowered.startswith("/help"):
+            return (
+                "📋 OmniCore Komutları:\n\n"
+                "/help           — Bu yardım mesajı\n"
+                "/status         — Sistem durumu özeti\n"
+                "/name [ad]      — Görünen adını göster/değiştir\n"
+                "/provider [ad]  — Provider göster/değiştir (gemini/groq/ollama)\n"
+                "/setmodel <id>  — Aktif modeli değiştir (kısa isim: flash, pro, 20b)\n"
+                "/models         — Kullanılabilir LLM modellerini listele\n"
+                "/config         — Yapılandırma ayarlarını göster\n"
+                "/config set K V — Ayar değiştir (kalıcı)\n"
+                "/set K V        — Hızlı ayar değiştir (kısa yolu)\n"
+                "/perm [mod]     — İzin modu: full/safe/ask\n"
+                "/plan           — Plan modunu aç/kapat\n"
+                "/doctor         — Detaylı sistem teşhisi\n"
+                "/memory         — Hafıza önizleme\n"
+                "/reset          — Konuşma geçmişini temizle\n"
+                "/hud            — Cyberpunk HUD paneli\n"
+                "/commit         — Git commit yardımcısı\n\n"
+                "Kısayollar:\n"
+                "/               — Komut menüsünü aç (↑↓ ile seçim)\n"
+                ".omnicore approve yes — Otomatik onay modu\n"
+                ".omnicore ask        — Manuel onay modu (varsayılan)"
+            )
+
+        if lowered.startswith(("/sysinfo", "/info")):
+            import platform
+
+            import psutil
+
+            cpu_pct = psutil.cpu_percent(interval=0.1)
+            vm = psutil.virtual_memory()
+            total_gb = vm.total / (1024**3)
+            used_gb = vm.used / (1024**3)
+            free_gb = vm.available / (1024**3)
+            return (
+                "💻 Sistem Bilgisi (System Info)\n"
+                "─────────────────────────────\n"
+                f"  İşletim Sistemi: {platform.system()} {platform.release()} ({platform.machine()})\n"
+                f"  Python Sürümü:   {platform.python_version()}\n"
+                f"  CPU Kullanımı:   %{cpu_pct}\n"
+                f"  Bellek (RAM):    {used_gb:.1f} GB / {total_gb:.1f} GB (%{vm.percent}) [Boş: {free_gb:.1f} GB]\n"
+                f"  Gizlilik:        🔒 %100 Yerel (Veri iletilmez)\n"
+                "─────────────────────────────"
+            )
+
+        if lowered == "/set" or lowered.startswith("/set "):
+            parts = content.split(" ", 2)
+            if len(parts) < 3:
+                return (
+                    "💡 Kullanım: /set <anahtar> <değer>\n"
+                    "Örnek: /set approval_mode full\n"
+                    "Örnek: /set name <yeni_ad>\n"
+                    "Örnek: /set model <model_id>"
+                )
+            from config.live_config import get_live_config
+
+            key = parts[1].strip()
+            val = parts[2].strip()
+            success, msg = get_live_config().set(key, val)
+            if success and key in ("model", "provider", "approval_mode"):
+                try:
+                    from config.settings import get_settings, invalidate_settings_cache
+
+                    invalidate_settings_cache()
+                    new_settings = get_settings()
+                    self._settings = new_settings
+                    self._destroy_current_llm()
+                    self._llm = self._build_llm(new_settings)
+                except Exception as exc:
+                    logger.warning("router.config_reload_failed", error=str(exc))
+            return msg
+
+        # --- TASTE ENGINE ---
+        if lowered == "/taste" or lowered.startswith("/taste "):
+            try:
+                from memory.taste import CATEGORIES, get_taste_engine
+
+                engine = get_taste_engine()
+                parts = content.split(" ", 2)
+
+                if lowered == "/taste":
+                    # Tüm tercihleri göster
+                    all_prefs = engine.get_all()
+                    if not all_prefs:
+                        cats = ", ".join(CATEGORIES.keys())
+                        return (
+                            "🧠 Henüz öğrenilmiş tercih yok. Kullandıkça otomatik öğrenirim.\n\n"
+                            f"Kullanılabilir kategoriler: {cats}"
+                        )
+                    lines = ["🧠 **Ogrenilmis Tercihler:**\n"]
+                    current_cat = ""
+                    for p in all_prefs:
+                        if p["category"] != current_cat:
+                            current_cat = p["category"]
+                            cat_name = CATEGORIES.get(current_cat, current_cat)
+                            lines.append(f"\n**{cat_name}:**")
+                        conf_bar = "█" * int(p["confidence"] * 5) + "░" * (5 - int(p["confidence"] * 5))
+                        lines.append(f"  {p['key']}: {p['value']} [{conf_bar}] {p['confidence']:.0%}")
+                    return "\n".join(lines)
+
+                # /taste <category> - Belirli kategorideki tercihleri goster
+                if len(parts) >= 2:
+                    cat = parts[1].strip()
+                    if cat == "reset":
+                        deleted = engine.forget()
+                        return f"🧠 Tüm tercihler sıfırlandı ({deleted} tercih silindi)."
+                    if cat == "help":
+                        return (
+                            "🧠 **Taste Komutları:**\n"
+                            "  /taste — Tüm tercihleri göster\n"
+                            "  /taste <kategori> — Belirli kategorideki tercihleri göster\n"
+                            "  /taste reset — Tüm tercihleri sıfırla\n"
+                            "  /taste forget <kategori> <anahtar> — Belirli tercihi sil\n"
+                            "  /taste help — Bu yardımı göster\n\n"
+                            "Kategoriler: " + ", ".join(CATEGORIES.keys())
+                        )
+                    if cat in CATEGORIES:
+                        prefs = engine.get_all(cat)
+                        if not prefs:
+                            return f"🧠 '{cat}' kategorisinde henuz tercih yok."
+                        lines = [f"🧠 **{CATEGORIES.get(cat, cat)}:**\n"]
+                        for p in prefs:
+                            conf_bar = "█" * int(p["confidence"] * 5) + "░" * (5 - int(p["confidence"] * 5))
+                            lines.append(f"  {p['key']}: {p['value']} [{conf_bar}] {p['confidence']:.0%}")
+                        return "\n".join(lines)
+                    return f"bilinmeyen kategori: {cat}. /taste help için yardıma bak."
+
+                return "Kullanım: /taste veya /taste <kategori>"
+            except Exception as exc:
+                return f"Taste hatası: {exc}"
+
+        return None
+
+    # -- internal helpers ------------------------------------------------------
+
+    async def _build_system_prompt(self, memory_context: str) -> str:
+        tools = self._filter_relevant_tools("", self._registry.list_tools())
+        return await self._build_system_prompt_with_tools(memory_context, tools)
+
+    async def _classify_intent(self, user_text: str, lc_messages: list) -> dict[str, Any]:
+        """Ask the LLM to decide: plan or direct answer."""
+        lowered = user_text.lower().strip()
+        spotify_triggers = (
+            "çal",
+            "cal",
+            "aç",
+            "ac",
+            "oynat",
+            "dinle",
+            "başlat",
+            "baslat",
+            "play",
+            "seek",
+            "atla",
+        )
+        if "spotify" in lowered and any(k in lowered for k in spotify_triggers):
+            seek_sec = 0
+            seek_match = re.search(
+                r"(\d+)\s*(?:\.|\s)*(?:sn|saniye|sec|second)",
+                lowered,
+            )
+            if seek_match:
+                try:
+                    seek_sec = int(seek_match.group(1))
+                except Exception:
+                    seek_sec = 0
+
+            cleaned_query = re.sub(
+                r"\bspotify(?:'?(?:dan|den|da|de|ta|te|ten|tan))?\b",
+                "",
+                user_text,
+                flags=re.IGNORECASE,
+            )
+            cleaned_query = re.sub(
+                r"\b\d+\.?\s*(?:sn|saniye|sec|second)(?:'?(?:sini|sine|sinde))?\b",
+                "",
+                cleaned_query,
+                flags=re.IGNORECASE,
+            )
+            turkish_music_words = (
+                r"şarkısının|sarkisinin|şarkısını|sarkisini|şarkısı"
+                r"|sarkisi|parçasının|parcasinin|parçasını|parcasini"
+                r"|parçası|parcasi|müziğini|muzigini|müziği|muzigi"
+                r"|aç|ac|çal|cal|oynat|dinle|başlat|baslat|play|dan|den|sini|sine"
+            )
+            cleaned_query = re.sub(
+                rf"\b(?:{turkish_music_words})\b",
+                "",
+                cleaned_query,
+                flags=re.IGNORECASE,
+            )
+            cleaned_query = cleaned_query.strip(" '\".,:-")
+            if not cleaned_query:
+                cleaned_query = "top tracks"
+
+            tool_name = "spotify_control" if self._registry.get("spotify_control") else "media_control_spotify_native"
+            seek_desc = f" ve {seek_sec}. saniyeye atla" if seek_sec > 0 else ""
+            return {
+                "needs_plan": True,
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool": tool_name,
+                        "description": (f"Spotify'da '{cleaned_query}' arat, çal{seek_desc}"),
+                        "parameters": {
+                            "action": "search_and_play",
+                            "query": cleaned_query,
+                            "seek_seconds": seek_sec,
+                        },
+                    }
+                ],
+            }
+
+        # Fast deterministic path for Screen / Vision ("ekrana bak", "şu an neye bakıyorum", etc.)
+        screen_vision_patterns = (
+            "ekrana bak",
+            "ekranda ne var",
+            "su an neye bakiyorum",
+            "şu an neye bakıyorum",
+            "su an baktigim",
+            "şu an baktığım",
+            "aktif pencereyi oku",
+            "aktif pencereyi analiz et",
+            "ekrani analiz et",
+            "ekranı analiz et",
+            "ekran goruntusunu analiz et",
+            "ekran görüntüsünü analiz et",
+            "pencereye bak",
+        )
+        if any(p in lowered for p in screen_vision_patterns):
+            tool_name = "instant_screen_context"
+            if not self._registry.get("instant_screen_context"):
+                tool_name = "gui_analyze_screen"
+            return {
+                "needs_plan": True,
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool": tool_name,
+                        "description": "Aktif ekran görüntüsünü al ve görsel analiz yap",
+                        "parameters": {
+                            "prompt": user_text,
+                        },
+                    }
+                ],
+            }
+
+        classification_prompt = (
+            "Asagidaki istegin arac calistirmayi gerektirip gerektirmedigine karar ver.\n"
+            f"Istek: {user_text}\n\n"
+            "ONEMLI: Hava durumu isteklerinde mutlaka api_weather veya guvenilir gercek kaynak "
+            "(orn. wttr.in) kullanilmali; sahte baglanti uretilmez.\n"
+            "SADECE JSON dondur:\n"
+            '{"needs_plan": true/false, "steps": [...] or []}'
+        )
+        lc_messages_copy = list(lc_messages) + [HumanMessage(content=classification_prompt)]
+
+        response = await self._ainvoke_with_retry(lc_messages_copy)
+        text = response.content.strip()
+
+        # Robust JSON extraction — handles markdown fences, extra text, multi-block responses.
+        try:
+            # 1. Try extracting from ```json ... ``` or ``` ... ``` blocks first.
+            fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+            if fence_match:
+                return json.loads(fence_match.group(1))
+
+            # 2. Try finding balanced JSON object anywhere in the response.
+            start = text.find("{")
+            if start != -1:
+                depth = 0
+                for idx in range(start, len(text)):
+                    if text[idx] == "{":
+                        depth += 1
+                    elif text[idx] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            try:
+                                candidate = json.loads(text[start : idx + 1])
+                                if isinstance(candidate, dict):
+                                    return candidate
+                            except json.JSONDecodeError:
+                                break
+
+            # 3. Last resort: try the full text.
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            logger.debug("router.classification_fallback", raw=text[:200])
+            return {"needs_plan": False, "steps": []}
+
+    async def _handle_unknown_tool_step(
+        self,
+        step: TaskStep,
+        user_message: Message,
+        results_summary: list[str],
+    ) -> bool:
+        tool = self._registry.get(step.tool_name)
+        if tool is not None:
+            return False
+
+        learning = self._create_tool_learning_plan(step, user_message)
+        step.status = StepStatus.FAILED
+        step.error = f"Unknown tool: {step.tool_name}"
+        fallback_json = json.dumps(learning, ensure_ascii=True)
+        results_summary.append(f"[FAIL] {step.description}: {step.error} | fallback={fallback_json}")
+        return True
+
+    async def _build_tool_input(self, step: TaskStep) -> tuple[Any, ToolInput]:
+        tool = self._registry.get(step.tool_name)
+        if tool is None:
+            raise ValueError(f"Unknown tool: {step.tool_name}")
+
+        temp_input = ToolInput(tool_name=step.tool_name, parameters=step.parameters)
+        tool_input = ToolInput(
+            tool_name=step.tool_name,
+            parameters=step.parameters,
+            requires_approval=tool.requires_approval(temp_input),
+        )
+        return tool, tool_input
+
+    async def _handle_policy_gate(
+        self,
+        step: TaskStep,
+        tool,
+        user_id: str,
+        results_summary: list[str],
+    ) -> tuple[bool, Any]:
+        policy_decision = self._policy.evaluate(step)
+
+        if self._guardian.plan_mode and step.is_destructive:
+            policy_decision.require_dry_run = True
+            if not step.dry_run_done and "missing_dry_run" not in policy_decision.reasons:
+                policy_decision.allowed = False
+                policy_decision.reasons.append("missing_dry_run")
+        if policy_decision.allowed:
+            return True, policy_decision
+
+        if policy_decision.require_dry_run and "missing_dry_run" in policy_decision.reasons:
+            dry_run_ok = await self._execute_required_dry_run(step, tool, user_id, results_summary)
+            if dry_run_ok:
+                policy_decision = self._policy.evaluate(step)
+                if policy_decision.allowed:
+                    return True, policy_decision
+
+        if (
+            policy_decision.require_backup
+            and "backup_required" in policy_decision.reasons
+            and RiskLevel(step.risk_level) == RiskLevel.CRITICAL
+        ):
+            override_ok = await self._attempt_critical_backup_override(step, user_id, results_summary)
+            if override_ok:
+                policy_decision = self._policy.evaluate(step)
+                if policy_decision.allowed:
+                    return True, policy_decision
+
+        step.status = StepStatus.SKIPPED
+        if policy_decision.safe_response:
+            step.error = (
+                f"Policy blocked: {', '.join(policy_decision.reasons)} | guidance={policy_decision.safe_response}"
+            )
+        else:
+            step.error = f"Policy blocked: {', '.join(policy_decision.reasons)}"
+
+        results_summary.append(f"[SKIPPED] {step.description}: {step.error}")
+        await self._state.log_audit(
+            "policy_rejected",
+            f"{step.tool_name}: {step.error}",
+            user_id=user_id,
+            metadata={
+                "risk_level": step.risk_level.value,
+                "reasons": policy_decision.reasons,
+            },
+        )
+        return False, policy_decision
+
+    async def _execute_required_dry_run(
+        self,
+        step: TaskStep,
+        tool,
+        user_id: str,
+        results_summary: list[str],
+    ) -> bool:
+        dry_run_params = dict(step.parameters)
+        dry_run_params["dry_run"] = True
+        dry_run_input = ToolInput(
+            tool_name=step.tool_name,
+            parameters=dry_run_params,
+            requires_approval=False,
+        )
+
+        probe_step = step.model_copy(deep=True)
+        probe_step.description = f"[DRY-RUN] {step.description}"
+        dry_run_output = await self._recovery.execute_with_retry(tool, dry_run_input, probe_step)
+
+        if dry_run_output.status.value == "success":
+            step.dry_run_done = True
+            step.requires_dry_run = True
+            await self._state.log_audit(
+                "policy_dry_run_passed",
+                f"{step.tool_name}: dry-run completed",
+                user_id=user_id,
+                metadata={"risk_level": step.risk_level.value},
+            )
+            results_summary.append(f"[DRY-RUN] {step.description}: policy preflight başarılı")
+            return True
+
+        step.error = f"Mandatory dry-run failed: {dry_run_output.error or 'unknown dry-run failure'}"
+        await self._state.log_audit(
+            "policy_dry_run_failed",
+            f"{step.tool_name}: {step.error}",
+            user_id=user_id,
+            metadata={"risk_level": step.risk_level.value},
+        )
+        results_summary.append(f"[FAIL] {step.description}: {step.error}")
+        return False
+
+    async def _attempt_critical_backup_override(
+        self,
+        step: TaskStep,
+        user_id: str,
+        results_summary: list[str],
+    ) -> bool:
+        approval = await self._guardian.request_critical_approval(
+            action_description=(
+                f"CRITICAL override for {step.tool_name}: backup missing. "
+                "Approve only if explicit rollback/compensation exists."
+            ),
+            user_id=user_id,
+        )
+
+        if approval != ApprovalResult.APPROVED:
+            results_summary.append(f"[SKIPPED] {step.description}: critical backup override denied")
+            return False
+
+        step.backup_ready = True
+        await self._state.log_audit(
+            "critical_override",
+            f"{step.tool_name}: backup requirement overridden by user",
+            user_id=user_id,
+            metadata={
+                "risk_level": step.risk_level.value,
+                "override": "backup_requirement",
+                "approval_mode": self._guardian.mode.value,
+            },
+        )
+        results_summary.append(f"[OVERRIDE] {step.description}: user overrode CRITICAL backup requirement")
+        return True
+
+    async def _handle_approval_gate(
+        self,
+        step: TaskStep,
+        tool,
+        tool_input: ToolInput,
+        policy_decision,
+        user_id: str,
+        results_summary: list[str],
+    ) -> bool:
+        # Fast path: if guardian is in YES (full) mode, auto-approve everything
+        if self._guardian.mode == ApprovalMode.YES:
+            if RiskLevel(step.risk_level) == RiskLevel.CRITICAL:
+                await self._state.log_audit(
+                    "critical_auto_override",
+                    f"{step.tool_name}: critical execution auto-approved because guardian mode is YES",
+                    user_id=user_id,
+                    metadata={
+                        "risk_level": step.risk_level.value,
+                        "approval_mode": self._guardian.mode.value,
+                    },
+                )
+            else:
+                await self._state.log_audit(
+                    "auto_approved_full_mode",
+                    f"{step.tool_name}: {step.description}",
+                    user_id=user_id,
+                    metadata={"approval_mode": self._guardian.mode.value},
+                )
+            return True
+
+        if not (tool.requires_approval(tool_input) or policy_decision.require_confirmation):
+            return True
+
+        step.status = StepStatus.AWAITING_APPROVAL
+        action_desc = f"{step.tool_name}: {step.description} | risk={step.risk_level.value}"
+        if policy_decision.require_double_confirmation:
+            approval = await self._guardian.request_critical_approval(
+                action_description=action_desc,
+                user_id=user_id,
+            )
+        else:
+            approval = await self._guardian.request_approval(
+                action_description=action_desc,
+                user_id=user_id,
+            )
+
+        if approval == ApprovalResult.APPROVED:
+            return True
+
+        step.status = StepStatus.SKIPPED
+        reason = "denied" if approval == ApprovalResult.DENIED else "timed out"
+        step.error = f"Action {reason} by user"
+        results_summary.append(f"[SKIPPED] {step.description}: {step.error}")
+        await self._state.log_audit("hitl_rejected", step.description, user_id=user_id)
+        return False
+
+    async def _execute_step_with_fallback(
+        self,
+        step: TaskStep,
+        tool,
+        tool_input: ToolInput,
+        user_message: Message,
+    ):
+        output = await self._recovery.execute_with_retry(tool, tool_input, step)
+        if output.status.value == "success" and _is_generic_or_empty_success(output):
+            output = output.model_copy(
+                update={
+                    "status": "failure",
+                    "error": (
+                        "Tool returned generic/empty success without actionable data; treated as failure for safety"
+                    ),
+                }
+            )
+
+        if output.status.value != "success":
+            fallback_output = await self._attempt_hybrid_gui_fallback(
+                step=step,
+                primary_output=output,
+                user_message=user_message,
+            )
+            if fallback_output is not None:
+                output = fallback_output
+        return output
+
+    async def _record_step_result(
+        self,
+        step: TaskStep,
+        output,
+        user_id: str,
+        results_summary: list[str],
+    ) -> None:
+        if output.status.value == "success":
+            step.status = StepStatus.COMPLETED
+            step.result = output.result
+            results_summary.append(f"[OK] {step.description}: {output.result}")
+        else:
+            step.status = StepStatus.FAILED
+            step.error = output.error
+            results_summary.append(f"[FAIL] {step.description}: {output.error}")
+
+        await self._state.log_audit(
+            f"tool_{output.status.value}",
+            f"{step.tool_name}: {output.result or output.error}",
+            user_id=user_id,
+        )
+
+    async def _finalize_plan_state(self, plan) -> None:
+        if plan.is_complete:
+            plan.mark_complete()
+            return
+
+        failed = [s for s in plan.steps if s.status == StepStatus.FAILED]
+        if failed:
+            plan.mark_failed("; ".join(s.error for s in failed))
+
+    async def _summarize_plan_results(
+        self,
+        user_message: Message,
+        results_summary: list[str],
+    ) -> str:
+        summary_prompt = (
+            f"Kullanıcı şunu sordu: {user_message.content}\n\n"
+            f"Aşağıdaki adımları yürüttüm:\n"
+            + "\n".join(results_summary)
+            + "\n\nLütfen kullanıcı için kısa bir TÜRKÇE özet yaz "
+            "ve araç çıktılarından somut ham değerleri dahil et. "
+            "Herhangi bir araç başarısız olduysa, tam hatayı belirt."
+        )
+        summary_response = await self._ainvoke_with_retry([HumanMessage(content=summary_prompt)])
+        summary_text = str(summary_response.content)
+
+        if _looks_like_json_plan(summary_text):
+            fallback = [line for line in results_summary if line]
+            if not fallback:
+                return "Araç hataları nedeniyle isteği tamamlayamadım."
+            return "\n".join(fallback)
+
+        if _contains_dummy_markers(summary_text):
+            fallback = [line for line in results_summary if line]
+            if fallback:
+                return "\n".join(fallback)
+        return summary_text
+
+    async def _execute_plan(
+        self,
+        user_message: Message,
+        classification: dict[str, Any],
+        conversation_id: str,
+        on_progress: Any = None,
+    ) -> str:
+        """Build a TaskPlan from the classification and execute step by step."""
+        plan = self._planner.build_plan(
+            user_request=user_message.content,
+            raw_steps=classification.get("steps", []),
+        )
+
+        # Persist the plan.
+        await self._state.save_task(plan.id, plan.user_request, plan.status.value, plan.model_dump_json())
+
+        plan.status = TaskStatus.EXECUTING
+        results_summary: list[str] = []
+        total_steps = len(plan.steps)
+
+        await self._emit_progress(
+            on_progress,
+            "plan_created",
+            {
+                "total": total_steps,
+                "steps": [
+                    {"step": i + 1, "tool": s.tool_name, "description": s.description} for i, s in enumerate(plan.steps)
+                ],
+            },
+        )
+
+        for idx, step in enumerate(plan.steps, 1):
+            step.status = StepStatus.IN_PROGRESS
+            await self._emit_progress(
+                on_progress,
+                "step_start",
+                {
+                    "step": idx,
+                    "total": total_steps,
+                    "tool": step.tool_name,
+                    "description": step.description,
+                },
+            )
+
+            if await self._handle_unknown_tool_step(step, user_message, results_summary):
+                await self._emit_progress(
+                    on_progress,
+                    "step_end",
+                    {
+                        "step": idx,
+                        "total": total_steps,
+                        "tool": step.tool_name,
+                        "status": "unknown_tool",
+                        "result": step.result,
+                    },
+                )
+                continue
+
+            tool, tool_input = await self._build_tool_input(step)
+
+            # Security: Policy gate runs for ALL steps, including delegated ones
+            policy_allowed, policy_decision = await self._handle_policy_gate(
+                step,
+                tool,
+                user_message.user_id,
+                results_summary,
+            )
+            if not policy_allowed:
+                await self._emit_progress(
+                    on_progress,
+                    "step_end",
+                    {
+                        "step": idx,
+                        "total": total_steps,
+                        "tool": step.tool_name,
+                        "status": "policy_denied",
+                        "result": step.result,
+                    },
+                )
+                continue
+
+            # Security: Approval gate runs for ALL steps, including delegated ones
+            approved = await self._handle_approval_gate(
+                step,
+                tool,
+                tool_input,
+                policy_decision,
+                user_message.user_id,
+                results_summary,
+            )
+            if not approved:
+                await self._emit_progress(
+                    on_progress,
+                    "step_end",
+                    {
+                        "step": idx,
+                        "total": total_steps,
+                        "tool": step.tool_name,
+                        "status": "denied",
+                        "result": "Action denied by user",
+                    },
+                )
+                continue
+
+            # Execute delegated steps through the same gate-approved path
+            if step.delegated:
+                delegated_ok = await self._execute_delegated_step(step, user_message, results_summary)
+                if delegated_ok:
+                    await self._emit_progress(
+                        on_progress,
+                        "step_end",
+                        {
+                            "step": idx,
+                            "total": total_steps,
+                            "tool": step.tool_name,
+                            "status": "ok",
+                            "result": step.result,
+                        },
+                    )
+                    continue
+
+            output = await self._execute_step_with_fallback(step, tool, tool_input, user_message)
+            await self._record_step_result(
+                step,
+                output,
+                user_message.user_id,
+                results_summary,
+            )
+
+            status_str = "ok" if (output and output.status.value == "success") else "error"
+            await self._emit_progress(
+                on_progress,
+                "step_end",
+                {
+                    "step": idx,
+                    "total": total_steps,
+                    "tool": step.tool_name,
+                    "status": status_str,
+                    "result": step.result or (output.message if output else ""),
+                },
+            )
+
+        # Finalize plan.
+        await self._finalize_plan_state(plan)
+
+        await self._state.save_task(plan.id, plan.user_request, plan.status.value, plan.model_dump_json())
+
+        await self._emit_progress(
+            on_progress,
+            "summarizing",
+            {"text": "Sonuçlar toplanıyor ve yanıt hazırlanıyor..."},
+        )
+
+        return await self._summarize_plan_results(user_message, results_summary)
+
+    async def _execute_delegated_step(
+        self,
+        step: TaskStep,
+        user_message: Message,
+        results_summary: list[str],
+    ) -> bool:
+        spawn_tool = self._registry.get("agent_spawn_subtask")
+        if spawn_tool is None:
+            return False
+
+        spawn_input = ToolInput(
+            tool_name="agent_spawn_subtask",
+            parameters={
+                "objective": step.description or user_message.content,
+                "max_subtasks": 4,
+            },
+            requires_approval=False,
+        )
+        spawn_output = await self._recovery.execute_with_retry(spawn_tool, spawn_input, step)
+        if spawn_output.status.value != "success":
+            return False
+
+        subtasks = list(spawn_output.data.get("subtasks") or [])
+        if not subtasks:
+            return False
+
+        delegated_results: list[str] = []
+        for item in subtasks:
+            tool_name = str(item.get("tool_name") or "").strip()
+            if not tool_name:
+                continue
+            tool = self._registry.get(tool_name)
+            if tool is None:
+                delegated_results.append(f"{item.get('id', 'subtask')}: unknown tool {tool_name}")
+                continue
+
+            sub_params = dict(item.get("parameters") or {})
+            sub_step_id = str(item.get("id") or "subtask")
+            sub_step_desc = str(item.get("description") or f"Delegated {tool_name}")
+
+            # Enforce capability policy
+            policy_decision = self._policy.evaluate(
+                user_id=user_message.user_id or "default",
+                tool_name=tool_name,
+                parameters=sub_params,
+                channel=user_message.channel,
+            )
+            if not policy_decision.allowed:
+                delegated_results.append(f"{sub_step_id}: blocked by policy ({policy_decision.reason})")
+                continue
+
+            # Enforce approval gate
+            requires_approval = tool.requires_approval(ToolInput(tool_name=tool_name, parameters=sub_params))
+            if requires_approval and self._guardian.mode.value == "ask":
+                approval_result = await self._guardian.request_approval(
+                    action_description=f"Swarm delegation: {sub_step_desc} ({tool_name})",
+                    user_id=user_message.user_id or "default",
+                )
+                if approval_result != ApprovalResult.APPROVED:
+                    delegated_results.append(f"{sub_step_id}: denied by user")
+                    continue
+
+            delegated_input = ToolInput(
+                tool_name=tool_name,
+                parameters=sub_params,
+                requires_approval=requires_approval,
+            )
+            delegated_output = await self._recovery.execute_with_retry(tool, delegated_input, step)
+            if delegated_output.status.value == "success":
+                delegated_results.append(f"{sub_step_id}: ok ({tool_name})")
+            else:
+                delegated_results.append(f"{sub_step_id}: fail ({tool_name}) {delegated_output.error}")
+
+        if not delegated_results:
+            return False
+
+        step.status = StepStatus.COMPLETED
+        step.result = " | ".join(delegated_results)
+        results_summary.append(f"[OK] {step.description}: {step.result}")
+        return True
+
+    async def shutdown(self) -> None:
+        """Release runtime resources held by the router."""
+        logger.info("router.shutdown.started")
+        self._destroy_current_llm()
+        gm = getattr(self, "_graph_memory", None)
+        if gm is not None and hasattr(gm, "close"):
+            try:
+                await gm.close()
+            except Exception as exc:
+                logger.warning("router.shutdown.graph_memory_failed", error=str(exc))
+            self._graph_memory = None
+        if getattr(self, "_state", None) is not None and hasattr(self._state, "close"):
+            try:
+                await self._state.close()
+            except Exception as exc:
+                logger.warning("router.shutdown.state_failed", error=str(exc))
+        logger.info("router.shutdown.completed")
+
+    def _is_fallback_candidate(self, step: TaskStep, primary_output, explicit: object) -> bool:
+        likely_cli = step.tool_name.startswith(("terminal_", "dev_", "net_", "web_"))
+        if explicit is not True and not likely_cli:
+            return False
+
+        error_text = str(getattr(primary_output, "error", "") or "").lower()
+        retryable = any(
+            marker in error_text
+            for marker in ("timeout", "timed out", "permission", "not found", "could not", "failed")
+        )
+        return explicit is True or retryable
+
+    def _build_fallback_tool_input(
+        self,
+        step: TaskStep,
+        params: dict[str, Any],
+        user_message: Message,
+        fallback_tool,
+    ) -> ToolInput:
+        source_query = str(params.get("query") or user_message.content or "")
+        source_url = str(params.get("url") or "")
+        max_steps = int(
+            params.get("fallback_steps", self._settings.hybrid_fallback_max_steps)
+            or self._settings.hybrid_fallback_max_steps
+        )
+        return ToolInput(
+            tool_name="gui_autonomous_explorer",
+            parameters={
+                "goal": (
+                    f"Primary step failed ({step.tool_name}): {step.description}. "
+                    f"Original request: {user_message.content}"
+                ),
+                "source_tool": step.tool_name,
+                "source_error": str(params.get("source_error", "") or ""),
+                "query": source_query,
+                "url": source_url,
+                "max_steps": max_steps,
+            },
+            requires_approval=fallback_tool.is_destructive,
+        )
+
+    async def _run_windows_secondary_fallback(
+        self,
+        step: TaskStep,
+        user_id: str,
+        source_query: str,
+        source_url: str,
+    ):
+        if os.name != "nt":
+            return None
+
+        hotkey_tool = self._registry.get("gui_press_hotkey")
+        type_tool = self._registry.get("gui_type_text")
+        analyze_tool = self._registry.get("gui_analyze_screen")
+        if not (hotkey_tool and type_tool and analyze_tool):
+            return None
+
+        target = source_url.strip() or (f"https://www.google.com/search?q={source_query.strip().replace(' ', '+')}")
+        sequence_tools = [hotkey_tool, type_tool, analyze_tool]
+        needs_approval = any(t.requires_approval(ToolInput(tool_name=t.name, parameters={})) for t in sequence_tools)
+        if needs_approval:
+            approval = await self._guardian.request_approval(
+                action_description=("GUI fallback sequence: gui_press_hotkey + gui_type_text + gui_analyze_screen"),
+                user_id=user_id,
+            )
+            if approval != ApprovalResult.APPROVED:
+                return None
+
+        steps = [
+            (
+                hotkey_tool,
+                ToolInput(
+                    tool_name="gui_press_hotkey",
+                    parameters={"keys": ["win", "r"]},
+                    requires_approval=hotkey_tool.is_destructive,
+                ),
+            ),
+            (
+                type_tool,
+                ToolInput(
+                    tool_name="gui_type_text",
+                    parameters={"text": target, "interval": 0.01},
+                    requires_approval=type_tool.is_destructive,
+                ),
+            ),
+            (
+                hotkey_tool,
+                ToolInput(
+                    tool_name="gui_press_hotkey",
+                    parameters={"keys": ["enter"]},
+                    requires_approval=hotkey_tool.is_destructive,
+                ),
+            ),
+            (
+                analyze_tool,
+                ToolInput(
+                    tool_name="gui_analyze_screen",
+                    parameters={"max_chars": 5000},
+                    requires_approval=analyze_tool.is_destructive,
+                ),
+            ),
+        ]
+
+        last_output = None
+        for tool, tool_input in steps:
+            last_output = await self._recovery.execute_with_retry(tool, tool_input, step)
+            if last_output.status.value != "success":
+                return None
+        return last_output
+
+    async def _attempt_hybrid_gui_fallback(
+        self,
+        step: TaskStep,
+        primary_output,
+        user_message: Message,
+    ):
+        """Try CLI->GUI fallback protocol on tool failure when applicable."""
+        fallback_tool = self._registry.get("gui_autonomous_explorer")
+        if fallback_tool is None:
+            return None
+
+        if not self._settings.hybrid_fallback_enabled:
+            return None
+
+        params = step.parameters if isinstance(step.parameters, dict) else {}
+        explicit = params.get("hybrid_fallback")
+        if explicit is False:
+            return None
+
+        if not self._is_fallback_candidate(step, primary_output, explicit):
+            return None
+
+        params = dict(params)
+        params["source_error"] = str(getattr(primary_output, "error", "") or "")
+        fallback_input = self._build_fallback_tool_input(
+            step,
+            params,
+            user_message,
+            fallback_tool,
+        )
+        source_query = str(params.get("query") or user_message.content or "")
+        source_url = str(params.get("url") or "")
+
+        try:
+            if fallback_tool.requires_approval(fallback_input):
+                approval = await self._guardian.request_approval(
+                    action_description=(f"gui_autonomous_explorer: Fallback for failed step '{step.tool_name}'"),
+                    user_id=user_message.user_id,
+                )
+                if approval != ApprovalResult.APPROVED:
+                    return None
+
+            fallback_output = await self._recovery.execute_with_retry(
+                fallback_tool,
+                fallback_input,
+                step,
+            )
+
+            if fallback_output.status.value == "success":
+                logger.info(
+                    "router.hybrid_fallback_success",
+                    source_tool=step.tool_name,
+                    fallback_tool="gui_autonomous_explorer",
+                )
+                return fallback_output
+
+            step_ocr = await self._run_windows_secondary_fallback(
+                step,
+                user_message.user_id,
+                source_query,
+                source_url,
+            )
+            if step_ocr is not None and step_ocr.status.value == "success":
+                logger.info(
+                    "router.hybrid_fallback_success",
+                    source_tool=step.tool_name,
+                    fallback_tool="gui_hotkey_type_analyze",
+                )
+                return step_ocr
+
+            logger.warning(
+                "router.hybrid_fallback_failed",
+                source_tool=step.tool_name,
+                fallback_error=fallback_output.error,
+            )
+            return None
+        except Exception as exc:
+            logger.error(
+                "router.hybrid_fallback_exception",
+                source_tool=step.tool_name,
+                error=str(exc),
+            )
+            return None
+
+
+def _clean_raw_json_plan_reply(reply: str) -> str:
+    """Detect and convert raw leaked plan JSON into human-friendly Turkish text."""
+    stripped = reply.strip()
+    if not stripped:
+        return reply
+
+    if '"needs_plan"' in stripped or ('"steps"' in stripped and stripped.startswith("{")):
+        try:
+            clean_text = re.sub(r"^```(?:json)?\s*", "", stripped)
+            clean_text = re.sub(r"\s*```$", "", clean_text).strip()
+            data = json.loads(clean_text)
+            if isinstance(data, dict) and ("needs_plan" in data or "steps" in data):
+                steps = data.get("steps", [])
+                if steps:
+                    lines = ["📋 **Yürütülen Otonom Plan:**\n"]
+                    for idx, s in enumerate(steps, 1):
+                        desc = s.get("description") or s.get("tool_name") or f"Adım {idx}"
+                        lines.append(f"  {idx}. {desc}")
+                    return "\n".join(lines)
+                elif "message" in data:
+                    return str(data["message"])
+                elif "reply" in data:
+                    return str(data["reply"])
+                else:
+                    return "İsteğiniz başarıyla analiz edilip yürütüldü."
+        except Exception:
+            pass
+    return reply
+
+
+def _looks_like_json_plan(text: str) -> bool:
+    stripped = text.strip()
+    if stripped.startswith("{") and '"needs_plan"' in stripped:
+        return True
+    return stripped.startswith("```") and '"needs_plan"' in stripped
+
+
+def _contains_dummy_markers(text: str) -> bool:
+    patterns = [
+        r"\[.*burada.*\]",
+        r"\[.*ekle.*\]",
+        r"dummy marker",
+    ]
+    lowered = text.lower()
+    return any(re.search(p, lowered) for p in patterns)
+
+
+def _is_generic_or_empty_success(output) -> bool:
+    if getattr(output, "status", None) != ToolStatus.SUCCESS:
+        return False
+
+    result = str(getattr(output, "result", "") or "").strip().lower()
+    data = getattr(output, "data", {}) or {}
+
+    if not result and not data:
+        return True
+
+    generic_markers = {
+        "ok",
+        "success",
+        "completed",
+        "done",
+        "işlem tamamlandı",
+        "islem tamamlandi",
+        "command completed",
+        "command executed",
+    }
+    if result in generic_markers and not data:
+        return True
+
+    if isinstance(data, dict):
+        flattened = " ".join(str(v).strip().lower() for v in data.values())
+        if "success" in flattened and "result" not in data and len(data) <= 1:
+            return True
+
+    return False
