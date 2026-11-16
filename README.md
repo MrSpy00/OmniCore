@@ -383,7 +383,7 @@ uv run python scripts/ast_async_audit.py
 Licensed under the **MIT License**.
 
 - **Author & Maintainer:** MrSpy00
-- **Organization & Enterprise Support:** [Aegis Software](https://aegissoft.com.tr) (`contact@aegissoft.com.tr`)
+- **Organization & Enterprise Support:** [Aegis Software](https://aegissoft.com.tr) (`aegissoft0@gmail.com`)
 - **Website:** [https://aegissoft.com.tr](https://aegissoft.com.tr)
 - **Repository:** [https://github.com/MrSpy00/OmniCore](https://github.com/MrSpy00/OmniCore)
 

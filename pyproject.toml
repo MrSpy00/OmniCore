@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 authors = [
     { name = "MrSpy00", email = "emincimsit@gmail.com" },
-    { name = "Aegis Software", email = "contact@aegissoft.com.tr" },
+    { name = "Aegis Software", email = "aegissoft0@gmail.com" },
 ]
 license = "MIT"
 keywords = ["ai-assistant", "autonomous-agent", "operating-system", "llm-router", "cognitive-architecture"]
