@@ -2,19 +2,21 @@
   <img src="assets/OmniCore-bounce.png" alt="OmniCore Logo" width="600"/>
 </p>
 
-<h1 align="center">OmniCore — Otonom Bilişsel İşletim Sistemi Asistanı Mimarisi</h1>
+<h1 align="center">OmniCore — Çoklu LLM Yönlendirme, Bellek & MCP Asistanı</h1>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12+-3776AB.svg?style=flat&logo=python&logoColor=white" alt="Python 3.12+"/>
+  <a href="https://github.com/MrSpy00/OmniCore/actions/workflows/ci.yml">
+    <img src="https://github.com/MrSpy00/OmniCore/actions/workflows/ci.yml/badge.svg" alt="CI Status"/>
+  </a>
   <img src="https://img.shields.io/badge/Tests-314%20Passed-00C853.svg?style=flat" alt="Tests Passed"/>
-  <img src="https://img.shields.io/badge/Coverage-70%25+-brightgreen.svg?style=flat" alt="Coverage 70%+"/>
-  <img src="https://img.shields.io/badge/Security-Bandit%20Verified-blue.svg?style=flat" alt="Bandit Security"/>
+  <img src="https://img.shields.io/badge/Coverage-70.35%25-brightgreen.svg?style=flat" alt="Coverage 70.35%"/>
   <img src="https://img.shields.io/badge/Aegis%20Software-aegissoft.com.tr-00BCD4.svg?style=flat" alt="Aegis Software"/>
   <img src="https://img.shields.io/badge/License-MIT-gray.svg?style=flat" alt="License MIT"/>
 </p>
 
 
-**OmniCore**, işletim sistemi düzeyinde mutlak kontrol, otonom süreç otomasyonu ve yapay zeka tabanlı yönetim sağlayan kurumsal düzeyde bilişsel bir işletim sistemi (OS) asistanı mimarisidir. Sistem yöneticiliği, Model Context Protocol (MCP) sunucu entegrasyonu, kendi kendini iyileştiren kod refaktörü, evrensel veritabanı inceleme, tekil kalıcı tarayıcı ve akıllı YouTube otomasyonu, donanım telemetrisi, çoklu ajan (swarm) protokolleri, siberpunk terminal telemetri ekranı (HUD), gerçek zamanlı ses akışı, güvenlik denetim araçları, kendi kendini eğiten kullanıcı Persona Sistemi, runtime skill (yetenek) sentezleme ve iki aşamalı grafik hafıza (GraphRAG) teknolojilerini tek bir çatı altında birleştirir.
+**OmniCore**, yerel sistem araçları, çoklu LLM yönlendirme, Model Context Protocol (MCP) sunucu entegrasyonu ve bellek katmanlarını tek yerde toplayan Python tabanlı bir AI ajan orkestrasyon platformudur. AST kod analizi, SQLite şema inceleme, Playwright tarayıcı otomasyonu, donanım telemetrisi, paralel alt-ajan çalıştırma, terminal HUD, sesli etkileşim, sistem kontrol araçları, kullanıcı tercih belleği (Persona) ve iki aşamalı grafik hafıza (GraphRAG) bileşenlerini içerir.
 
 ---
 
@@ -24,11 +26,11 @@
 
 ### 💡 Mimari ve Öne Çıkan Yetenekler
 
-OmniCore, **Kullanıcı Katmanı Yetenekleri** (gerçek zamanlı ses döngüsü, EdgeTTS ses sentezleme, mikrofon dinleme, Steam & Epic Games oyun yönetimi, kategorize edilmiş 2 aşamalı hafıza, Siberpunk Terminal Telemetri HUD) ile **Çekirdek ve İşletim Sistemi Hakimiyet Katmanı** (Kurumsal MCP Gateway, Kendi Kendini İyileştiren Kod Refaktörü, Evrensel Veritabanı Tarayıcı, Playwright Web Otomasyonu, Donanım Termal Telemetrisi, Çoklu Ajan Sürü Protokolü, Güvenlik Denetim Araçları, Bilgi Grafiği Hafızası, Kesintisiz Arka Plan Daemon İşleyicileri, Çevrimdışı Ollama Desteği, NTFS `$MFT` hızlı dosya arama, `whoami /priv` yetki matrisi ve 4 Seviyeli Risk Yönetimi) bileşenlerini tam entegre çalıştırır.
+OmniCore, **Kullanıcı Katmanı Yetenekleri** (gerçek zamanlı ses döngüsü, EdgeTTS ses sentezleme, mikrofon dinleme, Steam & Epic Games oyun yönetimi, kategorize edilmiş 2 aşamalı hafıza, Terminal Telemetri HUD) ile **Sistem ve Araç Katmanı** (MCP Gateway, AST Kod Refaktörü, SQLite Veritabanı Tarayıcı, Playwright Web Otomasyonu, Donanım Termal Telemetrisi, Çoklu Ajan Protokolü, Güvenlik Denetim Araçları, Bilgi Grafiği Hafızası, Arka Plan Daemon İşleyicileri, Çevrimdışı Ollama Desteği, NTFS `$MFT` dosya arama, `whoami /priv` yetki kontrolü ve 4 Seviyeli Risk Politikası) bileşenlerini bir arada çalıştırır.
 
 #### 🌟 Ana Özellikler Matrisi
 
-- 🔌 **Kurumsal MCP Sunucu Gateway**: OmniCore'un 40'tan fazla araç kiti kurumsal IDE'lere (Claude Desktop, VS Code, Cursor, Zed) standart JSON-RPC 2.0 protokolü ile dışa aktarılır (`interfaces/mcp_gateway.py`).
+- 🔌 **MCP Sunucu Gateway**: OmniCore'un 40'tan fazla araç kiti harici IDE'lere (Claude Desktop, VS Code, Cursor, Zed) standart JSON-RPC 2.0 protokolü ile dışa aktarılır (`interfaces/mcp_gateway.py`).
 - 🌐 **Tekil Kalıcı Tarayıcı & YouTube Otomasyonu**: Singleton oturum yöneticisi (`_GlobalBrowserSession`) ile çift pencere açılmasını kesin olarak önler. Gerçek kullanıcı tarayıcısında yeni sekme açma, CDP (`127.0.0.1:9222`) bağlantısı, YouTube reklam ve Premium modal atlatma, kanalın son videosunu bulma, yayın tarihi (`days_ago`) çıkarma, abone olup bildirimleri (zil) açma ve bağıl seek ("orta", "baş", "son", "%50") desteği (`tools/browser_helpers.py`, `tools/advanced_os_toolkit.py`).
 - 🧠 **Kendi Kendini Eğiten OmniCore Persona Sistemi**: Kullanıcının dilini (Türkçe/İngilizce), tercih ettiği tarayıcıyı (Brave, Chrome, Edge, Firefox), arama motorunu, izin modunu (`full_auto`, `ask_on_risk`, `always_ask`) ve YouTube oynatma alışkanlıklarını etkileşimlerden otomatik olarak öğrenir, güven skoruyla pekiştirir ve `.omnicore/persona.json` üzerinde kalıcı hale getirir (`config/persona_system.py`).
 - ⚡ **30+ LLM Sağlayıcısı & Kesintisiz Devretme (Failover)**: Gemini, Groq, OpenAI, Anthropic, DeepSeek, xAI (Grok 3, Grok 4), Cohere, Perplexity Sonar, Mistral, Ollama, Fireworks, Together, DeepInfra, Cerebras, SambaNova, Moonshot/Kimi, Zhipu GLM, Qwen vb. sağlayıcıları dinamik yük dengeleme ve 429/413 hata devretmesi ile yönetir (`core/router.py`, `config/settings.py`).
@@ -146,7 +148,7 @@ uv run omnicore --mode telegram
 # 5. REST API Sunucu Modu (FastAPI / Uvicorn http://localhost:8000)
 uv run omnicore --mode rest
 
-# 6. Kurumsal MCP Sunucu Modu (JSON-RPC 2.0 stdio)
+# 6. MCP Sunucu Modu (JSON-RPC 2.0 stdio)
 uv run omnicore --mode mcp
 
 # 7. Sesli Konusma Motoru (STT + TTS + LLM)
@@ -193,8 +195,8 @@ uv run python build.py --windowed
 ### 🧪 Test ve Doğrulama
 
 ```bash
-# Tam unit ve entegrasyon test paketini çalıştırın (161 test)
-uv run pytest --tb=short -q
+# Tam unit ve entegrasyon test paketini coverage raporuyla çalıştırın (314 test, %70.35 coverage)
+uv run pytest --tb=short -q --cov --cov-fail-under=70
 
 # Ruff kod linter denetimini çalıştırın
 uv run ruff check .
@@ -208,11 +210,11 @@ uv run ruff check .
 
 ### 💡 Architecture and Core Capabilities
 
-OmniCore seamlessly unifies **User-Facing Capabilities** (real-time streaming voice loop, EdgeTTS speech synthesis, PyAudio microphone listener, Steam & Epic launcher management, 2-stage categorized memory, Self-Improving Skill Curator, Cyberpunk Terminal Telemetry HUD) with a **Kernel & OS Dominance Layer** (Enterprise MCP Gateway, Self-Healing Code Refactorer, Universal Database Explorer, Playwright Web Automation, Hardware & Thermal Telemetry, Multi-Agent Swarm Protocol, Security Audit & Red Team Toolkit, Knowledge Graph Memory, Continuous Background Event Daemons, Offline Ollama Fallback, NTFS `$MFT` instant file search, privilege triage via `whoami /priv`, and 4-Tier Capability Risk Governance).
+OmniCore combines **User-Facing Capabilities** (real-time voice loop, EdgeTTS speech synthesis, microphone listener, Steam & Epic launcher management, 2-stage categorized memory, skill curator, terminal telemetry HUD) with an **OS & Tooling Layer** (MCP Gateway, AST code refactorer, SQLite explorer, Playwright automation, hardware telemetry, parallel subagent delegation, security audit tools, GraphRAG memory, background daemons, offline Ollama fallback, NTFS `$MFT` search, `whoami /priv` triage, and 4-tier risk governance).
 
 #### 🌟 Key Feature Matrix
 
-- 🔌 **Enterprise MCP Gateway**: Exposes OmniCore's 40+ toolkits to external tools and IDEs (Claude Desktop, VS Code, Cursor, Zed) via standard JSON-RPC 2.0 protocol (`interfaces/mcp_gateway.py`).
+- 🔌 **MCP Gateway**: Exposes OmniCore's 40+ toolkits to external tools and IDEs (Claude Desktop, VS Code, Cursor, Zed) via standard JSON-RPC 2.0 protocol (`interfaces/mcp_gateway.py`).
 - 🌐 **Persistent Browser & YouTube Automation**: Guaranteed single-window architecture via `_GlobalBrowserSession`. Supports real user browser launching, CDP attaching (`127.0.0.1:9222`), auto-skipping of pre-roll/mid-roll ads and YouTube Premium upsell modals, latest channel video discovery, upload date extraction (`days_ago`), channel subscription with bell notification toggling, and smart relative seeking.
 - 🧠 **Self-Learning OmniCore Persona System**: Autonomously observes user preferences (language, preferred browser, search engine, permission level, YouTube habits) through natural interactions, reinforces weights based on confidence scoring, and persists settings in `.omnicore/persona.json` with full manual override capabilities (`config/persona_system.py`).
 - ⚡ **30+ LLM Provider Matrix & Resilient Failover**: Supports Gemini, Groq, OpenAI, Anthropic, DeepSeek, xAI (Grok 3, Grok 4), Cohere, Perplexity Sonar, Mistral, Ollama, Fireworks, Together, DeepInfra, Cerebras, SambaNova, Moonshot/Kimi, Zhipu GLM, Qwen, and more with automatic 429/413 rate-limit failover routing (`core/router.py`, `config/settings.py`).
@@ -246,7 +248,7 @@ flowchart TD
     Memory --> ToolReg["Central Tool Registry"]
 
     subgraph Toolkits ["OmniCore Toolkits (40+ Modules)"]
-        T1["OS & Kernel Dominance"]
+        T1["OS & System Tooling"]
         T2["Persistent Browser & YouTube"]
         T3["Steam & Epic Game Updater"]
         T4["Voice Loop & EdgeTTS"]
@@ -330,7 +332,7 @@ uv run omnicore --mode telegram
 # 5. REST API Gateway (FastAPI / Uvicorn on http://localhost:8000)
 uv run omnicore --mode rest
 
-# 6. Enterprise MCP Gateway (JSON-RPC 2.0 via stdio)
+# 6. MCP Gateway (JSON-RPC 2.0 via stdio)
 uv run omnicore --mode mcp
 
 # 7. Voice Engine (STT + TTS + LLM)
@@ -383,8 +385,6 @@ uv run python scripts/ast_async_audit.py
 Licensed under the **MIT License**.
 
 - **Author & Maintainer:** MrSpy00
-- **Organization & Enterprise Support:** [Aegis Software](https://aegissoft.com.tr) (`aegissoft0@gmail.com`)
+- **Organization:** [aegisSoft](https://aegissoft.com.tr) (`aegissoft0@gmail.com`)
 - **Website:** [https://aegissoft.com.tr](https://aegissoft.com.tr)
 - **Repository:** [https://github.com/MrSpy00/OmniCore](https://github.com/MrSpy00/OmniCore)
-
-Engineered for sovereign agentic AI operations, cognitive OS administration, and autonomous multi-model orchestration.
